@@ -1,0 +1,44 @@
+#version 450
+#include "common.glsl"
+layout(local_size_x = 64) in;
+layout(std430, binding = 1) writeonly buffer Dst { Particle dst[]; };
+layout(std430, binding = 2) buffer Counters { uint counters[]; };
+layout(std430, binding = 3) readonly buffer Count { int cellCount[]; };
+layout(std430, binding = 4) readonly buffer Static { uint staticSolid[]; };
+layout(push_constant) uniform PC { ivec4 a; ivec4 b; } pc;
+
+void main() {
+    int res = int(G.camGrid.w);
+    int perSource = res * res * res;
+    int t = int(GID_U);
+    int s = t / perSource;
+    if (s >= G.flags.y) {
+        return;
+    }
+    int local = t % perSource;
+    vec4 src = G.sources[s];
+    ivec3 c = ivec3(src.xyz) + ivec3(local % res, (local / res) % res, local / (res * res));
+    if (!inBox(c)) {
+        return;
+    }
+    int ci = cellIndex(c);
+    if (staticSolid[ci] != 0u || entityAt(vec3(c) + 0.5) >= 0) {
+        return;
+    }
+    float bottom = float(c.y);
+    float top = min(float(c.y + 1), src.y + src.w * float(res));
+    float frac = top - bottom;
+    if (frac <= 0.05) {
+        return;
+    }
+    int need = int(round(G.simA.y * frac)) - cellCount[ci];
+    uint seed = hash(uint(t) * 2654435761u + uint(pc.a.y));
+    for (int k = 0; k < need; k++) {
+        uint o = atomicAdd(counters[pc.a.x], 1u);
+        if (o >= uint(G.caps.x)) {
+            return;
+        }
+        vec3 p = vec3(float(c.x) + rand(seed), bottom + rand(seed) * frac, float(c.z) + rand(seed));
+        dst[o] = Particle(vec4(p, 0.0), vec4(0.0));
+    }
+}

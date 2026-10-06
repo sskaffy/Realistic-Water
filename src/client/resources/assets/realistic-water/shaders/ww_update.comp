@@ -1,0 +1,75 @@
+#version 450
+#include "common.glsl"
+layout(local_size_x = 256) in;
+layout(std430, binding = 1) readonly buffer Src { Particle src[]; };
+layout(std430, binding = 2) writeonly buffer Dst { Particle dst[]; };
+layout(std430, binding = 3) buffer Counters { uint counters[]; };
+layout(std430, binding = 4) readonly buffer Vel { float vel[]; };
+layout(std430, binding = 5) readonly buffer Count { int cellCount[]; };
+layout(std430, binding = 6) readonly buffer Static { uint staticSolid[]; };
+layout(std430, binding = 7) buffer WwCount { int wwCount[]; };
+layout(push_constant) uniform PC { ivec4 a; ivec4 b; } pc;
+
+#include "gridsample.glsl"
+
+bool solidAt(vec3 p) {
+    ivec3 c = ivec3(floor(p));
+    return inGrid(c) && staticSolid[cellIndex(c)] != 0u;
+}
+
+int countAt(ivec3 c) {
+    return inBox(c) ? cellCount[cellIndex(c)] : 0;
+}
+
+void main() {
+    uint i = GID_U;
+    if (i >= counters[pc.a.x]) {
+        return;
+    }
+    Particle p = src[i];
+    vec3 x = p.pos.xyz;
+    float life = p.pos.w;
+    vec3 v = p.vel.xyz;
+
+    ivec3 c = ivec3(floor(x));
+    int n = countAt(c) + countAt(c + ivec3(1, 0, 0)) + countAt(c - ivec3(1, 0, 0))
+          + countAt(c + ivec3(0, 1, 0)) + countAt(c - ivec3(0, 1, 0))
+          + countAt(c + ivec3(0, 0, 1)) + countAt(c - ivec3(0, 0, 1));
+    int above = countAt(c + ivec3(0, 1, 0)) + countAt(c + ivec3(0, 2, 0));
+    vec3 g = G.gravityDt.xyz;
+    float type;
+    if (float(n) < G.wwD.y || !inInnerBox(x)) {
+        type = 0.0;
+        v += g * DT;
+        v *= max(0.0, 1.0 - G.wwD.x * DT);
+        life -= DT;
+    } else if (float(above) > G.wwD.z) {
+        type = 2.0;
+        vec3 uf = sampleVel(x);
+        v += -G.wwC.z * g * DT + G.wwC.w * (uf - v);
+    } else {
+        type = 1.0;
+        v = sampleVel(x);
+        v.y = min(v.y, 0.5 * length(v.xz) + 1.0);
+        life -= DT;
+    }
+
+    vec3 xn = x + v * DT;
+    if (solidAt(xn)) {
+        xn = x;
+        v = vec3(0.0);
+        life -= type < 0.5 ? 1.0 : DT * 4.0;
+    }
+    if (life <= 0.0 || any(lessThan(xn, vec3(0.0))) || any(greaterThanEqual(xn, vec3(NX, NY, NZ)))) {
+        return;
+    }
+    uint o = atomicAdd(counters[pc.a.y], 1u);
+    if (o >= uint(G.caps.y)) {
+        return;
+    }
+    dst[o] = Particle(vec4(xn, life), vec4(v, type));
+    ivec3 cn = ivec3(floor(xn));
+    if (inBox(cn)) {
+        atomicAdd(wwCount[cellIndex(cn)], 1);
+    }
+}

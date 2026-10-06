@@ -1,0 +1,67 @@
+#version 450
+#include "common.glsl"
+#include "mg_common.glsl"
+layout(local_size_x = 1024) in;
+layout(std430, binding = 1) readonly buffer MgFlags { uint mgFlags[]; };
+layout(std430, binding = 2) readonly buffer B { float b[]; };
+layout(std430, binding = 3) buffer X { float x[]; };
+
+shared float sx[1024];
+shared float sb[1024];
+shared uint sf[1024];
+
+void sweep(int t, int count, ivec3 c, ivec3 lo, ivec3 size, int parity) {
+    if (t < count && sf[t] == CELL_FLUID && ((c.x + c.y + c.z) & 1) == parity) {
+        float s = 0.0;
+        float n = 0.0;
+        for (int k = 0; k < 6; k++) {
+            ivec3 nb = c + MG_NB[k] - lo;
+            if (any(lessThan(nb, ivec3(0))) || any(greaterThanEqual(nb, size))) {
+                n += 1.0;
+                continue;
+            }
+            int j = nb.x + size.x * (nb.y + size.y * nb.z);
+            if (sf[j] == CELL_SOLID) {
+                continue;
+            }
+            n += 1.0;
+            if (sf[j] == CELL_FLUID) {
+                s += sx[j];
+            }
+        }
+        if (n > 0.0) {
+            sx[t] = (sb[t] + s) / n;
+        }
+    }
+    barrier();
+}
+
+void main() {
+    int l = pc.misc.z;
+    int t = int(gl_LocalInvocationID.x);
+    int count = min(lvlBoxCount(pc.dims, l), 1024);
+    ivec3 lo = lvlBoxMin(l);
+    ivec3 size = lvlBoxMax(l, pc.dims) - lo;
+    ivec3 c = ivec3(0);
+    int i = 0;
+    if (t < count) {
+        c = lvlBoxCell(t, pc.dims, l);
+        i = lvlIndex(c, pc.dims);
+        sf[t] = mgFlags[i];
+        sb[t] = b[i];
+        sx[t] = (pc.misc.y != 0 || sf[t] != CELL_FLUID) ? 0.0 : x[i];
+    }
+    barrier();
+    int sweeps = max(pc.misc2.x, 1);
+    for (int k = 0; k < sweeps; k++) {
+        sweep(t, count, c, lo, size, 0);
+        sweep(t, count, c, lo, size, 1);
+    }
+    for (int k = 0; k < sweeps; k++) {
+        sweep(t, count, c, lo, size, 1);
+        sweep(t, count, c, lo, size, 0);
+    }
+    if (t < count) {
+        x[i] = sx[t];
+    }
+}

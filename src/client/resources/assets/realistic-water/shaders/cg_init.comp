@@ -1,0 +1,21 @@
+#version 450
+#include "common.glsl"
+#include "mg_common.glsl"
+layout(local_size_x = 256) in;
+layout(std430, binding = 1) readonly buffer MgFlags { uint mgFlags[]; };
+layout(std430, binding = 2) readonly buffer B { float b[]; };
+layout(std430, binding = 3) readonly buffer X { float x[]; };
+layout(std430, binding = 4) writeonly buffer R { float r[]; };
+
+#define X_OF(j) x[j]
+#include "mg_ops.glsl"
+
+void main() {
+    int t = int(GID_U);
+    if (t >= G.boxMin.w) {
+        return;
+    }
+    ivec3 c = boxCell(t);
+    int i = cellIndex(c);
+    r[i] = mgFlags[i] == CELL_FLUID ? b[i] - applyA(c, i, pc.dims, 0) : 0.0;
+}
