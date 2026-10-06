@@ -1,0 +1,13 @@
+#version 450
+#include "common.glsl"
+layout(local_size_x = 1) in;
+layout(std430, binding = 1) buffer MeshCounters { uint meshCounters[]; };
+layout(push_constant) uniform PC { ivec4 a; ivec4 b; } pc; // a.y = quad capacity
+
+void main() {
+    uint quads = min(meshCounters[1], uint(pc.a.y));
+    meshCounters[4] = quads * 6u;
+    meshCounters[5] = 1u;
+    meshCounters[6] = 0u;
+    meshCounters[7] = 0u;
+}

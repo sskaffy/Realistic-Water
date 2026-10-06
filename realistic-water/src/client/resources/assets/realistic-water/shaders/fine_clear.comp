@@ -1,0 +1,14 @@
+#version 450
+#include "common.glsl"
+layout(local_size_x = 256) in;
+layout(std430, binding = 1) writeonly buffer Accum { int accum[]; };
+
+void main() {
+    int t = int(GID_U);
+    if (t >= G.fineBoxMin.w) {
+        return;
+    }
+    ivec3 d = G.fineBoxMax.xyz - G.fineBoxMin.xyz;
+    ivec3 p = G.fineBoxMin.xyz + ivec3(t % d.x, (t / d.x) % d.y, t / (d.x * d.y));
+    accum[fineIndex(p)] = 0;
+}

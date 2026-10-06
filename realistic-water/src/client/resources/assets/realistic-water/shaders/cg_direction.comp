@@ -1,0 +1,25 @@
+#version 450
+#include "common.glsl"
+layout(local_size_x = 256) in;
+layout(std430, binding = 1) readonly buffer Scalars { float scalars[]; };
+layout(std430, binding = 2) readonly buffer Z { float z[]; };
+layout(std430, binding = 3) buffer P { float p[]; };
+layout(push_constant) uniform PC { ivec4 a; ivec4 b; } pc;
+
+void main() {
+    int t = int(GID_U);
+    if (t >= G.boxMin.w) {
+        return;
+    }
+    int i = cellIndex(boxCell(t));
+    if (pc.a.x != 0) {
+        p[i] = z[i];
+        return;
+    }
+    float old = scalars[pc.a.z];
+    float beta = abs(old) > 1e-30 ? scalars[pc.a.y] / old : 0.0;
+    if (isnan(beta) || isinf(beta)) {
+        beta = 0.0;
+    }
+    p[i] = z[i] + beta * p[i];
+}

@@ -1,0 +1,29 @@
+#version 450
+#include "common.glsl"
+layout(local_size_x = 256) in;
+layout(std430, binding = 1) readonly buffer U { float u[]; };
+layout(std430, binding = 2) readonly buffer V { float v[]; };
+layout(std430, binding = 3) writeonly buffer Partials { float partials[]; };
+
+shared float sdata[256];
+
+void main() {
+    int bt = int(GID_U);
+    uint t = gl_LocalInvocationID.x;
+    float prod = 0.0;
+    if (bt < G.boxMin.w) {
+        int i = cellIndex(boxCell(bt));
+        prod = u[i] * v[i];
+    }
+    sdata[t] = prod;
+    barrier();
+    for (uint s = 128u; s > 0u; s >>= 1) {
+        if (t < s) {
+            sdata[t] += sdata[t + s];
+        }
+        barrier();
+    }
+    if (t == 0u) {
+        partials[GROUP_ID] = sdata[0];
+    }
+}

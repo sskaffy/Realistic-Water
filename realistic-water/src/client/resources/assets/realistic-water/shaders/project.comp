@@ -1,0 +1,35 @@
+#version 450
+#include "common.glsl"
+layout(local_size_x = 256) in;
+layout(std430, binding = 1) buffer Vel { float vel[]; };
+layout(std430, binding = 2) readonly buffer Flags { uint cellFlags[]; };
+layout(std430, binding = 3) readonly buffer Pressure { float pressure[]; };
+layout(std430, binding = 4) writeonly buffer Valid { uint valid[]; };
+
+uint typeAt(ivec3 c) {
+    return inBox(c) ? (cellFlags[cellIndex(c)] & 0xFFu) : CELL_AIR;
+}
+
+void main() {
+    int comp;
+    ivec3 f;
+    if (!boxFace(int(GID_U), comp, f)) {
+        return;
+    }
+    int i = faceIndex(comp, f);
+    ivec3 ca = f - axisVec(comp);
+    uint ta = typeAt(ca);
+    uint tb = typeAt(f);
+    if (ta == CELL_SOLID || tb == CELL_SOLID) {
+        valid[i] = 1u;
+        return;
+    }
+    if (ta == CELL_FLUID || tb == CELL_FLUID) {
+        float pa = ta == CELL_FLUID ? pressure[cellIndex(ca)] : 0.0;
+        float pb = tb == CELL_FLUID ? pressure[cellIndex(f)] : 0.0;
+        vel[i] -= pb - pa;
+        valid[i] = 1u;
+    } else {
+        valid[i] = 0u;
+    }
+}

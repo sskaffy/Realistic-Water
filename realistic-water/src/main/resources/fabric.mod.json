@@ -1,0 +1,36 @@
+{
+	"schemaVersion": 1,
+	"id": "realistic-water",
+	"version": "${version}",
+	"name": "Realistic Water",
+	"description": "Ultra realistic water in Minecraft!",
+	"authors": [
+		"Skaffy"
+	],
+	"contact": {
+	},
+	"license": "Custom License",
+	"icon": "assets/realistic-water/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"me.skaffy.RealisticWater"
+		],
+		"client": [
+			"me.skaffy.client.RealisticWaterClient"
+		]
+	},
+	"mixins": [
+		"realistic-water.mixins.json",
+		{
+			"config": "realistic-water.client.mixins.json",
+			"environment": "client"
+		}
+	],
+	"depends": {
+		"fabricloader": ">=0.19.5",
+		"minecraft": "~26.3",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}

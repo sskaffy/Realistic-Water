@@ -1,0 +1,37 @@
+#version 450
+#include "common.glsl"
+#include "mg_common.glsl"
+layout(local_size_x = 256) in;
+layout(std430, binding = 1) readonly buffer MgFlags { uint mgFlags[]; };
+layout(std430, binding = 2) readonly buffer FineB { float fineB[]; };
+layout(std430, binding = 3) readonly buffer FineX { float fineX[]; };
+layout(std430, binding = 4) writeonly buffer CoarseB { float coarseB[]; };
+layout(std430, binding = 5) writeonly buffer CoarseX { float coarseX[]; };
+
+#define X_OF(j) fineX[j]
+#include "mg_ops.glsl"
+
+void main() {
+    int t = int(GID_U);
+    if (t >= lvlBoxCount(pc.cdims, pc.misc.w)) {
+        return;
+    }
+    ivec3 C = lvlBoxCell(t, pc.cdims, pc.misc.w);
+    int ci = lvlIndex(C, pc.cdims);
+    float sum = 0.0;
+    if (mgFlags[ci] == CELL_FLUID) {
+        for (int k = 0; k < 8; k++) {
+            ivec3 f = 2 * C + ivec3(k & 1, (k >> 1) & 1, (k >> 2) & 1);
+            if (!lvlActive(f, pc.dims, pc.misc.z)) {
+                continue;
+            }
+            int fi = lvlIndex(f, pc.dims);
+            if (mgFlags[fi] != CELL_FLUID) {
+                continue;
+            }
+            sum += fineB[fi] - applyA(f, fi, pc.dims, pc.misc.z);
+        }
+    }
+    coarseB[ci] = 0.5 * sum;
+    coarseX[ci] = 0.0;
+}

@@ -1,0 +1,29 @@
+#version 450
+#include "common.glsl"
+#include "mg_common.glsl"
+layout(local_size_x = 256) in;
+layout(std430, binding = 1) buffer MgFlags { uint mgFlags[]; };
+
+void main() {
+    int t = int(GID_U);
+    if (t >= lvlBoxCount(pc.cdims, pc.misc.w)) {
+        return;
+    }
+    ivec3 C = lvlBoxCell(t, pc.cdims, pc.misc.w);
+    bool anyAir = false;
+    bool anyFluid = false;
+    for (int k = 0; k < 8; k++) {
+        ivec3 f = 2 * C + ivec3(k & 1, (k >> 1) & 1, (k >> 2) & 1);
+        if (any(greaterThanEqual(f, pc.dims.xyz))) {
+            continue;
+        }
+        if (!lvlActive(f, pc.dims, pc.misc.z)) {
+            anyAir = true;
+            continue;
+        }
+        uint ty = mgFlags[lvlIndex(f, pc.dims)];
+        anyAir = anyAir || ty == CELL_AIR;
+        anyFluid = anyFluid || ty == CELL_FLUID;
+    }
+    mgFlags[lvlIndex(C, pc.cdims)] = anyAir ? CELL_AIR : (anyFluid ? CELL_FLUID : CELL_SOLID);
+}
