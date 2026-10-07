@@ -1,6 +1,7 @@
 package me.skaffy;
 
 import me.skaffy.net.RemoveAllWaterPayload;
+import me.skaffy.net.SandSyncPayload;
 import me.skaffy.net.WaterSyncPayload;
 import net.minecraft.network.chat.Component;
 import net.fabricmc.api.ModInitializer;
@@ -21,8 +22,14 @@ public class RealisticWater implements ModInitializer {
 	public void onInitialize() {
 		ModContent.init();
 		PayloadTypeRegistry.serverboundPlay().register(WaterSyncPayload.TYPE, WaterSyncPayload.CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(SandSyncPayload.TYPE, SandSyncPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(RemoveAllWaterPayload.TYPE, RemoveAllWaterPayload.CODEC);
 		ServerPlayNetworking.registerGlobalReceiver(WaterSyncPayload.TYPE, (payload, context) -> {
+			if (isAuthority(context.server(), context.player())) {
+				context.server().execute(() -> payload.apply(context.player()));
+			}
+		});
+		ServerPlayNetworking.registerGlobalReceiver(SandSyncPayload.TYPE, (payload, context) -> {
 			if (isAuthority(context.server(), context.player())) {
 				context.server().execute(() -> payload.apply(context.player()));
 			}
@@ -32,7 +39,7 @@ public class RealisticWater implements ModInitializer {
 			if (isAuthority(context.server(), player)) {
 				context.server().execute(() -> {
 					int removed = payload.apply(player);
-					player.sendSystemMessage(Component.literal("Removed " + removed + " realistic water blocks"));
+					player.sendSystemMessage(Component.literal("Removed " + removed + " realistic " + (payload.sand() ? "sand" : "water") + " blocks"));
 				});
 			}
 		});
