@@ -14,6 +14,7 @@ layout(std430, binding = 7) readonly buffer Static { uint staticSolid[]; };
 layout(std430, binding = 8) readonly buffer Pot { vec2 potential[]; };
 layout(std430, binding = 9) writeonly buffer WwDst { Particle wwDst[]; };
 layout(std430, binding = 10) readonly buffer WwCount { int wwCount[]; };
+layout(std430, binding = 11) readonly buffer Count { int cellCount[]; };
 layout(push_constant) uniform PC { ivec4 a; ivec4 b; } pc;
 
 #include "gridsample.glsl"
@@ -21,6 +22,40 @@ layout(push_constant) uniform PC { ivec4 a; ivec4 b; } pc;
 bool solidAt(vec3 p) {
     ivec3 c = ivec3(floor(p));
     return inGrid(c) && staticSolid[cellIndex(c)] != 0u;
+}
+
+int countAt(ivec3 c) {
+    return inBox(c) ? cellCount[cellIndex(c)] : 0;
+}
+
+bool waterFilm(vec3 x, inout vec3 v, inout vec3 dx, inout float dryness) {
+    ivec3 c = ivec3(floor(x));
+    int n27 = 0;
+    int column = 0;
+    for (int k = 0; k < 27; k++) {
+        ivec3 o = ivec3(k % 3, (k / 3) % 3, k / 9) - 1;
+        int n = countAt(c + o);
+        n27 += n;
+        column += o.y >= 0 ? n : 0;
+    }
+    if (solidAt(x - vec3(0.0, 1.0, 0.0))) {
+        float depth = float(column) / (9.0 * G.simA.y);
+        float thin = clamp(1.0 - depth / max(G.matB.w, 1e-3), 0.0, 1.0);
+        float speed = length(v.xz);
+        bool groundAhead = speed < 1e-3 || solidAt(x + vec3(v.x / speed, -1.0, v.z / speed));
+        if (thin > 0.0 && groundAhead) {
+            float damp = exp(-G.matB.x * thin * DT);
+            v.xz *= damp;
+            dx.xz *= damp;
+        }
+    }
+    float res = G.camGrid.w;
+    if (n27 < int(G.matB.z) && length(v) < 1.5 * res) {
+        dryness += DT / max(G.matB.y, 1e-3);
+    } else {
+        dryness = 0.0;
+    }
+    return dryness < 1.0;
 }
 
 
@@ -122,6 +157,8 @@ void main() {
     }
     vec3 x = p.pos.xyz;
     vec3 v = p.vel.xyz;
+    float tag = p.pos.w;
+    bool sand = isSand();
     float maxSpeed = G.simB.x;
     bool gridded = inInnerBox(x);
     vec3 dx;
@@ -130,6 +167,13 @@ void main() {
         vec3 uOld = sampleVelOld(x);
         v = mix(uNew, v + (uNew - uOld), G.simA.x);
         dx = DT * sampleVel(x + 0.5 * DT * uNew);
+        if (sand && length(uNew) < G.matB.x && length(v) < G.matB.x) {
+            v = vec3(0.0);
+            dx = vec3(0.0);
+        }
+        if (!sand && !waterFilm(x, v, dx, tag)) {
+            return;
+        }
     } else {
         v += G.gravityDt.xyz * DT;
         dx = DT * v;
@@ -165,7 +209,7 @@ void main() {
     if (o >= uint(G.caps.x)) {
         return;
     }
-    dst[o] = Particle(vec4(xn, p.pos.w), vec4(v, 0.0));
+    dst[o] = Particle(vec4(xn, tag), vec4(v, sand ? p.vel.w : 0.0));
     uvec3 cell = uvec3(ivec3(floor(xn)) + AABB_BIAS);
     uvec3 lo = uvec3(subgroupMin(cell.x), subgroupMin(cell.y), subgroupMin(cell.z));
     uvec3 hi = uvec3(subgroupMax(cell.x), subgroupMax(cell.y), subgroupMax(cell.z));

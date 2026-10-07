@@ -4,10 +4,19 @@ layout(local_size_x = 64) in;
 layout(std430, binding = 1) readonly buffer Count { int cellCount[]; };
 layout(std430, binding = 2) readonly buffer Flags { uint cellFlags[]; };
 layout(std430, binding = 3) writeonly buffer Fill { uint fill[]; };
+layout(std430, binding = 4) readonly buffer Vel { float vel[]; };
 layout(push_constant) uniform PC { ivec4 a; ivec4 b; } pc;
 
 bool fluidAt(ivec3 c) {
     return inBox(c) && (cellFlags[cellIndex(c)] & 0xFFu) == CELL_FLUID;
+}
+
+float cellSpeed(ivec3 c) {
+    vec3 u = 0.5 * vec3(
+        vel[faceIndex(0, c)] + vel[faceIndex(0, c + ivec3(1, 0, 0))],
+        vel[faceIndex(1, c)] + vel[faceIndex(1, c + ivec3(0, 1, 0))],
+        vel[faceIndex(2, c)] + vel[faceIndex(2, c + ivec3(0, 0, 1))]);
+    return length(u);
 }
 
 void main() {
@@ -19,6 +28,7 @@ void main() {
     int res = int(G.camGrid.w);
     ivec3 block = pc.a.xyz + ivec3(t % nb.x, (t / nb.x) % nb.y, t / (nb.x * nb.y));
     float sum = 0.0;
+    float speed = 0.0;
     for (int k = 0; k < res * res * res; k++) {
         ivec3 c = block * res + ivec3(k % res, (k / res) % res, k / (res * res));
         if (!inBox(c)) {
@@ -32,7 +42,12 @@ void main() {
             }
         } else {
             sum += float(cellCount[i]);
+            if ((f & 0xFFu) == CELL_FLUID) {
+                speed = max(speed, cellSpeed(c));
+            }
         }
     }
-    fill[t] = uint(clamp(sum / (G.simA.y * float(res * res * res)), 0.0, 1.0) * 255.0 + 0.5);
+    uint full = uint(clamp(sum / (G.simA.y * float(res * res * res)), 0.0, 1.0) * 255.0 + 0.5);
+    uint fast = uint(clamp(speed / float(res) * 16.0, 0.0, 255.0));
+    fill[t] = full | (fast << 8);
 }

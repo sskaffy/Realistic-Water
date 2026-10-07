@@ -38,6 +38,14 @@ void main() {
     vec3 rel = G.domainOrigin.xyz + p.pos.xyz * G.domainOrigin.w;
     vec3 center = (G.view * vec4(rel, 1.0)).xyz;
     float r = pc.a.x;
+#ifndef DROPLETS
+    bool foam = p.vel.w > 0.5 && p.vel.w < 1.5;
+    if (foam) {
+        r *= pc.b.x;
+    }
+#else
+    bool foam = false;
+#endif
     float alpha = 1.0;
     float dist = -center.z;
     if (dist < pc.a.z) {
@@ -49,7 +57,7 @@ void main() {
         float s = pc.a.y / max(pixelR, 1e-4);
         alpha = 1.0 / (s * s);
         r *= s;
-    } else if (pc.a.w > 0.0 && pixelR > pc.a.w) {
+    } else if (pc.a.w > 0.0 && pixelR > pc.a.w && !foam) {
         r *= pc.a.w / pixelR;
     }
     if (pc.a.w > 0.0) {

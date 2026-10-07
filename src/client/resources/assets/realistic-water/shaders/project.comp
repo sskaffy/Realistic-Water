@@ -27,6 +27,10 @@ void main() {
     if (ta == CELL_FLUID || tb == CELL_FLUID) {
         float pa = ta == CELL_FLUID ? pressure[cellIndex(ca)] : 0.0;
         float pb = tb == CELL_FLUID ? pressure[cellIndex(f)] : 0.0;
+        if (isSand()) {
+            pa = max(pa, 0.0);
+            pb = max(pb, 0.0);
+        }
         vel[i] -= pb - pa;
         valid[i] = 1u;
     } else {

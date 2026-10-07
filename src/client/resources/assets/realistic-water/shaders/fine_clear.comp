@@ -1,7 +1,7 @@
 #version 450
 #include "common.glsl"
 layout(local_size_x = 256) in;
-layout(std430, binding = 1) writeonly buffer Accum { int accum[]; };
+layout(std430, binding = 1) writeonly buffer Zb { int zb[]; };
 
 void main() {
     int t = int(GID_U);
@@ -10,5 +10,9 @@ void main() {
     }
     ivec3 d = G.fineBoxMax.xyz - G.fineBoxMin.xyz;
     ivec3 p = G.fineBoxMin.xyz + ivec3(t % d.x, (t / d.x) % d.y, t / (d.x * d.y));
-    accum[fineIndex(p)] = 0;
+    int i = 4 * fineIndex(p);
+    zb[i] = 0;
+    zb[i + 1] = 0;
+    zb[i + 2] = 0;
+    zb[i + 3] = 0;
 }

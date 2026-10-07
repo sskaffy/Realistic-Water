@@ -2,6 +2,7 @@ package me.skaffy.client.water;
 
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import java.util.List;
+import me.skaffy.block.RealisticSandBlock;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
@@ -19,6 +20,7 @@ final class SolidCache {
 	static final byte PARTIAL = 2;
 
 	final int res;
+	final boolean ignoreSand;
 	private final int bitsPerBlock;
 	private final Long2ObjectOpenHashMap<Section> sections = new Long2ObjectOpenHashMap<>();
 
@@ -27,8 +29,9 @@ final class SolidCache {
 		final long[] @Nullable [] partial = new long[4096][];
 	}
 
-	SolidCache(int res) {
+	SolidCache(int res, boolean ignoreSand) {
 		this.res = res;
+		this.ignoreSand = ignoreSand;
 		this.bitsPerBlock = res * res * res;
 	}
 
@@ -94,7 +97,8 @@ final class SolidCache {
 
 	private void voxelizeBlock(ClientLevel level, BlockPos pos, BlockState state, Section s, int i) {
 		s.partial[i] = null;
-		VoxelShape shape = state.isAir() ? null : state.getCollisionShape(level, pos);
+		boolean skip = state.isAir() || (this.ignoreSand && state.getBlock() instanceof RealisticSandBlock);
+		VoxelShape shape = skip ? null : state.getCollisionShape(level, pos);
 		if (shape == null || shape.isEmpty()) {
 			s.kind[i] = EMPTY;
 			return;

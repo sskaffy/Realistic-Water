@@ -1,0 +1,47 @@
+#version 450
+#include "common.glsl"
+layout(local_size_x = 256) in;
+layout(std430, binding = 1) readonly buffer Parts { Particle parts[]; };
+layout(std430, binding = 2) readonly buffer Counters { uint counters[]; };
+layout(std430, binding = 3) buffer Zb { int zb[]; };
+layout(push_constant) uniform PC { ivec4 a; vec4 b; } pc;
+
+const float ZB_SCALE = 16384.0;
+
+void main() {
+    uint i = GID_U;
+    if (i >= counters[pc.a.x]) {
+        return;
+    }
+    Particle p = parts[i];
+    if (p.pos.w < 0.0) {
+        return;
+    }
+    vec3 g = p.pos.xyz * float(G.fine.w);
+    float R = pc.b.x;
+    float invR2 = 1.0 / (R * R);
+    ivec3 lo = ivec3(ceil(g - 0.5 - R));
+    ivec3 hi = ivec3(floor(g - 0.5 + R));
+    for (int z = lo.z; z <= hi.z; z++) {
+        for (int y = lo.y; y <= hi.y; y++) {
+            for (int x = lo.x; x <= hi.x; x++) {
+                ivec3 v = ivec3(x, y, z);
+                if (!inFine(v)) {
+                    continue;
+                }
+                vec3 d = g - (vec3(v) + 0.5);
+                float s2 = dot(d, d) * invR2;
+                if (s2 >= 1.0) {
+                    continue;
+                }
+                float t = 1.0 - s2;
+                float k = t * t * t;
+                int base = 4 * fineIndex(v);
+                atomicAdd(zb[base], int(k * ZB_SCALE + 0.5));
+                atomicAdd(zb[base + 1], int(round(k * d.x * ZB_SCALE)));
+                atomicAdd(zb[base + 2], int(round(k * d.y * ZB_SCALE)));
+                atomicAdd(zb[base + 3], int(round(k * d.z * ZB_SCALE)));
+            }
+        }
+    }
+}

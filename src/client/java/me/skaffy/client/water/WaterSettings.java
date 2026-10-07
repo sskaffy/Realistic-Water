@@ -6,7 +6,7 @@ import java.util.Map;
 import java.util.TreeMap;
 
 public final class WaterSettings {
-	public static int resolution = 4;
+	public static int resolution = 6;
 	public static int boxMargin = 6;
 
 	public static float cfl = 2.0F;
@@ -30,8 +30,8 @@ public final class WaterSettings {
 	public static float wwTrappedAirMax = 14.0F;
 	public static float wwWaveCrestMin = 0.4F;
 	public static float wwWaveCrestMax = 2.5F;
-	public static float wwFoamLifeMin = 4.0F;
-	public static float wwFoamLifeMax = 12.0F;
+	public static float wwFoamLifeMin = 1.5F;
+	public static float wwFoamLifeMax = 4.0F;
 	public static float wwBubbleBuoyancy = 2.5F;
 	public static float wwBubbleDrag = 0.6F;
 	public static float wwSprayDrag = 0.4F;
@@ -40,36 +40,73 @@ public final class WaterSettings {
 	public static int wwMaxPerParticle = 4;
 	public static int wwCellLimit = 12;
 
+	public static float filmFriction = 40.0F;
+	public static float filmDepth = 0.08F;
+	public static boolean sheetFill = false;
+	public static float sheetSmoothing = 2.0F;
+	public static float strandedTime = 1.5F;
+	public static int strandedNeighbors = 12;
+
 	public static int surfaceSubdivision = 2;
-	public static float surfaceIso = 0.4F;
-	public static float dropletThreshold = 0.12F;
+	public static float surfaceKernel = 3.0F;
+	public static float surfaceRadius = 0.9F;
+	public static float surfaceIso = 0.5F;
+	public static float dropletThreshold = 0.35F;
 	public static float nearCull = 0.05F;
 
 	public static float particleRadius = 0.4F;
 	public static float thicknessScale = 1.0F;
 	public static float refraction = 0.15F;
-	public static float absorbR = 2.2F;
-	public static float absorbG = 1.5F;
-	public static float absorbB = 1.1F;
-	public static float scatterR = 0.055F;
-	public static float scatterG = 0.085F;
-	public static float scatterB = 0.1F;
-	public static float scatterDensity = 0.9F;
+	public static float absorbR = 0.45F;
+	public static float absorbG = 0.12F;
+	public static float absorbB = 0.07F;
+	public static float scatterR = 0.03F;
+	public static float scatterG = 0.08F;
+	public static float scatterB = 0.11F;
+	public static float scatterDensity = 0.5F;
 	public static float underwaterFog = 0.1F;
-	public static float surfaceSmoothing = 1.0F;
-	public static float detailStrength = 0.5F;
-	public static float detailScale = 2.6F;
+	public static float surfaceSmoothing = 0.6F;
+	public static float detailStrength = 0.4F;
+	public static float detailScale = 6.0F;
 	public static float detailSpeed = 1.4F;
-	public static float roughness = 0.12F;
+	public static float roughness = 0.06F;
 	public static float specular = 6.0F;
+	public static float wetDarkening = 0.3F;
+	public static float filmShading = 0.25F;
 	public static float wwRadius = 0.012F;
 	public static float wwMaxPixels = 2.5F;
 	public static float foamCoverage = 1.2F;
+	public static float foamSize = 3.0F;
+	public static float foamBubbleSize = 0.05F;
 	public static float bubbleAlpha = 0.25F;
 	public static float sprayAlpha = 0.35F;
 
 	public static float sourceFill = 0.9F;
 	public static boolean bucketMakesSource = false;
+
+	public static boolean flowSounds = true;
+	public static float flowSoundVolume = 1.0F;
+
+	public static float sandFriction = 0.7F;
+	public static float sandCohesion = 0.15F;
+	public static int sandFrictionIterations = 8;
+	public static float sandStiffness = 0.12F;
+	public static float sandFlipRatio = 0.95F;
+	public static float sandVolumeCorrection = 1.5F;
+	public static float sandRestSpeed = 0.15F;
+	public static int sandMinCellCount = 1;
+	public static float sandSurfaceIso = 0.5F;
+	public static float sandSurfaceSmoothing = 0.6F;
+	public static float sandGrainSize = 0.02F;
+	public static int sandGrainsPerParticle = 6;
+	public static float sandGrainSpread = 0.45F;
+	public static float sandGrainMinPixels = 0.7F;
+	public static float sandColorR = 0.86F;
+	public static float sandColorG = 0.79F;
+	public static float sandColorB = 0.6F;
+	public static float sandColorVariation = 0.2F;
+	public static float sandAo = 0.6F;
+	public static boolean sandSounds = true;
 
 	public static String ffmpeg = "";
 	public static boolean renderFreezeWorld = true;

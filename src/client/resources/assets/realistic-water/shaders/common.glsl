@@ -51,7 +51,15 @@ layout(std140, set = 0, binding = 0) uniform Globals {
     vec4 killInfo;
     vec4 shadeA;
     vec4 shadeB;
+    vec4 matA;
+    vec4 matB;
+    vec4 matC;
+    vec4 matD;
 } G;
+
+bool isSand() {
+    return G.matA.x > 0.5;
+}
 
 #define NX G.dims.x
 #define NY G.dims.y

@@ -42,5 +42,6 @@ void main() {
     if (o >= uint(G.caps.x)) {
         return;
     }
-    dst[o] = Particle(vec4(p, 0.0), vec4(e.vel.xyz, 0.0));
+    float tag = isSand() ? 0.001 + 0.998 * rand(seed) : 0.0;
+    dst[o] = Particle(vec4(p, 0.0), vec4(e.vel.xyz, tag));
 }

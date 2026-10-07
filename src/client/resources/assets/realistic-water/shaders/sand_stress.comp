@@ -1,0 +1,54 @@
+#version 450
+#include "common.glsl"
+layout(local_size_x = 256) in;
+layout(std430, binding = 1) readonly buffer Vel { float vel[]; };
+layout(std430, binding = 2) readonly buffer Flags { uint cellFlags[]; };
+layout(std430, binding = 3) readonly buffer Scale { float scale[]; };
+layout(std430, binding = 4) writeonly buffer Stress { float stress[]; };
+
+#include "sand_strain.glsl"
+
+float scaleAt(ivec3 c) {
+    return inBox(c) ? scale[cellIndex(c)] : 0.0;
+}
+
+float edgeScale(int plane, ivec3 e) {
+    ivec2 ab = planeAxes(plane);
+    ivec3 ea = axisVec(ab.x);
+    ivec3 eb = axisVec(ab.y);
+    float sum = 0.0;
+    float n = 0.0;
+    for (int k = 0; k < 4; k++) {
+        ivec3 c = e - ((k & 1) != 0 ? ea : ivec3(0)) - ((k & 2) != 0 ? eb : ivec3(0));
+        if (typeAt(c) == CELL_FLUID) {
+            sum += scaleAt(c);
+            n += 1.0;
+        }
+    }
+    return n > 0.0 ? sum / n : 0.0;
+}
+
+void main() {
+    int bt = int(GID_U);
+    if (bt >= G.boxMin.w) {
+        return;
+    }
+    ivec3 c = boxCell(bt);
+    int i = cellIndex(c);
+    float k = 2.0 * G.matB.y;
+    vec3 diag = vec3(0.0);
+    if (typeAt(c) == CELL_FLUID) {
+        diag = vec3(
+            faceVel(0, c + ivec3(1, 0, 0)) - faceVel(0, c),
+            faceVel(1, c + ivec3(0, 1, 0)) - faceVel(1, c),
+            faceVel(2, c + ivec3(0, 0, 1)) - faceVel(2, c));
+        diag -= (diag.x + diag.y + diag.z) / 3.0;
+        diag *= k * scale[i];
+    }
+    stress[6 * i + 0] = diag.x;
+    stress[6 * i + 1] = diag.y;
+    stress[6 * i + 2] = diag.z;
+    for (int plane = 0; plane < 3; plane++) {
+        stress[6 * i + 3 + plane] = edgeActive(plane, c) ? k * edgeScale(plane, c) * edgeStrain(plane, c) : 0.0;
+    }
+}

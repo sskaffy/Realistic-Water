@@ -1,0 +1,28 @@
+#version 450
+#include "common.glsl"
+layout(local_size_x = 256) in;
+layout(std430, binding = 1) readonly buffer Vel { float vel[]; };
+layout(std430, binding = 2) readonly buffer Flags { uint cellFlags[]; };
+layout(std430, binding = 3) readonly buffer Pressure { float pressure[]; };
+layout(std430, binding = 4) writeonly buffer Scale { float scale[]; };
+
+#include "sand_strain.glsl"
+
+void main() {
+    int bt = int(GID_U);
+    if (bt >= G.boxMin.w) {
+        return;
+    }
+    ivec3 c = boxCell(bt);
+    int i = cellIndex(c);
+    if (typeAt(c) != CELL_FLUID) {
+        scale[i] = 0.0;
+        return;
+    }
+    vec3 diag;
+    vec3 shear;
+    cellStrain(c, diag, shear);
+    float rigid = sqrt(dot(diag, diag) + 2.0 * dot(shear, shear));
+    float yieldStress = G.matA.y * max(pressure[i], 0.0) + G.matA.z;
+    scale[i] = rigid > yieldStress ? yieldStress / rigid : 1.0;
+}

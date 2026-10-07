@@ -21,7 +21,6 @@ vec3 viewPosAt(vec2 uv, float dist) {
     return dir * (dist / -dir.z);
 }
 
-/** How wide one pixel is in blocks at this distance; the scale everything has to stay above to not alias. */
 float pixelFootprint(float dist) {
     return 2.0 * dist / max(G.proj[1][1] * G.screen.y, 1e-4);
 }
@@ -118,9 +117,13 @@ vec3 shadeAboveWater(vec2 uv, vec3 n, float fd, float sceneDist, float ambient) 
     vec3 V = normalize(-P);
     n = dot(n, V) < 0.0 ? -n : n;
     float footprint = pixelFootprint(fd);
+    float thickness = max(texture(thicknessTex, uv).r, 0.0);
+    vec3 upV = normalize(mat3(G.view) * vec3(0.0, 1.0, 0.0));
+    float vertical = thickness * abs(dot(V, upV));
+    float film = 1.0 - smoothstep(0.02, max(G.shadeB.z, 0.03), vertical);
+    n = normalize(mix(n, upV, film * 0.9));
     vec3 wrinkled = rippleNormal(n, P, footprint);
     n = normalize(mix(n, wrinkled, smoothstep(0.0, 0.15, dot(wrinkled, V))));
-    float thickness = max(texture(thicknessTex, uv).r, 0.0);
 
     vec2 offset = n.xy * G.waterA.z * clamp(thickness, 0.0, 2.0) / max(fd, 1.0);
     vec2 ruv = clamp(uv + offset, vec2(0.0), vec2(1.0));
@@ -131,7 +134,10 @@ vec3 shadeAboveWater(vec2 uv, vec3 n, float fd, float sceneDist, float ambient) 
         path = thickness;
     }
     path *= G.waterA.y;
-    vec3 transmitted = texture(sceneColor, ruv).rgb * exp(-G.absorb.rgb * path);
+    vec3 under = texture(sceneColor, ruv).rgb;
+    float wet = G.shadeB.y * smoothstep(0.0, 0.03, path);
+    under = pow(max(under, vec3(0.0)), vec3(1.0 + wet)) * (1.0 - 0.15 * wet);
+    vec3 transmitted = under * exp(-G.absorb.rgb * path);
     vec3 scattered = G.scatter.rgb * ambient * (1.0 - exp(-G.scatter.w * path));
     vec3 water = transmitted + scattered;
 
@@ -142,6 +148,29 @@ vec3 shadeAboveWater(vec2 uv, vec3 n, float fd, float sceneDist, float ambient) 
     vec3 reflection = mix(skyColor(Rw), ssr, hit);
     float F = 0.02 + 0.98 * pow(1.0 - clamp(dot(n, V), 0.0, 1.0), 5.0);
     return mix(water, reflection, F) + sunSpecular(n, V, footprint);
+}
+
+float foamLace(vec2 p, float coverage, float footprint) {
+    float size = max(G.shadeB.w, 1e-3);
+    vec2 q = p / size;
+    ivec2 cell = ivec2(floor(q));
+    float f1 = 9.0;
+    float f2 = 9.0;
+    for (int k = 0; k < 9; k++) {
+        ivec2 c = cell + ivec2(k % 3 - 1, k / 3 - 1);
+        uint s = hash(uint(c.x) * 73856093u ^ uint(c.y) * 19349663u);
+        vec2 feature = vec2(c) + 0.1 + 0.8 * vec2(rand(s), rand(s));
+        float d = length(q - feature);
+        if (d < f1) {
+            f2 = f1;
+            f1 = d;
+        } else if (d < f2) {
+            f2 = d;
+        }
+    }
+    float wall = 1.0 - smoothstep(0.0, 0.06 + 0.6 * coverage, f2 - f1);
+    float detail = smoothstep(0.7, 2.5, size / max(footprint, 1e-5));
+    return mix(0.55, wall, detail);
 }
 
 vec3 shadeSurfaceFromBelow(vec2 uv, vec3 n, float fd, vec3 deep) {
@@ -199,6 +228,10 @@ void main() {
     if (foam.a > 1e-4) {
         vec3 foamColor = foam.rgb / foam.a;
         float coverage = min(1.0 - exp(-foam.a * G.foamA.y), 0.9);
+        if (hasFluid && !underwater) {
+            vec3 world = G.misc.yzw + (G.invView * vec4(viewPosAt(uv, fd), 0.0)).xyz;
+            coverage *= foamLace(world.xz, coverage, pixelFootprint(fd));
+        }
         color = mix(color, foamColor * mix(0.25, 1.0, ambient), coverage);
     }
 

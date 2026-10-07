@@ -20,7 +20,7 @@ void main() {
         if (e >= 0) {
             t = CELL_SOLID | (uint(e + 1) << 8);
         } else {
-            t = cellCount[i] > 0 ? CELL_FLUID : CELL_AIR;
+            t = cellCount[i] >= max(int(G.matA.w), 1) ? CELL_FLUID : CELL_AIR;
         }
     }
     cellFlags[i] = t;

@@ -1,7 +1,7 @@
 #version 450
 #include "common.glsl"
 layout(binding = 2) uniform sampler2D sceneDepth;
-layout(binding = 3) uniform sampler2D gbuffer; // .w = distance to the water surface
+layout(binding = 3) uniform sampler2D gbuffer;
 layout(std430, binding = 4) readonly buffer ViewState { vec4 viewState; };
 layout(location = 0) in vec2 vUV;
 layout(location = 1) in vec3 vCenter;
@@ -34,7 +34,7 @@ void main() {
         a *= G.foamA.z;
         color = vec3(0.8, 0.9, 1.0);
     } else {
-        a *= 0.9 * clamp(vData.x * 0.8, 0.0, 1.0);
+        a *= 0.9 * clamp(vData.x * 0.8, 0.0, 1.0) * exp(-2.5 * r2);
     }
     float fd = texture(gbuffer, uv).w;
     if (viewState.x > 0.5) {

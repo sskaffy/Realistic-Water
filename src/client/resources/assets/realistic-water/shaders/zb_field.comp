@@ -1,0 +1,25 @@
+#version 450
+#include "common.glsl"
+layout(local_size_x = 256) in;
+layout(std430, binding = 1) readonly buffer Zb { int zb[]; };
+layout(std430, binding = 2) writeonly buffer Field { float field[]; };
+layout(push_constant) uniform PC { ivec4 a; vec4 b; } pc;
+
+void main() {
+    int t = int(GID_U);
+    if (t >= G.fineBoxMin.w) {
+        return;
+    }
+    ivec3 bd = G.fineBoxMax.xyz - G.fineBoxMin.xyz;
+    ivec3 p = G.fineBoxMin.xyz + ivec3(t % bd.x, (t / bd.x) % bd.y, t / (bd.x * bd.y));
+    int i = fineIndex(p);
+    float sw = float(zb[4 * i]);
+    if (sw < 1.0) {
+        field[i] = 0.0;
+        return;
+    }
+    vec3 c = vec3(float(zb[4 * i + 1]), float(zb[4 * i + 2]), float(zb[4 * i + 3])) / sw;
+    float phi = length(c) - pc.b.x;
+    float w = sw / 16384.0;
+    field[i] = clamp(0.5 - 0.5 * phi, 0.0, 1.0) * smoothstep(pc.b.y, pc.b.z, w);
+}

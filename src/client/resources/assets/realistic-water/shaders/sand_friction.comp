@@ -1,0 +1,43 @@
+#version 450
+#include "common.glsl"
+layout(local_size_x = 256) in;
+layout(std430, binding = 1) buffer Vel { float vel[]; };
+layout(std430, binding = 2) readonly buffer Flags { uint cellFlags[]; };
+layout(std430, binding = 3) readonly buffer Stress { float stress[]; };
+
+uint typeAt(ivec3 c) {
+    return inBox(c) ? (cellFlags[cellIndex(c)] & 0xFFu) : CELL_AIR;
+}
+
+float stressAt(ivec3 c, int component) {
+    return inBox(c) ? stress[6 * cellIndex(c) + component] : 0.0;
+}
+
+int planeOf(int comp, int other) {
+    int lo = min(comp, other);
+    int hi = max(comp, other);
+    return lo == 0 ? (hi == 1 ? 0 : 1) : 2;
+}
+
+void main() {
+    int comp;
+    ivec3 f;
+    if (!boxFace(int(GID_U), comp, f)) {
+        return;
+    }
+    ivec3 ca = f - axisVec(comp);
+    uint ta = typeAt(ca);
+    uint tb = typeAt(f);
+    if (ta == CELL_SOLID || tb == CELL_SOLID || (ta != CELL_FLUID && tb != CELL_FLUID)) {
+        return;
+    }
+    float d = stressAt(f, comp) - stressAt(ca, comp);
+    for (int other = 0; other < 3; other++) {
+        if (other == comp) {
+            continue;
+        }
+        int s = 3 + planeOf(comp, other);
+        d += stressAt(f + axisVec(other), s) - stressAt(f, s);
+    }
+    vel[faceIndex(comp, f)] += d;
+}

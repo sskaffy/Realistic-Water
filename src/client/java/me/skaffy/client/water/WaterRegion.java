@@ -30,6 +30,7 @@ public final class WaterRegion implements AutoCloseable {
 	static final long ARGS_WW_DISPATCH = 16;
 	static final long ARGS_FLUID_DRAW = 48;
 	static final long ARGS_WW_DRAW = 64;
+	static final long ARGS_GRAIN_DRAW = 80;
 	static final int AABB_BIAS = 1 << 20;
 	static final int MAX_REMOVE = 16;
 	private static final int INITIAL_PARTICLES = 262_144;
@@ -60,7 +61,14 @@ public final class WaterRegion implements AutoCloseable {
 	public record Removal(double minX, double minY, double minZ, double maxX, double maxY, double maxZ) {
 	}
 
-	public record Fill(int x, int y, int z, int dx, int dy, int dz, byte[] fill) {
+	public record Fill(int x, int y, int z, int dx, int dy, int dz, byte[] fill, byte[] speed) {
+		float fullness(int i) {
+			return (this.fill[i] & 0xFF) / 255.0F;
+		}
+
+		float blocksPerSecond(int i) {
+			return (this.speed[i] & 0xFF) / 16.0F;
+		}
 	}
 
 	private static ComputeProgram[] programs;
@@ -80,14 +88,17 @@ public final class WaterRegion implements AutoCloseable {
 				new ComputeProgram("project.comp", U, S, S, S, S),
 				new ComputeProgram("extrapolate.comp", U, S, S, S),
 				new ComputeProgram("potential.comp", U, S, S, S, S),
-				new ComputeProgram("g2p.comp", U, S, S, S, S, S, S, S, S, S, S),
+				new ComputeProgram("g2p.comp", U, S, S, S, S, S, S, S, S, S, S, S),
 				new ComputeProgram("ww_update.comp", U, S, S, S, S, S, S, S),
 				new ComputeProgram("inflow.comp", U, S, S, S, S),
 				new ComputeProgram("probe.comp", U, S, S, S),
 				new ComputeProgram("shift.comp", U, S, S),
 				new ComputeProgram("remove.comp", U, S, S),
 				new ComputeProgram("merge.comp", U, S, S, S, S),
-				new ComputeProgram("blockfill.comp", U, S, S, S)
+				new ComputeProgram("blockfill.comp", U, S, S, S, S),
+				new ComputeProgram("sand_scale.comp", U, S, S, S, S),
+				new ComputeProgram("sand_stress.comp", U, S, S, S, S),
+				new ComputeProgram("sand_friction.comp", U, S, S, S)
 			};
 		}
 		return programs;
@@ -106,6 +117,7 @@ public final class WaterRegion implements AutoCloseable {
 
 	final int id;
 	final int res;
+	final Material material;
 
 	int ox;
 	int oy;
@@ -138,6 +150,8 @@ public final class WaterRegion implements AutoCloseable {
 	VkBuf divergence;
 	VkBuf potential;
 	VkBuf[] wwCount = new VkBuf[2];
+	private @Nullable VkBuf frictionScale;
+	private @Nullable VkBuf frictionStress;
 	PressureSolver solver;
 	SurfaceMesher mesher;
 	private boolean freshGrid;
@@ -181,9 +195,10 @@ public final class WaterRegion implements AutoCloseable {
 	float lastMaxSpeed;
 	private int emittedSinceReadback;
 
-	WaterRegion(int id, int res) {
+	WaterRegion(int id, int res, Material material) {
 		this.id = id;
 		this.res = res;
+		this.material = material;
 		for (int i = 0; i < 2; i++) {
 			this.particles[i] = VkBuf.device((long) this.fluidCapacity * PARTICLE_BYTES, 0);
 			this.whitewater[i] = VkBuf.device((long) this.wwCapacity * PARTICLE_BYTES, 0);
@@ -289,11 +304,14 @@ public final class WaterRegion implements AutoCloseable {
 			VkBuf rb = this.fillReadback[slot];
 			rb.invalidate(0, n * 4L);
 			byte[] data = new byte[n];
+			byte[] speed = new byte[n];
 			ByteBuffer fb = rb.mapped();
 			for (int i = 0; i < n; i++) {
-				data[i] = (byte) fb.getInt(i * 4);
+				int packed = fb.getInt(i * 4);
+				data[i] = (byte) packed;
+				speed[i] = (byte) (packed >>> 8);
 			}
-			fill = new Fill(meta[0], meta[1], meta[2], meta[3], meta[4], meta[5], data);
+			fill = new Fill(meta[0], meta[1], meta[2], meta[3], meta[4], meta[5], data, speed);
 			this.fillMeta[slot] = null;
 		}
 		return fill;
@@ -420,6 +438,10 @@ public final class WaterRegion implements AutoCloseable {
 		this.potential = VkBuf.device(this.numCells * 8L, 0);
 		this.wwCount[0] = VkBuf.device(this.numCells * 4L, 0);
 		this.wwCount[1] = VkBuf.device(this.numCells * 4L, 0);
+		if (this.material == Material.SAND) {
+			this.frictionScale = VkBuf.device(this.numCells * 4L, 0);
+			this.frictionStress = VkBuf.device(this.numCells * 24L, 0);
+		}
 		this.solver = new PressureSolver(this.nx, this.ny, this.nz);
 		this.mesher = new SurfaceMesher(this.nx, this.ny, this.nz, Math.max(1, WaterSettings.surfaceSubdivision));
 		this.freshGrid = true;
@@ -428,7 +450,8 @@ public final class WaterRegion implements AutoCloseable {
 	private void releaseGrid() {
 		for (AutoCloseable c : new AutoCloseable[]{
 			this.accum, this.vel, this.velOld, this.valid0, this.valid1, this.cellCount, this.cellDens, this.cellFlags, this.staticSolid,
-			this.pressure, this.divergence, this.potential, this.wwCount[0], this.wwCount[1], this.solver, this.mesher
+			this.pressure, this.divergence, this.potential, this.wwCount[0], this.wwCount[1], this.frictionScale, this.frictionStress,
+			this.solver, this.mesher
 		}) {
 			if (c != null) {
 				Vk.destroyLater(c);
@@ -700,8 +723,10 @@ public final class WaterRegion implements AutoCloseable {
 		p[0].bind(cb, ubo, Desc.ssbo(this.counters), Desc.ssbo(this.args));
 		p[0].push(cb, C_FLUID + this.cur, C_WW + this.wwCur);
 		p[0].dispatch(cb, 1, 1, 1);
-		p[13].bind(cb, ubo, Desc.ssbo(this.cellDens), Desc.ssbo(this.cellFlags), Desc.ssbo(frameView));
-		p[13].dispatch(cb, 1, 1, 1);
+		if (this.material == Material.WATER) {
+			p[13].bind(cb, ubo, Desc.ssbo(this.cellDens), Desc.ssbo(this.cellFlags), Desc.ssbo(frameView));
+			p[13].dispatch(cb, 1, 1, 1);
+		}
 		if (this.fillRequested) {
 			this.recordFill(cb, ubo, slot);
 		}
@@ -741,7 +766,7 @@ public final class WaterRegion implements AutoCloseable {
 		}
 		Vk.barrier(cb);
 		ComputeProgram fill = programs()[17];
-		fill.bind(cb, ubo, Desc.ssbo(this.cellCount), Desc.ssbo(this.cellFlags), Desc.ssbo(this.fillBuffer));
+		fill.bind(cb, ubo, Desc.ssbo(this.cellCount), Desc.ssbo(this.cellFlags), Desc.ssbo(this.fillBuffer), Desc.ssbo(this.vel));
 		fill.push(cb, x0, y0, z0, 0, dx, dy, dz, 0);
 		fill.dispatch(cb, ComputeProgram.groups(n, 64), 1, 1);
 		Vk.barrier(cb);
@@ -755,7 +780,8 @@ public final class WaterRegion implements AutoCloseable {
 		int dst = 1 - this.cur;
 		int wwSrc = this.wwCur;
 		int wwDst = 1 - this.wwCur;
-		boolean ww = WaterSettings.whitewater;
+		boolean sand = this.material == Material.SAND;
+		boolean ww = !sand && WaterSettings.whitewater;
 		int cellGroups = ComputeProgram.groups(boxCells(box), 256);
 		int faceGroups = ComputeProgram.groups(boxFaces(box), 256);
 
@@ -803,6 +829,20 @@ public final class WaterRegion implements AutoCloseable {
 		p[7].dispatch(cb, faceGroups, 1, 1);
 		Vk.barrier(cb);
 
+		if (sand) {
+			for (int k = 0; k < WaterSettings.sandFrictionIterations; k++) {
+				p[18].bind(cb, ubo, Desc.ssbo(this.vel), Desc.ssbo(this.cellFlags), Desc.ssbo(this.pressure), Desc.ssbo(this.frictionScale));
+				p[18].dispatch(cb, cellGroups, 1, 1);
+				Vk.barrier(cb);
+				p[19].bind(cb, ubo, Desc.ssbo(this.vel), Desc.ssbo(this.cellFlags), Desc.ssbo(this.frictionScale), Desc.ssbo(this.frictionStress));
+				p[19].dispatch(cb, cellGroups, 1, 1);
+				Vk.barrier(cb);
+				p[20].bind(cb, ubo, Desc.ssbo(this.vel), Desc.ssbo(this.cellFlags), Desc.ssbo(this.frictionStress));
+				p[20].dispatch(cb, faceGroups, 1, 1);
+				Vk.barrier(cb);
+			}
+		}
+
 		VkBuf[] valid = {this.valid0, this.valid1};
 		for (int k = 0; k < WaterSettings.extrapolationLayers; k++) {
 			p[8].bind(cb, ubo, Desc.ssbo(this.vel), Desc.ssbo(valid[k % 2]), Desc.ssbo(valid[(k + 1) % 2]));
@@ -819,7 +859,7 @@ public final class WaterRegion implements AutoCloseable {
 		p[10].bind(cb, ubo,
 			Desc.ssbo(this.particles[src]), Desc.ssbo(this.particles[dst]), Desc.ssbo(this.counters),
 			Desc.ssbo(this.vel), Desc.ssbo(this.velOld), Desc.ssbo(this.cellFlags), Desc.ssbo(this.staticSolid),
-			Desc.ssbo(this.potential), Desc.ssbo(this.whitewater[wwDst]), Desc.ssbo(this.wwCount[wwSrc]));
+			Desc.ssbo(this.potential), Desc.ssbo(this.whitewater[wwDst]), Desc.ssbo(this.wwCount[wwSrc]), Desc.ssbo(this.cellCount));
 		p[10].push(cb, C_FLUID + src, C_FLUID + dst, 0, this.seed++, C_WW + wwDst, ww ? 1 : 0);
 		p[10].dispatchIndirect(cb, this.args, ARGS_FLUID_DISPATCH);
 		Vk.barrier(cb);

@@ -1,0 +1,64 @@
+#version 450
+#include "common.glsl"
+layout(local_size_x = 256) in;
+layout(std430, binding = 1) buffer Dens { float dens[]; };
+layout(std430, binding = 2) buffer Wide { float wide[]; };
+layout(std430, binding = 3) buffer Result { float result[]; };
+layout(push_constant) uniform PC { ivec4 a; vec4 b; } pc;
+
+const int TAPS = 6;
+
+float densAt(ivec3 p) {
+    return inFine(p) ? dens[fineIndex(p)] : 0.0;
+}
+
+float wideAt(ivec3 p) {
+    return inFine(p) ? wide[fineIndex(p)] : 0.0;
+}
+
+bool thinAt(ivec3 p, float v) {
+    return v < 0.9 && max(densAt(p + ivec3(0, 2, 0)), densAt(p - ivec3(0, 2, 0))) < 0.25;
+}
+
+float sheetAt(ivec3 p) {
+    float v = densAt(p);
+    return thinAt(p, v) ? v : 0.0;
+}
+
+void main() {
+    int t = int(GID_U);
+    if (t >= G.fineBoxMin.w) {
+        return;
+    }
+    ivec3 bd = G.fineBoxMax.xyz - G.fineBoxMin.xyz;
+    ivec3 p = G.fineBoxMin.xyz + ivec3(t % bd.x, (t / bd.x) % bd.y, t / (bd.x * bd.y));
+    int i = fineIndex(p);
+    int pass = pc.a.x;
+    if (pass == 2) {
+        dens[i] = result[i];
+        return;
+    }
+    float inv2s2 = 0.5 / max(pc.b.x * pc.b.x, 1e-4);
+    ivec3 e = pass == 0 ? ivec3(1, 0, 0) : ivec3(0, 0, 1);
+    float sum = pass == 0 ? sheetAt(p) : wideAt(p);
+    float norm = 1.0;
+    for (int k = 1; k <= TAPS; k++) {
+        float w = exp(-float(k * k) * inv2s2);
+        sum += w * (pass == 0 ? sheetAt(p + k * e) + sheetAt(p - k * e) : wideAt(p + k * e) + wideAt(p - k * e));
+        norm += 2.0 * w;
+    }
+    float blurred = sum / norm;
+    if (pass == 0) {
+        wide[i] = blurred;
+        return;
+    }
+    float v = dens[i];
+    float r = v;
+    if (thinAt(p, v)) {
+        r = max(blurred, mix(v, blurred, 0.5));
+        if (v > G.surf.x) {
+            r = max(r, G.surf.x + 0.04);
+        }
+    }
+    result[i] = r;
+}

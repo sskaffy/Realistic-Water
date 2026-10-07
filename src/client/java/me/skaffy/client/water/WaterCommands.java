@@ -38,13 +38,22 @@ public final class WaterCommands {
 				return 1;
 			}))
 			.then(literal("ball")
-				.executes(c -> ball(c, 3))
-				.then(argument("size", IntegerArgumentType.integer(1, 64)).executes(c -> ball(c, IntegerArgumentType.getInteger(c, "size")))))
-			.then(literal("remove").executes(c -> {
-				WaterWorld.get().removeAll(Minecraft.getInstance().options.renderDistance().get() + 2);
-				c.getSource().sendFeedback(Component.literal("Removing all realistic water around you (springs included)"));
-				return 1;
-			}))
+				.executes(c -> ball(c, 3, Material.WATER))
+				.then(argument("size", IntegerArgumentType.integer(1, 64)).executes(c -> ball(c, IntegerArgumentType.getInteger(c, "size"), Material.WATER))))
+			.then(literal("sand")
+				.executes(c -> ball(c, 2, Material.SAND))
+				.then(argument("size", IntegerArgumentType.integer(1, 64)).executes(c -> ball(c, IntegerArgumentType.getInteger(c, "size"), Material.SAND))))
+			.then(literal("remove")
+				.executes(c -> {
+					WaterWorld.get().removeAll(Minecraft.getInstance().options.renderDistance().get() + 2, Material.WATER);
+					c.getSource().sendFeedback(Component.literal("Removing all realistic water around you (springs included)"));
+					return 1;
+				})
+				.then(literal("sand").executes(c -> {
+					WaterWorld.get().removeAll(Minecraft.getInstance().options.renderDistance().get() + 2, Material.SAND);
+					c.getSource().sendFeedback(Component.literal("Removing all realistic sand around you"));
+					return 1;
+				})))
 			.then(literal("set")
 				.then(argument("name", StringArgumentType.word())
 					.suggests((c, b) -> SharedSuggestionProvider.suggest(WaterSettings.fields().keySet(), b))
@@ -64,13 +73,13 @@ public final class WaterCommands {
 					.then(argument("fps", IntegerArgumentType.integer(1, 240)).executes(c -> render(c, IntegerArgumentType.getInteger(c, "fps")))))));
 	}
 
-	private static int ball(CommandContext<FabricClientCommandSource> c, int size) {
+	private static int ball(CommandContext<FabricClientCommandSource> c, int size, Material material) {
 		var player = c.getSource().getPlayer();
 		Vec3 center = player.getEyePosition().add(player.getLookAngle().scale(size + 3.0));
 		double half = size * 0.5;
 		WaterWorld.get().addEmitter(new WaterRegion.Emitter(
-			center.x - half, center.y - half, center.z - half, center.x + half, center.y + half, center.z + half, 0, 0, 0));
-		c.getSource().sendFeedback(Component.literal("Dropped a " + size + "^3 block cube of water"));
+			center.x - half, center.y - half, center.z - half, center.x + half, center.y + half, center.z + half, 0, 0, 0), material);
+		c.getSource().sendFeedback(Component.literal("Dropped a " + size + "^3 block cube of " + (material == Material.SAND ? "sand" : "water")));
 		return 1;
 	}
 

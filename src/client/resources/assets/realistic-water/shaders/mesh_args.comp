@@ -2,7 +2,7 @@
 #include "common.glsl"
 layout(local_size_x = 1) in;
 layout(std430, binding = 1) buffer MeshCounters { uint meshCounters[]; };
-layout(push_constant) uniform PC { ivec4 a; ivec4 b; } pc; // a.y = quad capacity
+layout(push_constant) uniform PC { ivec4 a; ivec4 b; } pc;
 
 void main() {
     uint quads = min(meshCounters[1], uint(pc.a.y));

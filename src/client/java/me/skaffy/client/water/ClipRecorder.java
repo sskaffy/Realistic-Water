@@ -28,7 +28,8 @@ public final class ClipRecorder {
 	private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH.mm.ss");
 	private static final int QUEUE_DEPTH = 4;
 	private static final List<String> FFMPEG_CANDIDATES = List.of(
-		"ffmpeg", "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg", "/snap/bin/ffmpeg");
+		"ffmpeg", System.getProperty("user.home") + "/.local/bin/ffmpeg",
+		"/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg", "/snap/bin/ffmpeg");
 
 	private double clockMs;
 	private long lastRealMs;

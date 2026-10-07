@@ -1,5 +1,6 @@
 package me.skaffy.client.mixin;
 
+import me.skaffy.block.RealisticSandBlock;
 import me.skaffy.client.water.WaterWorld;
 import me.skaffy.fluid.RealisticWaterFluid;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -14,9 +15,13 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(ClientLevel.class)
 public class ClientLevelMixin {
 	@Unique
+	private static boolean realisticWater$invisible(BlockState state) {
+		return state.isAir() || RealisticWaterFluid.isRealistic(state.getFluidState()) || state.getBlock() instanceof RealisticSandBlock;
+	}
+
+	@Unique
 	private static boolean realisticWater$invisibleSwap(BlockState oldState, BlockState newState) {
-		return (oldState.isAir() || RealisticWaterFluid.isRealistic(oldState.getFluidState()))
-			&& (newState.isAir() || RealisticWaterFluid.isRealistic(newState.getFluidState()));
+		return realisticWater$invisible(oldState) && realisticWater$invisible(newState);
 	}
 
 	@Inject(method = "sendBlockUpdated", at = @At("HEAD"), cancellable = true)

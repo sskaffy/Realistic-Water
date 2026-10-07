@@ -13,7 +13,7 @@ void main() {
         return;
     }
     Particle p = src[i];
-    if (p.pos.w < 0.0 && p.vel.w == 0.0) {
+    if (p.pos.w < 0.0) {
         return;
     }
     uint o = atomicAdd(dstCounters[pc.a.y], 1u);
