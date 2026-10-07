@@ -1,20 +1,31 @@
 Copyright (c) 2026 Skaffy. All rights reserved.
 
+Original project: https://github.com/sskaffy/Realistic-Water
+
 You MAY:
 - Include this mod, unmodified, in any modpack, public or private.
 - Use this mod on any server (including servers with paid ranks/perks)
   and in videos/streams.
 - Earn money from modpacks containing this mod through platform reward
   programs (e.g. CurseForge, Modrinth).
+- Fork this mod: modify the source code and distribute your modified
+  version, as long as you follow the fork conditions below.
+
+Fork conditions. Any fork or modified version must:
+- Clearly credit Skaffy as the author of the original mod.
+- Include a visible link to the original project on its mod page and
+  in its README or description.
+- State clearly that it is a modified version and not the original mod.
+- Be distributed under this same license, with this notice kept intact.
 
 You MAY NOT:
-- Sell this mod or any modpack containing it, or put either behind
-  a paywall (including paid early access).
-- Distribute modified versions of this mod, reupload it outside of a
-  modpack, or bundle it inside another mod (list it as a dependency
-  instead).
-- Copy substantial portions of the source code into other projects.
-- Claim this mod as your own.
+- Sell this mod, any fork of it, or any modpack containing either, or
+  put any of them behind a paywall (including paid early access).
+- Reupload this mod unmodified outside of a modpack, or bundle it inside
+  another mod (list it as a dependency instead).
+- Copy substantial portions of the source code into other projects,
+  except as a fork that follows the conditions above.
+- Claim this mod, or the original work within a fork, as your own.
 
 Modpacks including this mod must link back to the original mod page.
 
