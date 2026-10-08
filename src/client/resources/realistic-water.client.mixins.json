@@ -6,7 +6,6 @@
 		"CameraMixin",
 		"ClientLevelMixin",
 		"DeltaTrackerTimerMixin",
-		"FluidRendererMixin",
 		"FrontendGpuDeviceAccessor",
 		"GameRendererMixin",
 		"LevelRendererMixin",
