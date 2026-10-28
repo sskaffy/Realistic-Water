@@ -223,6 +223,12 @@ public final class WaterRegion implements AutoCloseable {
 	private int @Nullable [] recentEmitWorld;
 	private int recentEmitExpiry;
 	int idleFrames;
+	/** Rebuild the surface mesh only every Nth frame (1 = every frame); set per frame by WaterWorld from camera distance. */
+	int meshInterval = 1;
+	int meshTick;
+	boolean meshBuilt;
+	/** Horizontal distance in blocks from the camera to this body's box, refreshed every frame by WaterWorld. */
+	double camDist;
 	boolean fillRequested;
 	int lastFluidCount;
 	private final int[] slotFrame = new int[Vk.FRAME_RING];
@@ -754,7 +760,7 @@ public final class WaterRegion implements AutoCloseable {
 			this.light.flush(0, count * 4L);
 			return;
 		}
-		int n = Math.min(count, LIGHT_BLOCKS_PER_FRAME);
+		int n = Math.min(count, Math.max(256, LIGHT_BLOCKS_PER_FRAME / Math.max(1, this.meshInterval)));
 		int start = this.lightCursor;
 		for (int k = 0; k < n; k++) {
 			int i = (start + k) % count;
@@ -1089,7 +1095,7 @@ public final class WaterRegion implements AutoCloseable {
 		p[6].dispatch(cb, cellGroups, 1, 1);
 		Vk.barrier(cb);
 
-		this.solver.solve(cb, ubo, this.cellFlags, this.divergence, this.pressure, Math.max(1, WaterSettings.cgIterations), box);
+		this.solver.solve(cb, ubo, this.cellFlags, this.divergence, this.pressure, WaterSettings.effectiveCgIterations(), box);
 
 		p[7].bind(cb, ubo, Desc.ssbo(this.vel), Desc.ssbo(this.cellFlags), Desc.ssbo(this.pressure), Desc.ssbo(this.valid0));
 		p[7].dispatch(cb, faceGroups, 1, 1);

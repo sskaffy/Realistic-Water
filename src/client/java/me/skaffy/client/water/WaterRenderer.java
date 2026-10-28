@@ -124,7 +124,11 @@ public final class WaterRenderer implements AutoCloseable {
 		List<Runnable> meshes = new java.util.ArrayList<>(bodies.size());
 		for (Body body : bodies) {
 			WaterRegion r = body.region();
+			if (r.meshBuilt && r.meshInterval > 1 && ++r.meshTick % r.meshInterval != 0) {
+				continue;
+			}
 			if (r.takeFieldStale()) {
+				r.meshBuilt = true;
 				boolean sort = WaterSettings.surfaceGather && WaterSettings.sortParticles;
 				meshes.add(() -> {
 					r.mesher.build(cb, body.ubo(), r.currentParticles(), r.counters, WaterRegion.C_FLUID + r.cur, r.args, r.staticSolid, r.cellFlags,

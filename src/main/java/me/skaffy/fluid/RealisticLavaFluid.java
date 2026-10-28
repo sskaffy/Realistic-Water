@@ -143,7 +143,7 @@ public abstract class RealisticLavaFluid extends FlowingFluid {
 	public BlockState createLegacyBlock(final FluidState fluidState) {
 		return ModContent.REALISTIC_LAVA_BLOCK.defaultBlockState()
 			.setValue(LiquidBlock.LEVEL, getLegacyLevel(fluidState))
-			.setValue(RealisticWaterBlock.INFINITE, fluidState.isSource());
+			.setValue(RealisticWaterBlock.INFINITE, fluidState.isSource() && ModSettings.bucketMakesSource);
 	}
 
 	@Override

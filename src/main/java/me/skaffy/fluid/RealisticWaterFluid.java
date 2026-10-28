@@ -83,7 +83,7 @@ public abstract class RealisticWaterFluid extends FlowingFluid {
 	public BlockState createLegacyBlock(final FluidState fluidState) {
 		return ModContent.REALISTIC_WATER_BLOCK.defaultBlockState()
 			.setValue(LiquidBlock.LEVEL, getLegacyLevel(fluidState))
-			.setValue(RealisticWaterBlock.INFINITE, fluidState.isSource());
+			.setValue(RealisticWaterBlock.INFINITE, fluidState.isSource() && me.skaffy.ModSettings.bucketMakesSource);
 	}
 
 	@Override

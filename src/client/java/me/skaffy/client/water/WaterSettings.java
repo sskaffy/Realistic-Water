@@ -22,6 +22,14 @@ public final class WaterSettings {
 	public static float maxDt = 1.0F / 40.0F;
 	public static int maxStepsPerFrame = 4;
 	public static int renderMaxStepsPerFrame = 64;
+
+	public static boolean adaptiveQuality = true;
+	public static float targetFrameMs = 20.0F;
+	public static float adaptiveMinQuality = 0.4F;
+	public static float simDistance = 96.0F;
+	public static float farMeshDistance = 40.0F;
+	public static int farMeshInterval = 3;
+
 	public static int cgIterations = 5;
 	public static int mgCoarseSweeps = 12;
 	public static int solverBottomCells = 8192;
@@ -219,9 +227,35 @@ public final class WaterSettings {
 	public static boolean renderSteadyPreview = true;
 	public static float renderCameraSmoothing = 0.12F;
 
+	/** Runtime scale (adaptiveMinQuality..1) driven by the frame-time governor in WaterWorld. Not a setting, never saved. */
+	static float quality = 1.0F;
+
 	private static final Map<String, String> DEFAULTS = snapshot();
 
 	private WaterSettings() {
+	}
+
+	static int effectiveMaxSteps() {
+		return Math.max(1, Math.round(maxStepsPerFrame * (adaptiveQuality ? quality : 1.0F)));
+	}
+
+	static int effectiveCgIterations() {
+		return Math.max(2, Math.min(cgIterations, Math.round(cgIterations * (adaptiveQuality ? quality : 1.0F))));
+	}
+
+	/** Slowly lowers quality while frames run over the target and restores it once there is headroom. */
+	static void adapt(float smoothedFrameMs) {
+		if (!adaptiveQuality || targetFrameMs <= 0.0F) {
+			quality = 1.0F;
+			return;
+		}
+		float floor = Math.clamp(adaptiveMinQuality, 0.1F, 1.0F);
+		if (smoothedFrameMs > targetFrameMs * 1.15F) {
+			quality = Math.max(floor, quality - 0.02F);
+		} else if (smoothedFrameMs < targetFrameMs * 0.85F) {
+			quality = Math.min(1.0F, quality + 0.005F);
+		}
+		quality = Math.max(floor, quality);
 	}
 
 	private static Map<String, String> snapshot() {
@@ -328,6 +362,9 @@ public final class WaterSettings {
 		}
 		if ("lavaIgniteFlammables".equals(name) && t == boolean.class) {
 			ModSettings.lavaIgniteFlammables = (boolean) f.get(null);
+		}
+		if ("bucketMakesSource".equals(name) && t == boolean.class) {
+			ModSettings.bucketMakesSource = (boolean) f.get(null);
 		}
 		if ("lavaWaterMixing".equals(name) && t == boolean.class) {
 			ModSettings.lavaWaterMixing = (boolean) f.get(null);
