@@ -4,12 +4,26 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import me.skaffy.ModContent;
+import me.skaffy.RealisticWater;
 import me.skaffy.net.BodyStatePayload;
+import me.skaffy.net.GridBlockEntityPayload;
+import me.skaffy.net.GridBlockEventPayload;
+import me.skaffy.net.GridLevelEventPayload;
+import me.skaffy.net.GridSoundPayload;
 import me.skaffy.physics.PhysicsWorld;
 import me.skaffy.physics.RigidBody;
+import me.skaffy.physics.SweptCollider;
+import me.skaffy.portal.PortalTransit;
+import net.minecraft.world.level.block.Portal;
+import net.minecraft.world.level.portal.TeleportTransition;
+import net.fabricmc.fabric.api.networking.v1.PlayerLookup;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.entity.player.Input;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.Holder;
+import net.minecraft.sounds.SoundEvent;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
@@ -19,7 +33,6 @@ import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
-import me.skaffy.block.WaveMakerBlock;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.damagesource.DamageSource;
@@ -29,10 +42,13 @@ import net.minecraft.world.entity.InterpolationHandler;
 import net.minecraft.world.entity.LinearInterpolationHandler;
 import net.minecraft.world.entity.MoverType;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.SoundType;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.storage.ValueInput;
@@ -55,6 +71,7 @@ public class RealisticBlockEntity extends Entity {
 	private static final EntityDataAccessor<Integer> DATA_OWNER = SynchedEntityData.defineId(RealisticBlockEntity.class, EntityDataSerializers.INT);
 	private static final EntityDataAccessor<Vector3fc> DATA_VEL = SynchedEntityData.defineId(RealisticBlockEntity.class, EntityDataSerializers.VECTOR3);
 	private static final EntityDataAccessor<Vector3fc> DATA_SPIN = SynchedEntityData.defineId(RealisticBlockEntity.class, EntityDataSerializers.VECTOR3);
+	private static final EntityDataAccessor<BlockPos> DATA_ORIGIN = SynchedEntityData.defineId(RealisticBlockEntity.class, EntityDataSerializers.BLOCK_POS);
 	public static final int FREE = -1;
 	public static final int LOCKED = -2;
 	private static final int LOCK_TICKS = 10;
@@ -64,7 +81,8 @@ public class RealisticBlockEntity extends Entity {
 	public final RigidBody body = new RigidBody();
 	private boolean bodyNeedsPosition;
 	int burningTicks;
-	private @Nullable GridRedstone redstone;
+	private @Nullable GridMirror mirror;
+	private boolean portalArrived;
 	private final Quaternionf rotO = new Quaternionf();
 	private final Quaternionf rotNow = new Quaternionf();
 	private final Quaternionf rotTarget = new Quaternionf();
@@ -112,6 +130,32 @@ public class RealisticBlockEntity extends Entity {
 		builder.define(DATA_OWNER, FREE);
 		builder.define(DATA_VEL, new Vector3f());
 		builder.define(DATA_SPIN, new Vector3f());
+		builder.define(DATA_ORIGIN, BlockPos.ZERO);
+	}
+
+	public BlockPos gridOrigin() {
+		return this.entityData.get(DATA_ORIGIN);
+	}
+
+	void setGridOrigin(BlockPos origin) {
+		if (!origin.equals(this.entityData.get(DATA_ORIGIN))) {
+			this.entityData.set(DATA_ORIGIN, origin);
+		}
+	}
+
+	public RigidBody.@Nullable Cell cellAtGrid(BlockPos gridPos) {
+		BlockPos origin = this.gridOrigin();
+		if (origin.equals(BlockPos.ZERO)) {
+			return null;
+		}
+		return this.body.cellAt(gridPos.getX() - origin.getX(), gridPos.getY() - origin.getY(), gridPos.getZ() - origin.getZ());
+	}
+
+	public Vec3 gridToWorld(BlockPos gridPos, float partialTicks) {
+		BlockPos origin = this.gridOrigin();
+		Vector3d out = this.body.toWorld(gridPos.getX() - origin.getX() + 0.5, gridPos.getY() - origin.getY() + 0.5,
+			gridPos.getZ() - origin.getZ() + 0.5, new Vector3d());
+		return new Vec3(out.x, out.y, out.z);
 	}
 
 	public int owner() {
@@ -165,7 +209,10 @@ public class RealisticBlockEntity extends Entity {
 		if (!this.level().isClientSide()) {
 			return;
 		}
-		if (DATA_CELLS.equals(accessor)) {
+		if (DATA_ORIGIN.equals(accessor)) {
+			this.clientGridDirty = true;
+		} else if (DATA_CELLS.equals(accessor)) {
+			this.clientGridDirty = true;
 			this.cellsChanged();
 		} else if (DATA_ROT.equals(accessor)) {
 			Quaternionfc q = this.entityData.get(DATA_ROT);
@@ -204,12 +251,14 @@ public class RealisticBlockEntity extends Entity {
 			}
 			return;
 		}
-		this.stopSimulating();
 		boolean had = !this.body.cells.isEmpty() && this.body.mass > 0.0;
 		Vector3d oldCom = new Vector3d(this.body.com);
 		this.body.setCells(cells);
+		this.clientBlockEntities.keySet().removeIf(key -> !this.body.hasCell(BlockPos.getX(key), BlockPos.getY(key), BlockPos.getZ(key)));
+		this.clientBlockEntityTags.keySet().removeIf(key -> !this.body.hasCell(BlockPos.getX(key), BlockPos.getY(key), BlockPos.getZ(key)));
 		this.body.rebuild();
 		if (!had) {
+			this.stopSimulating();
 			this.setPos(this.position());
 			return;
 		}
@@ -218,6 +267,12 @@ public class RealisticBlockEntity extends Entity {
 		this.yo += shift.y;
 		this.zo += shift.z;
 		this.setPos(this.getX() + shift.x, this.getY() + shift.y, this.getZ() + shift.z);
+		if (this.simulated) {
+			this.body.pos.add(shift);
+			this.renderFrom.add(shift);
+			this.renderTo.add(shift);
+			this.body.updateDerived();
+		}
 	}
 
 	protected RigidBody.Cell makeCell(int x, int y, int z, BlockState state) {
@@ -351,19 +406,58 @@ public class RealisticBlockEntity extends Entity {
 			this.burningTicks--;
 		}
 		this.checkOwner();
-		if (this.redstone == null) {
-			this.redstone = new GridRedstone(this);
+		GridMirror grid = this.grid();
+		if (grid != null) {
+			grid.push();
 		}
-		this.redstone.tick();
 		if (this.isRemoved() || this.body.cells.isEmpty()) {
 			return;
+		}
+		if (grid != null) {
+			grid.randomTick(((ServerLevel) this.level()).getGameRules().get(GameRules.RANDOM_TICK_SPEED));
 		}
 		this.setSharedFlagOnFire(this.burningTicks > 0);
 		if (this.getY() < this.level().getMinY() - 64) {
 			this.discard();
 			return;
 		}
+		if (this.passPortal((ServerLevel) this.level())) {
+			return;
+		}
 		RealisticPhysics.track(this);
+	}
+
+	private boolean passPortal(ServerLevel level) {
+		BlockPos touched = PortalTransit.touchedPortal(level, this);
+		if (touched == null) {
+			this.portalArrived = false;
+			return false;
+		}
+		if (this.portalArrived || this.isPassenger() || !(level.getBlockState(touched).getBlock() instanceof Portal portal)) {
+			return false;
+		}
+		TeleportTransition exit = portal.getPortalDestination(level, this, touched);
+		if (exit == null || !level.isAllowedToEnterPortal(exit.newLevel())
+			|| exit.newLevel().dimension() != level.dimension() && !this.canTeleport(level, exit.newLevel())) {
+			return false;
+		}
+		Vec3 at = exit.position().add(0.0, this.getY() - this.body.minY, 0.0);
+		this.lock();
+		Entity moved = this.teleport(new TeleportTransition(exit.newLevel(), at, exit.deltaMovement(), exit.yRot(), exit.xRot(), exit.relatives(),
+			exit.postTeleportTransition()));
+		if (moved instanceof RealisticBlockEntity arrived) {
+			arrived.portalArrived = true;
+		}
+		return moved != null && moved != this;
+	}
+
+	@Override
+	public void onRemoval(final RemovalReason reason) {
+		super.onRemoval(reason);
+		if (reason == RemovalReason.CHANGED_DIMENSION && this.mirror != null) {
+			this.mirror.releaseMoved();
+			this.mirror = null;
+		}
 	}
 
 	void afterPhysics() {
@@ -417,47 +511,191 @@ public class RealisticBlockEntity extends Entity {
 		this.syncShape();
 	}
 
-	void extendPiston(long base, BlockState extended, long front, BlockState head, List<Long> line, Direction facing, boolean kick) {
-		this.lock();
-		for (int i = line.size() - 1; i >= 0; i--) {
-			long k = line.get(i);
-			RigidBody.Cell c = this.body.removeCell(BlockPos.getX(k), BlockPos.getY(k), BlockPos.getZ(k));
-			if (c != null) {
-				this.body.addCell(c.moved(c.x + facing.getStepX(), c.y + facing.getStepY(), c.z + facing.getStepZ()));
-			}
+	protected boolean usesGrid() {
+		return true;
+	}
+
+	public @Nullable GridMirror grid() {
+		if (!this.usesGrid() || !(this.level() instanceof ServerLevel server)) {
+			return null;
 		}
-		this.body.replaceCell(BlockMaterials.cell(BlockPos.getX(base), BlockPos.getY(base), BlockPos.getZ(base), extended));
-		this.body.addCell(BlockMaterials.cell(BlockPos.getX(front), BlockPos.getY(front), BlockPos.getZ(front), head));
-		this.body.rebuild();
-		this.syncShape();
-		this.afterPhysics();
-		Vector3d tip = this.body.toWorld(BlockPos.getX(front) + 0.5 + facing.getStepX() * 0.3, BlockPos.getY(front) + 0.5 + facing.getStepY() * 0.3,
-			BlockPos.getZ(front) + 0.5 + facing.getStepZ() * 0.3, new Vector3d());
-		this.level().playSound(null, tip.x, tip.y, tip.z, SoundEvents.PISTON_EXTEND, SoundSource.BLOCKS, 0.5F, this.random.nextFloat() * 0.25F + 0.6F);
-		if (!kick) {
-			return;
+		if (this.mirror == null) {
+			this.mirror = new GridMirror(this, server);
 		}
-		Vector3d dir = this.body.dirToWorld(facing.getStepX(), facing.getStepY(), facing.getStepZ(), new Vector3d());
-		BlockPos at = BlockPos.containing(tip.x, tip.y, tip.z);
-		RealisticBlockEntity other = null;
-		for (RealisticBlockEntity e : this.level().getEntitiesOfClass(RealisticBlockEntity.class, new AABB(at).inflate(0.5))) {
-			if (e != this && e.body.containsWorld(tip.x, tip.y, tip.z)) {
-				other = e;
-				break;
-			}
-		}
-		boolean wall = !this.level().getBlockState(at).getCollisionShape(this.level(), at).isEmpty();
-		if (!wall && other == null) {
-			return;
-		}
-		double impulse = Math.min(PISTON_IMPULSE, this.body.mass * 8.0);
-		RealisticPhysics.push(this, tip.x, tip.y, tip.z, -dir.x, -dir.y, -dir.z, Double.POSITIVE_INFINITY, 0.0, impulse);
-		if (other != null) {
-			RealisticPhysics.push(other, tip.x, tip.y, tip.z, dir.x, dir.y, dir.z, Double.POSITIVE_INFINITY, 0.0, Math.min(PISTON_IMPULSE, other.body.mass * 8.0));
+		return this.mirror;
+	}
+
+	void markGridStale() {
+		if (this.mirror != null) {
+			this.mirror.invalidate();
 		}
 	}
 
-	private static final double PISTON_IMPULSE = 3000.0;
+	public void gridChanged(BlockPos gridPos) {
+		if (this.mirror != null) {
+			this.mirror.noteChanged(gridPos);
+		}
+	}
+
+	public void gridBlockEntityChanged(BlockPos gridPos) {
+		if (this.mirror != null) {
+			this.mirror.noteBlockEntityChanged(gridPos);
+		}
+	}
+
+	public void sendGridBlockEvent(BlockPos gridPos, int paramA, int paramB) {
+		GridSpace.Slot slot = this.mirror == null ? null : this.mirror.slot();
+		if (slot == null) {
+			return;
+		}
+		GridBlockEventPayload payload = new GridBlockEventPayload(this.getId(), slot.gridX(gridPos.getX()), slot.gridY(gridPos.getY()),
+			slot.gridZ(gridPos.getZ()), paramA, paramB);
+		for (ServerPlayer player : PlayerLookup.tracking(this)) {
+			ServerPlayNetworking.send(player, payload);
+		}
+	}
+
+	public void sendGridSound(float x, float y, float z, Holder<SoundEvent> sound, SoundSource source, float volume, float pitch) {
+		GridSoundPayload payload = new GridSoundPayload(this.getId(), x, y, z, sound, source.ordinal(), volume, pitch);
+		for (ServerPlayer player : PlayerLookup.tracking(this)) {
+			ServerPlayNetworking.send(player, payload);
+		}
+	}
+
+	public void sendGridLevelEvent(float x, float y, float z, int event, int data) {
+		GridLevelEventPayload payload = new GridLevelEventPayload(this.getId(), x, y, z, event, data);
+		for (ServerPlayer player : PlayerLookup.tracking(this)) {
+			ServerPlayNetworking.send(player, payload);
+		}
+	}
+
+	public Vec3 cellToWorld(double x, double y, double z) {
+		Vector3d out = this.body.toWorld(x, y, z, new Vector3d());
+		return new Vec3(out.x, out.y, out.z);
+	}
+
+	public void applyClientBlockEvent(int x, int y, int z, int paramA, int paramB) {
+		BlockPos origin = this.gridOrigin();
+		if (origin.equals(BlockPos.ZERO)) {
+			return;
+		}
+		BlockPos at = new BlockPos(origin.getX() + x, origin.getY() + y, origin.getZ() + z);
+		BlockState state = this.level().getBlockState(at);
+		if (!state.isAir()) {
+			state.triggerEvent(this.level(), at, paramA, paramB);
+		}
+	}
+
+	@Override
+	public void startSeenByPlayer(final ServerPlayer player) {
+		super.startSeenByPlayer(player);
+		if (this.mirror == null) {
+			return;
+		}
+		for (GridBlockEntityPayload payload : this.mirror.fullBlockEntityState()) {
+			ServerPlayNetworking.send(player, payload);
+		}
+	}
+
+	public final Long2ObjectMap<BlockEntity> clientBlockEntities = new Long2ObjectOpenHashMap<>();
+	private java.util.List<BlockPos> gridBlocks = java.util.List.of();
+	public boolean clientGridDirty = true;
+
+	public void rememberGridBlocks(java.util.List<BlockPos> positions) {
+		this.gridBlocks = positions;
+	}
+
+	public java.util.List<BlockPos> gridBlocks() {
+		return this.gridBlocks;
+	}
+	private final Long2ObjectMap<CompoundTag> clientBlockEntityTags = new Long2ObjectOpenHashMap<>();
+
+	public void applyClientBlockEntity(int x, int y, int z, @Nullable CompoundTag tag) {
+		long key = BlockPos.asLong(x, y, z);
+		if (tag == null) {
+			this.clientBlockEntityTags.remove(key);
+			return;
+		}
+		this.clientBlockEntityTags.put(key, tag);
+		this.applyTag(x, y, z, tag);
+	}
+
+	private void applyTag(int x, int y, int z, CompoundTag tag) {
+		BlockEntity be = this.clientGridBlockEntity(x, y, z);
+		if (be == null) {
+			return;
+		}
+		BlockEntity loaded = BlockEntity.loadStatic(be.getBlockPos(), be.getBlockState(), tag, this.registryAccess());
+		if (loaded != null) {
+			this.clientBlockEntities.put(BlockPos.asLong(x, y, z), loaded);
+			loaded.setLevel(this.level());
+		}
+	}
+
+	public void reapplyClientBlockEntities() {
+		for (Long2ObjectMap.Entry<CompoundTag> entry : this.clientBlockEntityTags.long2ObjectEntrySet()) {
+			long key = entry.getLongKey();
+			this.applyTag(BlockPos.getX(key), BlockPos.getY(key), BlockPos.getZ(key), entry.getValue());
+		}
+	}
+
+	public @Nullable BlockEntity clientGridBlockEntity(int x, int y, int z) {
+		BlockEntity own = this.clientBlockEntities.get(BlockPos.asLong(x, y, z));
+		if (own != null) {
+			return own;
+		}
+		BlockPos origin = this.gridOrigin();
+		if (origin.equals(BlockPos.ZERO)) {
+			return null;
+		}
+		return this.level().getBlockEntity(origin.offset(x, y, z));
+	}
+
+	void pullFromGrid() {
+		if (this.mirror != null) {
+			this.mirror.pull();
+		}
+	}
+
+	public void finishPlacement(Player player, ItemStack stack, BlockState state) {
+		GridMirror grid = this.grid();
+		if (grid == null) {
+			return;
+		}
+		grid.push();
+		GridSpace.Slot slot = grid.slot();
+		if (slot == null) {
+			return;
+		}
+		BlockPos at = slot.world(0, 0, 0);
+		ServerLevel server = (ServerLevel) this.level();
+		GridInteraction.asGridPlayer(player, this, slot, () -> {
+			BlockItem.updateCustomBlockEntityTag(server, player, at, stack);
+			state.getBlock().setPlacedBy(server, at, state, player, stack);
+			return null;
+		});
+		grid.pull();
+	}
+
+	void adoptCell(int x, int y, int z, BlockState state) {
+		if (state.isAir() || this.body.hasCell(x, y, z)) {
+			return;
+		}
+		this.body.addCell(this.makeCell(x, y, z, state));
+		this.body.rebuild();
+		this.setPos(this.body.pos.x, this.body.pos.y, this.body.pos.z);
+		this.syncShape();
+		this.afterPhysics();
+	}
+
+	@Override
+	public void remove(final RemovalReason reason) {
+		super.remove(reason);
+		if (this.mirror != null) {
+			this.mirror.release();
+			this.mirror = null;
+		}
+	}
 
 	private void lock() {
 		this.setOwner(LOCKED);
@@ -526,6 +764,35 @@ public class RealisticBlockEntity extends Entity {
 		return new AABB(this.body.minX, this.body.minY, this.body.minZ, this.body.maxX, this.body.maxY, this.body.maxZ);
 	}
 
+	public List<SweptCollider.Oriented> orientedBoxes(AABB area) {
+		List<SweptCollider.Oriented> out = new ArrayList<>();
+		RigidBody b = this.body;
+		if (b.cells.isEmpty()) {
+			return out;
+		}
+		Vector3d ax = b.dirToWorld(1.0, 0.0, 0.0, new Vector3d());
+		Vector3d ay = b.dirToWorld(0.0, 1.0, 0.0, new Vector3d());
+		Vector3d az = b.dirToWorld(0.0, 0.0, 1.0, new Vector3d());
+		double[] axes = {ax.x, ax.y, ax.z, ay.x, ay.y, ay.z, az.x, az.y, az.z};
+		Vector3d centre = new Vector3d();
+		for (RigidBody.Cell cell : b.cells) {
+			for (double[] box : this.playerBoxes(cell)) {
+				double hx = (box[3] - box[0]) * 0.5;
+				double hy = (box[4] - box[1]) * 0.5;
+				double hz = (box[5] - box[2]) * 0.5;
+				if (hx <= 0.0 || hy <= 0.0 || hz <= 0.0) {
+					continue;
+				}
+				b.toWorld(cell.x + box[0] + hx, cell.y + box[1] + hy, cell.z + box[2] + hz, centre);
+				SweptCollider.Oriented oriented = new SweptCollider.Oriented(centre.x, centre.y, centre.z, axes, hx, hy, hz);
+				if (oriented.intersects(area.minX, area.minY, area.minZ, area.maxX, area.maxY, area.maxZ)) {
+					out.add(oriented);
+				}
+			}
+		}
+		return out;
+	}
+
 	public List<VoxelShape> collisionShapes(AABB area) {
 		List<VoxelShape> out = new ArrayList<>();
 		RigidBody b = this.body;
@@ -561,24 +828,6 @@ public class RealisticBlockEntity extends Entity {
 		return out;
 	}
 
-	public static boolean wallAhead(Entity mover, Vec3 movement) {
-		if (mover instanceof RealisticBlockEntity || movement.horizontalDistanceSqr() < 1.0E-8) {
-			return false;
-		}
-		AABB box = mover.getBoundingBox();
-		AABB moved = box.move(movement.x, 0.0, movement.z).deflate(1.0E-4);
-		for (RealisticBlockEntity e : mover.level().getEntitiesOfClass(RealisticBlockEntity.class, moved.inflate(0.1))) {
-			for (VoxelShape shape : e.collisionShapes(moved)) {
-				AABB b = shape.bounds();
-				if (b.maxY > box.minY + 0.01 && b.intersects(moved)) {
-					return true;
-				}
-			}
-		}
-		return false;
-	}
-
-
 	@Override
 	public boolean hurtServer(final ServerLevel level, final DamageSource source, final float damage) {
 		return false;
@@ -591,7 +840,7 @@ public class RealisticBlockEntity extends Entity {
 
 	@Override
 	public boolean canBeCollidedWith(final @Nullable Entity other) {
-		return !(other instanceof RealisticBlockEntity);
+		return false;
 	}
 
 	@Override
@@ -642,59 +891,49 @@ public class RealisticBlockEntity extends Entity {
 
 	@Override
 	public InteractionResult interact(final Player player, final InteractionHand hand, final Vec3 location) {
-		ItemStack stack = player.getItemInHand(hand);
-		Block block = RealisticBlockItem.blockOf(stack);
 		Vec3 clicked = this.position().add(location);
-		if (block == null) {
-			return this.useCell(player, clicked);
-		}
 		if (this.level().isClientSide()) {
-			return InteractionResult.SUCCESS;
+			return this.pick(player, clicked) == null ? InteractionResult.PASS : InteractionResult.SUCCESS;
 		}
-		int[] spot = this.faceAt(clicked);
-		if (spot == null || this.body.hasCell(spot[0], spot[1], spot[2])) {
-			return InteractionResult.FAIL;
-		}
-		Vector3d hit = this.body.toGrid(clicked.x, clicked.y, clicked.z, new Vector3d()).sub(spot[0], spot[1], spot[2]);
-		Vec3 view = player.getViewVector(1.0F);
-		Vector3d look = this.body.dirToGrid(view.x, view.y, view.z, new Vector3d());
-		BlockState state = GridPlacement.stateFor(block, Direction.from3DDataValue(spot[3]), hit, look);
-		if (state == null) {
-			return InteractionResult.FAIL;
-		}
-		Vector3d center = this.body.toWorld(spot[0] + 0.5, spot[1] + 0.5, spot[2] + 0.5, new Vector3d());
-		BlockPos at = BlockPos.containing(center.x, center.y, center.z);
-		if (!this.level().getBlockState(at).getCollisionShape(this.level(), at).isEmpty()) {
-			return InteractionResult.FAIL;
-		}
-		this.lock();
-		this.body.addCell(BlockMaterials.cell(spot[0], spot[1], spot[2], state));
-		this.body.rebuild();
-		this.syncShape();
-		this.afterPhysics();
-		SoundType sound = state.getSoundType();
-		this.level().playSound(null, center.x, center.y, center.z, sound.getPlaceSound(), SoundSource.BLOCKS, (sound.getVolume() + 1.0F) / 2.0F,
-			sound.getPitch() * 0.8F);
-		if (!player.hasInfiniteMaterials()) {
-			stack.shrink(1);
-		}
-		return InteractionResult.SUCCESS_SERVER;
+		return InteractionResult.PASS;
 	}
 
-	private InteractionResult useCell(Player player, Vec3 clicked) {
-		RigidBody.Cell cell = this.cellAt(clicked);
-		if (cell == null || !(cell.payload instanceof BlockState state) || !(state.getBlock() instanceof WaveMakerBlock)) {
-			return InteractionResult.PASS;
+	public void useFromClient(ServerPlayer player, InteractionHand hand, int x, int y, int z, int face, double localX, double localY, double localZ) {
+		if (this.isRemoved() || !player.mayBuild() || this.body.cellAt(x, y, z) == null || face < 0 || face > 5) {
+			RealisticWater.LOGGER.warn("[use] refused: removed={} mayBuild={} cell={} face={}",
+				this.isRemoved(), player.mayBuild(), this.body.cellAt(x, y, z) != null, face);
+			return;
 		}
-		if (this.level().isClientSide()) {
-			return InteractionResult.SUCCESS;
+		Vector3d centre = this.body.toWorld(x + 0.5, y + 0.5, z + 0.5, new Vector3d());
+		double reach = player.blockInteractionRange() + 1.5;
+		if (player.getEyePosition().distanceToSqr(centre.x, centre.y, centre.z) > reach * reach) {
+			return;
 		}
-		BlockState next = state.cycle(WaveMakerBlock.SPEED);
-		Long2ObjectOpenHashMap<BlockState> change = new Long2ObjectOpenHashMap<>();
-		change.put(BlockPos.asLong(cell.x, cell.y, cell.z), next);
-		this.setCellStates(change);
-		WaveMakerBlock.announceSpeed(this.level(), player, clicked.x, clicked.y, clicked.z, next);
-		return InteractionResult.SUCCESS_SERVER;
+		GridMirror grid = this.grid();
+		if (grid == null) {
+			return;
+		}
+		grid.push();
+		GridSpace.Slot slot = grid.slot();
+		if (slot == null) {
+			return;
+		}
+		GridPick pick = new GridPick(x, y, z, Direction.from3DDataValue(face), new Vector3d(localX, localY, localZ));
+		ItemStack stack = player.getItemInHand(hand);
+		Block block = RealisticBlockItem.blockOf(stack);
+		ServerLevel server = (ServerLevel) this.level();
+		boolean blockFirst = !player.isSecondaryUseActive() || stack.isEmpty();
+		InteractionResult result = InteractionResult.PASS;
+		if (blockFirst) {
+			result = GridInteraction.use(server, player, hand, this, slot, pick);
+		}
+		if (!result.consumesAction() && block != null) {
+			result = GridInteraction.place(server, player, hand, block, this, slot, pick);
+			if (result.consumesAction() && !player.hasInfiniteMaterials()) {
+				stack.shrink(1);
+			}
+		}
+		grid.pull();
 	}
 
 	public RigidBody.@Nullable Cell cellAt(Vec3 world) {
@@ -722,12 +961,29 @@ public class RealisticBlockEntity extends Entity {
 	}
 
 	private static final double[][] CUBE = {{0, 0, 0, 1, 1, 1}};
-	private static final Direction[] BOX_FACES = {Direction.WEST, Direction.EAST, Direction.DOWN, Direction.UP, Direction.NORTH, Direction.SOUTH};
+	public static final Direction[] RAY_FACES = {Direction.WEST, Direction.EAST, Direction.DOWN, Direction.UP, Direction.NORTH, Direction.SOUTH};
 
-	public int @Nullable [] faceAt(Vec3 world) {
+	public record GridPick(int x, int y, int z, Direction face, Vector3d local) {
+	}
+
+	public @Nullable GridPick pick(Player player, Vec3 reported) {
+		Vec3 eye = player.getEyePosition();
+		Vec3 look = player.getViewVector(1.0F);
+		RigidBody.Hit hit = this.body.rayCast(eye.x, eye.y, eye.z, look.x, look.y, look.z, player.blockInteractionRange() + 2.0);
+		if (hit != null) {
+			Vector3d local = this.body.toGrid(eye.x + look.x * hit.distance(), eye.y + look.y * hit.distance(), eye.z + look.z * hit.distance(),
+				new Vector3d());
+			return new GridPick(hit.x(), hit.y(), hit.z(), RAY_FACES[hit.face()], local);
+		}
+		return this.pick(reported);
+	}
+
+	public @Nullable GridPick pick(Vec3 world) {
 		Vector3d g = this.body.toGrid(world.x, world.y, world.z, new Vector3d());
-		int[] best = null;
-		double bestDist = 0.03;
+		GridPick outward = null;
+		double outwardDist = 0.08;
+		GridPick any = null;
+		double anyDist = 0.08;
 		int bx = (int) Math.floor(g.x);
 		int by = (int) Math.floor(g.y);
 		int bz = (int) Math.floor(g.z);
@@ -741,23 +997,27 @@ public class RealisticBlockEntity extends Entity {
 					for (double[] box : cell.boxes == null ? CUBE : cell.boxes) {
 						double[] d = {g.x - cell.x - box[0], cell.x + box[3] - g.x, g.y - cell.y - box[1], cell.y + box[4] - g.y, g.z - cell.z - box[2],
 							cell.z + box[5] - g.z};
-						if (d[0] < -0.03 || d[1] < -0.03 || d[2] < -0.03 || d[3] < -0.03 || d[4] < -0.03 || d[5] < -0.03) {
+						if (d[0] < -0.08 || d[1] < -0.08 || d[2] < -0.08 || d[3] < -0.08 || d[4] < -0.08 || d[5] < -0.08) {
 							continue;
 						}
 						for (int f = 0; f < 6; f++) {
 							double dist = Math.abs(d[f]);
-							Direction face = BOX_FACES[f];
-							int[] n = {cell.x + face.getStepX(), cell.y + face.getStepY(), cell.z + face.getStepZ(), face.get3DDataValue()};
-							if (dist < bestDist && !this.body.hasCell(n[0], n[1], n[2])) {
-								bestDist = dist;
-								best = n;
+							Direction face = RAY_FACES[f];
+							GridPick made = new GridPick(cell.x, cell.y, cell.z, face, new Vector3d(g));
+							if (dist < anyDist) {
+								anyDist = dist;
+								any = made;
+							}
+							if (dist < outwardDist && !this.body.hasCell(cell.x + face.getStepX(), cell.y + face.getStepY(), cell.z + face.getStepZ())) {
+								outwardDist = dist;
+								outward = made;
 							}
 						}
 					}
 				}
 			}
 		}
-		return best;
+		return outward != null ? outward : any;
 	}
 
 	public void removeCell(int x, int y, int z) {
@@ -773,6 +1033,7 @@ public class RealisticBlockEntity extends Entity {
 		if (parts.size() > 1 && this.level() instanceof ServerLevel server) {
 			parts.sort(Comparator.comparingInt(List::size));
 			for (List<RigidBody.Cell> part : parts.subList(0, parts.size() - 1)) {
+				Long2ObjectOpenHashMap<CompoundTag> carried = this.mirror == null ? new Long2ObjectOpenHashMap<>() : this.mirror.takeBlockEntityTags(part);
 				for (RigidBody.Cell c : part) {
 					this.body.removeCell(c.x, c.y, c.z);
 				}
@@ -780,7 +1041,11 @@ public class RealisticBlockEntity extends Entity {
 				probe.setCells(part);
 				probe.rebuild();
 				Vector3d center = this.body.toWorld(probe.com.x, probe.com.y, probe.com.z, new Vector3d());
-				spawn(server, part, center, this.body);
+				RealisticBlockEntity piece = spawn(server, part, center, this.body);
+				GridMirror pieceGrid = piece.grid();
+				if (pieceGrid != null && !carried.isEmpty()) {
+					pieceGrid.loadBlockEntities(carried);
+				}
 			}
 		}
 		this.body.rebuild();
@@ -799,6 +1064,9 @@ public class RealisticBlockEntity extends Entity {
 			o.putInt("z", c.z);
 			o.store("state", BlockState.CODEC, (BlockState) c.payload);
 			o.putDouble("burn", c.burn);
+		}
+		if (this.mirror != null) {
+			this.mirror.saveBlockEntities(output.childrenList("blockEntities"));
 		}
 		output.putDouble("qx", this.body.rot.x);
 		output.putDouble("qy", this.body.rot.y);
@@ -821,6 +1089,15 @@ public class RealisticBlockEntity extends Entity {
 			cells.add(c);
 		}));
 		this.body.setCells(cells);
+		Long2ObjectOpenHashMap<CompoundTag> blockEntities = new Long2ObjectOpenHashMap<>();
+		input.childrenListOrEmpty("blockEntities").stream().forEach(o -> o.read("data", CompoundTag.CODEC).ifPresent(
+			tag -> blockEntities.put(BlockPos.asLong(o.getIntOr("x", 0), o.getIntOr("y", 0), o.getIntOr("z", 0)), tag)));
+		if (!blockEntities.isEmpty()) {
+			GridMirror grid = this.grid();
+			if (grid != null) {
+				grid.loadBlockEntities(blockEntities);
+			}
+		}
 		this.body.rot.set(input.getDoubleOr("qx", 0.0), input.getDoubleOr("qy", 0.0), input.getDoubleOr("qz", 0.0), input.getDoubleOr("qw", 1.0));
 		this.body.vel.set(input.getDoubleOr("vx", 0.0), input.getDoubleOr("vy", 0.0), input.getDoubleOr("vz", 0.0));
 		this.body.ang.set(input.getDoubleOr("wx", 0.0), input.getDoubleOr("wy", 0.0), input.getDoubleOr("wz", 0.0));

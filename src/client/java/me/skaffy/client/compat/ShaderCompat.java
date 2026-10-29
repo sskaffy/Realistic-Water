@@ -2,6 +2,9 @@ package me.skaffy.client.compat;
 
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.renderpearl.api.textures.GpuTextureView;
+import com.mojang.renderpearl.backend.vulkan.VulkanGpuTextureView;
+import org.joml.Matrix4f;
+import org.joml.Matrix4fc;
 import com.mojang.renderpearl.frontend.FrontendCommandEncoder;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
@@ -14,7 +17,9 @@ import me.skaffy.client.water.WaterSettings;
 import me.skaffy.client.water.WaterWorld;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.phys.Vec3;
 import org.jspecify.annotations.Nullable;
 
 public final class ShaderCompat {
@@ -27,6 +32,23 @@ public final class ShaderCompat {
 	private static final String VITRAIL_LEVEL_PASS = "dev.vitrail.render.LevelPass";
 	private static final String VITRAIL_GEOMETRY_HOLD = "dev.vitrail.render.GeometryHold";
 	private static final String SULKAN_SCENE_PASS = "com.sulkan.shaders.graph.SceneRenderPass";
+	private static final String VITRAIL_SHADOW_GEOMETRY = "dev.vitrail.render.ShadowGeometry";
+	private static @Nullable Field shadowStorage;
+	private static @Nullable Field shadowGathered;
+	private static boolean shadowLooked;
+	private static @Nullable Field activeChain;
+	private static Field chainProgram;
+	private static Field chainValues;
+	private static Field chainTargets;
+	private static Method programPackName;
+	private static Field valuesState;
+	private static Field frameView;
+	private static Field mapModelView;
+	private static Field mapProjection;
+	private static Field targetsShadow;
+	private static Method shadowDepth;
+	private static Method shadowResolution;
+	private static boolean packShadowLooked;
 
 	private static @Nullable MethodHandle drawingPack;
 	private static @Nullable Field featuresColour;
@@ -61,9 +83,28 @@ public final class ShaderCompat {
 		WaterWorld.get().beginLevel();
 	}
 
+	public static boolean wantsBeforeTranslucent() {
+		return !drawn && !SULKAN && !vitrailPackRunning();
+	}
+
+	public static void beforeTranslucent() {
+		if (wantsBeforeTranslucent()) {
+			draw(FrameTarget.main());
+		}
+	}
+
 	public static void inLevel() {
 		if (!vitrailPackRunning()) {
-			draw(FrameTarget.main());
+			if (!drawn) {
+				draw(FrameTarget.main());
+			}
+			rain(FrameTarget.main());
+		}
+	}
+
+	private static void rain(@Nullable FrameTarget target) {
+		if (target != null && WaterSettings.realisticRain) {
+			outsidePasses(() -> WaterWorld.get().renderRain(target));
 		}
 	}
 
@@ -89,6 +130,9 @@ public final class ShaderCompat {
 	public static void afterLevel() {
 		if (!drawn) {
 			draw(FrameTarget.main());
+		}
+		if (vitrailPackRunning()) {
+			rain(FrameTarget.main());
 		}
 		if (WaterWorld.get().hasLate()) {
 			FrameTarget main = FrameTarget.main();
@@ -210,6 +254,144 @@ public final class ShaderCompat {
 			}
 		}
 		return sulkanOutside;
+	}
+
+	public static void vitrailShadowGathered() {
+		if (!WaterWorld.get().hasShadowCasters()) {
+			return;
+		}
+		lookUpShadowGeometry();
+		if (shadowGathered == null) {
+			return;
+		}
+		try {
+			if (shadowGathered.getInt(null) == 0) {
+				shadowGathered.setInt(null, 1);
+			}
+		} catch (IllegalAccessException | RuntimeException e) {
+			shadowGathered = null;
+			RealisticWater.LOGGER.warn("Couldn't keep Vitrail's shadow walk open for realistic shadow casters", e);
+		}
+	}
+
+	public static void vitrailShadowSubmit(Vec3 camera) {
+		lookUpShadowGeometry();
+		if (shadowStorage == null) {
+			return;
+		}
+		try {
+			if (shadowStorage.get(null) instanceof SubmitNodeCollector collector) {
+				WaterWorld.get().submitShadowCasters(collector, camera);
+			}
+		} catch (IllegalAccessException | RuntimeException e) {
+			shadowStorage = null;
+			RealisticWater.LOGGER.warn("Couldn't add realistic shadow casters to Vitrail's shadow pass", e);
+		}
+	}
+
+	private static void lookUpShadowGeometry() {
+		if (shadowLooked) {
+			return;
+		}
+		shadowLooked = true;
+		try {
+			Class<?> geometry = Class.forName(VITRAIL_SHADOW_GEOMETRY);
+			shadowStorage = geometry.getDeclaredField("storage");
+			shadowStorage.setAccessible(true);
+			shadowGathered = geometry.getDeclaredField("gathered");
+			shadowGathered.setAccessible(true);
+		} catch (ReflectiveOperationException | LinkageError | RuntimeException e) {
+			shadowStorage = null;
+			shadowGathered = null;
+			RealisticWater.LOGGER.info("Vitrail's shadow geometry isn't reachable; sand, leaves and slime won't cast pack shadows ({})", e.toString());
+		}
+	}
+
+	public record PackShadow(long view, Matrix4f modelView, Matrix4f projection, int resolution) {
+	}
+
+	private static final String[] BSL_WARP_PACKS = {"bsl", "complementary"};
+
+	public static @Nullable PackShadow packShadowMap() {
+		if (!VITRAIL || !vitrailPackRunning()) {
+			return null;
+		}
+		lookUpPackShadow();
+		if (activeChain == null) {
+			return null;
+		}
+		try {
+			Object chain = activeChain.get(null);
+			if (chain == null) {
+				return null;
+			}
+			Object program = chainProgram.get(chain);
+			String name = program == null ? null : (String) programPackName.invoke(program);
+			if (name == null || !knownWarp(name)) {
+				return null;
+			}
+			Object view = frameView.get(valuesState.get(chainValues.get(chain)));
+			Object shadow = targetsShadow.get(chainTargets.get(chain));
+			if (view == null || shadow == null || !(shadowDepth.invoke(shadow) instanceof VulkanGpuTextureView depth)) {
+				return null;
+			}
+			Matrix4f modelView = new Matrix4f((Matrix4fc) mapModelView.get(view));
+			Matrix4f projection = new Matrix4f((Matrix4fc) mapProjection.get(view));
+			return new PackShadow(depth.vkImageView(), modelView, projection, (int) shadowResolution.invoke(shadow));
+		} catch (ReflectiveOperationException | RuntimeException e) {
+			activeChain = null;
+			RealisticWater.LOGGER.warn("Couldn't read Vitrail's shadow map; realistic materials fall back to their own shadow trace", e);
+			return null;
+		}
+	}
+
+	private static boolean knownWarp(String packName) {
+		String lower = packName.toLowerCase(java.util.Locale.ROOT);
+		for (String known : BSL_WARP_PACKS) {
+			if (lower.contains(known)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private static void lookUpPackShadow() {
+		if (packShadowLooked) {
+			return;
+		}
+		packShadowLooked = true;
+		try {
+			Class<?> chain = Class.forName(VITRAIL_CHAIN);
+			activeChain = field(chain, "active");
+			chainProgram = field(chain, "chain");
+			chainValues = field(chain, "values");
+			chainTargets = field(chain, "targets");
+			programPackName = Class.forName("dev.vitrail.glsl.PackProgram$Chain").getDeclaredMethod("packName");
+			valuesState = field(Class.forName("dev.vitrail.render.PackValues"), "state");
+			frameView = field(Class.forName("dev.vitrail.render.FrameState"), "view");
+			Class<?> matrices = Class.forName("dev.vitrail.render.ViewMatrices");
+			mapModelView = field(matrices, "mapShadowModelView");
+			mapProjection = field(matrices, "mapShadowProjection");
+			targetsShadow = field(Class.forName("dev.vitrail.render.ColorTargets"), "shadowMap");
+			Class<?> shadowTargets = Class.forName("dev.vitrail.render.ShadowTargets");
+			shadowDepth = shadowTargets.getDeclaredMethod("depthWithoutTranslucents");
+			shadowDepth.setAccessible(true);
+			shadowResolution = shadowTargets.getDeclaredMethod("resolution");
+			shadowResolution.setAccessible(true);
+		} catch (ReflectiveOperationException | LinkageError | RuntimeException e) {
+			activeChain = null;
+			RealisticWater.LOGGER.info("Vitrail's shadow map isn't reachable; realistic materials use their own shadow trace ({})", e.toString());
+		}
+	}
+
+	private static Field field(Class<?> owner, String name) throws NoSuchFieldException {
+		Field f = owner.getDeclaredField(name);
+		f.setAccessible(true);
+		return f;
+	}
+
+	public static boolean packRunning() {
+		return SULKAN || vitrailPackRunning();
 	}
 
 	private static boolean vitrailPackRunning() {

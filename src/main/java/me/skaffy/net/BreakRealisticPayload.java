@@ -2,6 +2,9 @@ package me.skaffy.net;
 
 import me.skaffy.RealisticWater;
 import me.skaffy.physics.RigidBody;
+import me.skaffy.realistic.GridInteraction;
+import me.skaffy.realistic.GridMirror;
+import me.skaffy.realistic.GridSpace;
 import me.skaffy.realistic.RealisticBlockEntity;
 import me.skaffy.realistic.RealisticBlockItem;
 import net.minecraft.core.BlockPos;
@@ -46,12 +49,20 @@ public record BreakRealisticPayload(int entityId, int x, int y, int z) implement
 			return;
 		}
 		BlockState state = (BlockState) cell.payload;
-		level.levelEvent(LevelEvent.PARTICLES_AND_SOUND_DESTROY_BLOCK, BlockPos.containing(c.x, c.y, c.z), Block.getId(state));
+		GridMirror grid = e.grid();
+		GridSpace.Slot slot = grid == null ? null : grid.slot();
+		if (slot != null) {
+			BlockPos at = slot.world(this.x, this.y, this.z);
+			GridInteraction.asGridPlayer(player, e, slot, () -> level.destroyBlock(at, false, player));
+			grid.pull();
+		} else {
+			level.levelEvent(LevelEvent.PARTICLES_AND_SOUND_DESTROY_BLOCK, BlockPos.containing(c.x, c.y, c.z), Block.getId(state));
+			e.removeCell(this.x, this.y, this.z);
+		}
 		if (!player.hasInfiniteMaterials() && state.getBlock().asItem() != net.minecraft.world.item.Items.AIR) {
 			ItemEntity drop = new ItemEntity(level, c.x, c.y, c.z, RealisticBlockItem.of(state.getBlock(), 1));
 			drop.setDefaultPickUpDelay();
 			level.addFreshEntity(drop);
 		}
-		e.removeCell(this.x, this.y, this.z);
 	}
 }

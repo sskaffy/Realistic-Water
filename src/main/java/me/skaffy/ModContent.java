@@ -16,11 +16,14 @@ import me.skaffy.realistic.RealisticBoatEntity;
 import me.skaffy.realistic.RealisticBoatItem;
 import net.minecraft.core.component.DataComponentType;
 import net.minecraft.resources.Identifier;
+import net.minecraft.server.level.TicketType;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.MobCategory;
 import net.minecraft.world.flag.FeatureFlags;
 import net.minecraft.world.inventory.MenuType;
 import net.fabricmc.fabric.api.creativetab.v1.CreativeModeTabEvents;
+import net.fabricmc.fabric.api.particle.v1.FabricParticleTypes;
+import net.minecraft.core.particles.SimpleParticleType;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Registry;
 import net.minecraft.sounds.SoundEvent;
@@ -35,6 +38,7 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.BucketItem;
+import me.skaffy.fluid.SmallWaterBucketItem;
 import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
@@ -70,6 +74,10 @@ public final class ModContent {
 	public static final ResourceKey<Item> REALISTIC_WATER_BUCKET_KEY = ResourceKey.create(Registries.ITEM, RealisticWater.id("realistic_water_bucket"));
 	public static final Item REALISTIC_WATER_BUCKET = Registry.register(BuiltInRegistries.ITEM, REALISTIC_WATER_BUCKET_KEY, new BucketItem(
 		REALISTIC_WATER, new Item.Properties().craftRemainder(Items.BUCKET).stacksTo(1).setId(REALISTIC_WATER_BUCKET_KEY)));
+
+	public static final ResourceKey<Item> SMALL_REALISTIC_WATER_BUCKET_KEY = ResourceKey.create(Registries.ITEM, RealisticWater.id("small_realistic_water_bucket"));
+	public static final Item SMALL_REALISTIC_WATER_BUCKET = Registry.register(BuiltInRegistries.ITEM, SMALL_REALISTIC_WATER_BUCKET_KEY, new SmallWaterBucketItem(
+		REALISTIC_WATER, new Item.Properties().craftRemainder(Items.BUCKET).stacksTo(1).setId(SMALL_REALISTIC_WATER_BUCKET_KEY)));
 
 	public static final FlowingFluid FLOWING_REALISTIC_LAVA = Registry.register(
 		BuiltInRegistries.FLUID, RealisticWater.id("flowing_realistic_lava"), new RealisticLavaFluid.Flowing());
@@ -172,6 +180,8 @@ public final class ModContent {
 
 	public static final ResourceKey<Item> WAVE_MAKER_ITEM_KEY = ResourceKey.create(Registries.ITEM, RealisticWater.id("wave_maker"));
 	public static final Item WAVE_MAKER_ITEM = registerBlockItem(WAVE_MAKER_ITEM_KEY, WAVE_MAKER);
+	public static final SoundEvent BOILING = Registry.register(BuiltInRegistries.SOUND_EVENT, RealisticWater.id("block.realistic_water.boil"),
+		SoundEvent.createVariableRangeEvent(RealisticWater.id("block.realistic_water.boil")));
 	public static final SoundEvent WAVE_MAKER_RUN = Registry.register(BuiltInRegistries.SOUND_EVENT, RealisticWater.id("block.wave_maker.run"),
 		SoundEvent.createVariableRangeEvent(RealisticWater.id("block.wave_maker.run")));
 
@@ -196,6 +206,12 @@ public final class ModContent {
 	public static final MenuType<ConverterMenu> CONVERTER_MENU = Registry.register(BuiltInRegistries.MENU, RealisticWater.id("realistic_converter"),
 		new MenuType<>(ConverterMenu::new, FeatureFlags.VANILLA_SET));
 
+	public static final TicketType GRID_TICKET = Registry.register(BuiltInRegistries.TICKET_TYPE, RealisticWater.id("realistic_grid"),
+		new TicketType(TicketType.NO_TIMEOUT, TicketType.FLAG_LOADING | TicketType.FLAG_SIMULATION));
+
+	public static final TicketType BACKGROUND_TICKET = Registry.register(BuiltInRegistries.TICKET_TYPE, RealisticWater.id("realistic_background"),
+		new TicketType(100L, TicketType.FLAG_LOADING | TicketType.FLAG_SIMULATION | TicketType.FLAG_KEEP_DIMENSION_ACTIVE));
+
 	public static final ResourceKey<EntityType<?>> REALISTIC_BLOCK_ENTITY_KEY = ResourceKey.create(Registries.ENTITY_TYPE, RealisticWater.id("realistic_block"));
 	public static final EntityType<RealisticBlockEntity> REALISTIC_BLOCK_ENTITY = Registry.register(BuiltInRegistries.ENTITY_TYPE, REALISTIC_BLOCK_ENTITY_KEY,
 		EntityType.Builder.<RealisticBlockEntity>of(RealisticBlockEntity::new, MobCategory.MISC)
@@ -214,6 +230,8 @@ public final class ModContent {
 			.noLootTable()
 			.build(REALISTIC_BOAT_KEY));
 
+	public static final SimpleParticleType STEAM = Registry.register(BuiltInRegistries.PARTICLE_TYPE, RealisticWater.id("steam"), FabricParticleTypes.simple(true));
+
 	private ModContent() {
 	}
 
@@ -227,6 +245,7 @@ public final class ModContent {
 		CreativeModeTabEvents.modifyOutputEvent(CreativeModeTabs.TOOLS_AND_UTILITIES)
 			.register(output -> {
 				output.insertAfter(Items.WATER_BUCKET, REALISTIC_WATER_BUCKET);
+				output.insertAfter(REALISTIC_WATER_BUCKET, SMALL_REALISTIC_WATER_BUCKET);
 				output.insertAfter(Items.LAVA_BUCKET, REALISTIC_LAVA_BUCKET);
 				output.insertAfter(REALISTIC_LAVA_BUCKET, REALISTIC_SLIME_BUCKET);
 				output.insertAfter(REALISTIC_SLIME_BUCKET, CONVERTER);

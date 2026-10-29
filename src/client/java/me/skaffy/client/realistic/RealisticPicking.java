@@ -29,10 +29,13 @@ public final class RealisticPicking {
 		RealisticHit best = null;
 		for (RealisticBlockEntity e : mc.level.getEntitiesOfClass(RealisticBlockEntity.class, area)) {
 			e.syncClientBody(e.renderPosition(partialTicks), e.renderRotation(partialTicks));
-			double[] hit = raycast(e.body, eye, dir, limit);
+			RigidBody.Hit hit = e.body.rayCast(eye.x, eye.y, eye.z, dir.x, dir.y, dir.z, limit);
 			if (hit != null) {
-				limit = hit[0];
-				best = new RealisticHit(e, eye.add(dir.scale(hit[0])), (int) hit[1], (int) hit[2], (int) hit[3]);
+				limit = hit.distance();
+				Vec3 at = eye.add(dir.scale(hit.distance()));
+				best = new RealisticHit(e, at, hit.x(), hit.y(), hit.z(),
+					RealisticBlockEntity.RAY_FACES[hit.face()].get3DDataValue(),
+					e.body.toGrid(at.x, at.y, at.z, new org.joml.Vector3d()));
 			}
 		}
 		if (best != null) {
@@ -42,47 +45,5 @@ public final class RealisticPicking {
 			mc.hitResult = mc.player.pick(mc.player.blockInteractionRange(), partialTicks, false);
 			mc.crosshairPickEntity = null;
 		}
-	}
-
-	private static final double[][] CUBE = {{0, 0, 0, 1, 1, 1}};
-
-	static double[] raycast(RigidBody body, Vec3 eye, Vec3 dir, double maxT) {
-		if (body.cells.isEmpty()) {
-			return null;
-		}
-		Vector3d o = body.toGrid(eye.x, eye.y, eye.z, new Vector3d());
-		Vector3d e = body.toGrid(eye.x + dir.x, eye.y + dir.y, eye.z + dir.z, new Vector3d());
-		double dx = e.x - o.x;
-		double dy = e.y - o.y;
-		double dz = e.z - o.z;
-		double[] best = null;
-		double bestT = maxT;
-		double[] ori = {o.x, o.y, o.z};
-		double[] d = {dx, dy, dz};
-		for (RigidBody.Cell c : body.cells) {
-			for (double[] box : c.boxes == null ? CUBE : c.boxes) {
-				double t0 = 0.0;
-				double t1 = bestT;
-				double[] lo = {c.x + box[0], c.y + box[1], c.z + box[2]};
-				double[] hi = {c.x + box[3], c.y + box[4], c.z + box[5]};
-				boolean miss = false;
-				for (int a = 0; a < 3 && !miss; a++) {
-					if (Math.abs(d[a]) < 1e-12) {
-						miss = ori[a] < lo[a] || ori[a] > hi[a];
-						continue;
-					}
-					double ta = (lo[a] - ori[a]) / d[a];
-					double tb = (hi[a] - ori[a]) / d[a];
-					t0 = Math.max(t0, Math.min(ta, tb));
-					t1 = Math.min(t1, Math.max(ta, tb));
-					miss = t0 > t1;
-				}
-				if (!miss && t0 < bestT) {
-					bestT = t0;
-					best = new double[]{t0, c.x, c.y, c.z};
-				}
-			}
-		}
-		return best;
 	}
 }

@@ -126,6 +126,11 @@ public class RealisticBoatEntity extends RealisticBlockEntity {
 	}
 
 	@Override
+	protected boolean usesGrid() {
+		return false;
+	}
+
+	@Override
 	protected RigidBody.Cell makeCell(int x, int y, int z, BlockState state) {
 		boolean raft = this.isRaft();
 		double density = BoatHull.PLANK_DENSITY * BlockMaterials.WEIGHT * (raft ? BoatHull.RAFT_DENSITY : 1.0);

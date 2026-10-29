@@ -7,7 +7,8 @@ public enum Material {
 	SAND,
 	LAVA,
 	SLIME,
-	LEAVES;
+	LEAVES,
+	STEAM;
 
 	float shaderId() {
 		return switch (this) {
@@ -15,6 +16,7 @@ public enum Material {
 			case LAVA -> 2.0F;
 			case SLIME -> 3.0F;
 			case LEAVES -> 4.0F;
+			case STEAM -> 5.0F;
 			default -> 0.0F;
 		};
 	}
@@ -29,6 +31,18 @@ public enum Material {
 
 	boolean isLeaves() {
 		return this == LEAVES;
+	}
+
+	boolean isGas() {
+		return this == STEAM;
+	}
+
+	boolean isParticleOnly() {
+		return this == LEAVES || this == STEAM;
+	}
+
+	boolean syncs() {
+		return this != STEAM;
 	}
 
 	boolean usesLayers() {
@@ -55,6 +69,7 @@ public enum Material {
 			case LAVA -> "lava";
 			case SLIME -> "slime";
 			case LEAVES -> "leaves";
+			case STEAM -> "steam";
 			default -> "water";
 		};
 	}

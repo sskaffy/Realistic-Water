@@ -9,6 +9,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.block.MovingBlockRenderState;
+import net.minecraft.client.renderer.blockentity.state.BlockEntityRenderState;
 import net.minecraft.client.renderer.block.dispatch.BlockStateModel;
 import net.minecraft.client.renderer.block.dispatch.BlockStateModelPart;
 import net.minecraft.client.renderer.entity.EntityRenderer;
@@ -20,10 +21,14 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.util.ARGB;
+import net.minecraft.util.LightCoordsUtil;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.CardinalLighting;
+import net.minecraft.world.level.EmptyBlockGetter;
 import net.minecraft.world.phys.shapes.Shapes;
+import net.minecraft.world.phys.shapes.VoxelShape;
 import net.minecraft.world.level.block.RenderShape;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Quaternionf;
@@ -34,9 +39,12 @@ public class RealisticBlockRenderer extends EntityRenderer<RealisticBlockEntity,
 		final Quaternionf rotation = new Quaternionf();
 		final List<MovingBlockRenderState> blocks = new ArrayList<>();
 		final List<float[]> offsets = new ArrayList<>();
+		final List<BlockEntityRenderState> blockEntities = new ArrayList<>();
+		final List<float[]> blockEntityOffsets = new ArrayList<>();
 		int crackIndex = -1;
 		int crackStage;
 		int outlineIndex = -1;
+		VoxelShape outlineShape = Shapes.block();
 		float lineWidth = 1.0F;
 	}
 
@@ -90,6 +98,8 @@ public class RealisticBlockRenderer extends EntityRenderer<RealisticBlockEntity,
 		state.rotation.set(entity.renderRotation(partialTicks));
 		state.blocks.clear();
 		state.offsets.clear();
+		state.blockEntities.clear();
+		state.blockEntityOffsets.clear();
 		state.crackIndex = -1;
 		state.outlineIndex = -1;
 		RigidBody body = entity.body;
@@ -119,10 +129,31 @@ public class RealisticBlockRenderer extends EntityRenderer<RealisticBlockEntity,
 			}
 			if (hovered != null && hovered.x == cell.x && hovered.y == cell.y && hovered.z == cell.z) {
 				state.outlineIndex = state.blocks.size();
+				state.outlineShape = block.blockState.getShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO);
+				if (state.outlineShape.isEmpty()) {
+					state.outlineShape = Shapes.block();
+				}
 			}
+			float[] offset = {(float) (cell.x - body.com.x), (float) (cell.y - body.com.y), (float) (cell.z - body.com.z)};
 			state.blocks.add(block);
-			state.offsets.add(new float[]{(float) (cell.x - body.com.x), (float) (cell.y - body.com.y), (float) (cell.z - body.com.z)});
+			state.offsets.add(offset);
+			this.extractBlockEntity(entity, cell, block, offset, state, partialTicks);
 		}
+	}
+
+	private void extractBlockEntity(RealisticBlockEntity entity, RigidBody.Cell cell, MovingBlockRenderState lit, float[] offset, State state,
+		float partialTicks) {
+		BlockEntity be = entity.clientGridBlockEntity(cell.x, cell.y, cell.z);
+		if (be == null) {
+			return;
+		}
+		BlockEntityRenderState beState = Minecraft.getInstance().getBlockEntityRenderDispatcher().tryExtractRenderState(be, partialTicks, null, false);
+		if (beState == null) {
+			return;
+		}
+		beState.lightCoords = LightCoordsUtil.pack(lit.getBrightness(LightLayer.BLOCK, lit.blockPos), lit.getBrightness(LightLayer.SKY, lit.blockPos));
+		state.blockEntities.add(beState);
+		state.blockEntityOffsets.add(offset);
 	}
 
 	private static CardinalLighting turned(CardinalLighting base, RigidBody body) {
@@ -159,8 +190,15 @@ public class RealisticBlockRenderer extends EntityRenderer<RealisticBlockEntity,
 			if (i == state.outlineIndex) {
 				var lines = Minecraft.getInstance().gameRenderer.useImprovedTransparency()
 					? RenderTypes.linesTranslucentNoDepthWrite() : RenderTypes.linesTranslucent();
-				collector.submitShapeOutline(poseStack, Shapes.block(), lines, ARGB.black(102), state.lineWidth, false);
+				collector.submitShapeOutline(poseStack, state.outlineShape, lines, ARGB.black(102), state.lineWidth, false);
 			}
+			poseStack.popPose();
+		}
+		for (int i = 0; i < state.blockEntities.size(); i++) {
+			float[] o = state.blockEntityOffsets.get(i);
+			poseStack.pushPose();
+			poseStack.translate(o[0], o[1], o[2]);
+			Minecraft.getInstance().getBlockEntityRenderDispatcher().submit(state.blockEntities.get(i), poseStack, collector, camera);
 			poseStack.popPose();
 		}
 		poseStack.popPose();

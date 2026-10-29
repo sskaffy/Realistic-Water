@@ -1,0 +1,24 @@
+#version 450
+layout(local_size_x = 256) in;
+layout(std430, binding = 0) readonly buffer BlockMask { uint blockMask[]; };
+layout(std430, binding = 1) writeonly buffer NearMask { uint nearMask[]; };
+layout(push_constant) uniform PC { ivec4 a; } pc;
+
+#define GID_U (gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * gl_NumWorkGroups.x * gl_WorkGroupSize.x)
+
+void main() {
+    ivec3 n = pc.a.xyz;
+    int t = int(GID_U);
+    if (t >= n.x * n.y * n.z) {
+        return;
+    }
+    ivec3 b = ivec3(t % n.x, (t / n.x) % n.y, t / (n.x * n.y));
+    uint near = 0u;
+    for (int k = 0; k < 27 && near == 0u; k++) {
+        ivec3 q = b + ivec3(k % 3, (k / 3) % 3, k / 9) - 1;
+        if (all(greaterThanEqual(q, ivec3(0))) && all(lessThan(q, n))) {
+            near = blockMask[q.x + n.x * (q.y + n.y * q.z)];
+        }
+    }
+    nearMask[t] = near;
+}

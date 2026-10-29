@@ -4,12 +4,20 @@
 	"compatibilityLevel": "JAVA_25",
 	"mixins": [
 		"BoatItemAccessor",
-		"EntityGetterMixin",
-		"EntityStepMixin",
+		"BucketItemSteamMixin",
+		"ChunkMapSaveMixin",
+		"ChunkStatusTasksMixin",
+		"ContainerOpenersCounterGridMixin",
+		"EntityCollideMixin",
+		"LevelBlockEntityGridMixin",
+		"NaturalSpawnerMixin",
 		"PistonBaseBlockMixin",
 		"PistonStructureResolverMixin",
+		"PlayerEdgeMixin",
+		"PlayerGridReachMixin",
 		"ServerGamePacketListenerImplMixin",
-		"StandingAndWallBlockItemAccessor"
+		"ServerLevelBlockEventMixin",
+		"ServerLevelGridMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

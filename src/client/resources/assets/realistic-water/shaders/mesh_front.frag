@@ -8,6 +8,8 @@ layout(location = 0) out vec4 outG;
 layout(location = 1) out vec4 outMat;
 #define REGION_LIGHT_BINDING 4
 #include "region_light.glsl"
+#define PACK_SHADOW_BINDING 5
+#include "sun_shadow.glsl"
 
 void main() {
     float dist = -vView.z;
@@ -21,5 +23,6 @@ void main() {
     outG = vec4(n, dist);
     vec3 rel = (G.invView * vec4(vView, 1.0)).xyz;
     vec3 nWorld = mat3(G.invView) * n;
-    outMat = vec4(G.matA.x, regionLightAt(relToSim(rel + nWorld * 0.5)), 0.0);
+    float shadowed = abs(G.matA.x - 3.0) < 0.5 ? 1.0 - sunShadowFactor(relToSim(rel + nWorld * 0.1)) : 0.0;
+    outMat = vec4(G.matA.x, regionLightAt(relToSim(rel + nWorld * 0.5)), shadowed);
 }

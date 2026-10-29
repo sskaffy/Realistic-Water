@@ -1,0 +1,59 @@
+#version 450
+#include "common.glsl"
+layout(local_size_x = 64) in;
+layout(std430, binding = 1) readonly buffer Count { uint cellCount[]; };
+layout(std430, binding = 2) writeonly buffer Occ { uint occ[]; };
+layout(push_constant) uniform PC { ivec4 a; ivec4 b; } pc;
+
+float countAt(int i) {
+#ifdef LEAVES
+    uint word = cellCount[i];
+    return float((word >> 16) + (word & 0xFFFFu));
+#else
+    return float(int(cellCount[i]));
+#endif
+}
+
+void main() {
+    int t = int(GID_U);
+    int words = pc.b.w;
+    if (t >= words * pc.b.y * pc.b.z) {
+        return;
+    }
+    int wx = t % words;
+    int y = (t / words) % pc.b.y;
+    int z = t / (words * pc.b.y);
+    int res = max(int(G.camGrid.w + 0.5), 1);
+    int d = max(pc.a.w, 1);
+#ifdef LEAVES
+    float full = max(G.matA.y, 1.0);
+#else
+    float full = max(G.simA.y, 1e-3);
+#endif
+    uint packed = 0u;
+    for (int k = 0; k < 4; k++) {
+        int x = wx * 4 + k;
+        if (x >= pc.b.x) {
+            break;
+        }
+        ivec3 piece = pc.a.xyz + ivec3(x, y, z);
+        ivec3 c0 = (piece * res) / d;
+        ivec3 c1 = max(((piece + 1) * res) / d, c0 + 1);
+        float sum = 0.0;
+        int n = 0;
+        for (int cz = c0.z; cz < c1.z; cz++) {
+            for (int cy = c0.y; cy < c1.y; cy++) {
+                for (int cx = c0.x; cx < c1.x; cx++) {
+                    ivec3 c = ivec3(cx, cy, cz);
+                    n++;
+                    if (inBox(c)) {
+                        sum += countAt(cellIndex(c));
+                    }
+                }
+            }
+        }
+        float o = clamp(sum / (full * float(max(n, 1))), 0.0, 1.0);
+        packed |= uint(o * 255.0 + 0.5) << (8 * k);
+    }
+    occ[t] = packed;
+}

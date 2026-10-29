@@ -1,6 +1,10 @@
 package me.skaffy.realistic;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import me.skaffy.ModContent;
 import me.skaffy.RealisticWater;
 import net.minecraft.core.BlockPos;
@@ -22,6 +26,7 @@ import net.minecraft.world.level.EmptyBlockGetter;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.BaseTorchBlock;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.ComparatorBlock;
 import net.minecraft.world.level.block.RedstoneWireBlock;
 import net.minecraft.world.level.block.EntityBlock;
@@ -38,6 +43,10 @@ public class RealisticBlockItem extends Item {
 		super(properties);
 	}
 
+	private static final Set<Block> REFUSED = Set.of(Blocks.BEDROCK, Blocks.BARRIER, Blocks.LIGHT, Blocks.STRUCTURE_VOID, Blocks.STRUCTURE_BLOCK,
+		Blocks.JIGSAW, Blocks.COMMAND_BLOCK, Blocks.CHAIN_COMMAND_BLOCK, Blocks.REPEATING_COMMAND_BLOCK, Blocks.SPAWNER, Blocks.TRIAL_SPAWNER,
+		Blocks.VAULT, Blocks.END_PORTAL, Blocks.END_PORTAL_FRAME, Blocks.END_GATEWAY, Blocks.NETHER_PORTAL, Blocks.MOVING_PISTON);
+
 	public static boolean convertible(ItemStack stack) {
 		if (stack.getItem() instanceof BoatItem) {
 			return true;
@@ -46,22 +55,35 @@ public class RealisticBlockItem extends Item {
 			return false;
 		}
 		Block block = item.getBlock();
-		if (block == ModContent.WAVE_MAKER || block instanceof ComparatorBlock) {
+		if (block == ModContent.WAVE_MAKER) {
 			return true;
 		}
-		if (block instanceof EntityBlock || BuiltInRegistries.BLOCK.getKey(block).getNamespace().equals(RealisticWater.MOD_ID)) {
-			return false;
-		}
-		BlockState state = block.defaultBlockState();
-		boolean walkThrough = block instanceof BaseTorchBlock || block instanceof RedstoneWireBlock;
-		return state.getRenderShape() == RenderShape.MODEL && state.getFluidState().isEmpty()
-			&& (walkThrough || !state.getCollisionShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO).isEmpty());
+		return !REFUSED.contains(block) && !BuiltInRegistries.BLOCK.getKey(block).getNamespace().equals(RealisticWater.MOD_ID);
 	}
+
+	public static @Nullable BlockItem itemFor(Block block) {
+		if (block.asItem() instanceof BlockItem direct) {
+			return direct;
+		}
+		return ITEM_FOR_BLOCK.computeIfAbsent(block, b -> {
+			for (Item item : BuiltInRegistries.ITEM) {
+				if (item instanceof BlockItem blockItem && blockItem.getBlock() == b) {
+					return Optional.of(blockItem);
+				}
+			}
+			return Optional.<BlockItem>empty();
+		}).orElse(null);
+	}
+
+	private static final Map<Block, Optional<BlockItem>> ITEM_FOR_BLOCK = new ConcurrentHashMap<>();
 
 	public static ItemStack of(Block block, int count) {
 		ItemStack stack = new ItemStack(ModContent.REALISTIC_BLOCK_ITEM, count);
 		stack.set(ModContent.SOURCE_BLOCK, BuiltInRegistries.BLOCK.getKey(block));
-		stack.set(DataComponents.ITEM_MODEL, BuiltInRegistries.ITEM.getKey(block.asItem()));
+		BlockItem item = itemFor(block);
+		if (item != null) {
+			stack.set(DataComponents.ITEM_MODEL, BuiltInRegistries.ITEM.getKey(item));
+		}
 		stack.set(DataComponents.ITEM_NAME, Component.translatable("item.realistic-water.realistic_block.of", block.getName()));
 		return stack;
 	}
@@ -106,7 +128,11 @@ public class RealisticBlockItem extends Item {
 			state = block.defaultBlockState();
 		}
 		if (level instanceof ServerLevel server) {
-			RealisticBlockEntity.spawn(server, List.of(BlockMaterials.cell(0, 0, 0, state)), center, null);
+			RealisticBlockEntity spawned = RealisticBlockEntity.spawn(server, List.of(BlockMaterials.cell(0, 0, 0, state)), center, null);
+			Player placer = context.getPlayer();
+			if (placer != null) {
+				spawned.finishPlacement(placer, stack, state);
+			}
 			SoundType sound = state.getSoundType();
 			level.playSound(null, pos, sound.getPlaceSound(), SoundSource.BLOCKS, (sound.getVolume() + 1.0F) / 2.0F, sound.getPitch() * 0.8F);
 			Player player = context.getPlayer();

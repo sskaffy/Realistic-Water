@@ -16,12 +16,11 @@
       "y": 270
     },
     "facing=up": {
-      "model": "realistic-water:block/wave_maker",
-      "x": 270
+      "model": "realistic-water:block/wave_maker_vertical"
     },
     "facing=down": {
-      "model": "realistic-water:block/wave_maker",
-      "x": 90
+      "model": "realistic-water:block/wave_maker_vertical",
+      "x": 180
     }
   }
 }

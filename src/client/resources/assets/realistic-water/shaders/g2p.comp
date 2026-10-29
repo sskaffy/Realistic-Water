@@ -15,7 +15,11 @@ layout(std430, binding = 8) readonly buffer Pot { vec2 potential[]; };
 layout(std430, binding = 9) writeonly buffer WwDst { Particle wwDst[]; };
 layout(std430, binding = 10) readonly buffer WwCount { int wwCount[]; };
 layout(std430, binding = 11) readonly buffer Count { int cellCount[]; };
+layout(std430, binding = 12) readonly buffer Heat { int cellHeat[]; };
+layout(std430, binding = 14) buffer HeatEvents { uint eventCount; uint eventPad0; uint eventPad1; uint eventPad2; vec4 events[]; };
 layout(push_constant) uniform PC { ivec4 a; ivec4 b; } pc;
+#define REGION_LIGHT_BINDING 13
+#include "region_light.glsl"
 
 #include "gridsample.glsl"
 
@@ -88,9 +92,6 @@ bool slimeSupported(vec3 x) {
     return true;
 }
 
-// A particle inside a solid (a trapdoor closed on it, say) leaves through the nearest open face, keeping its
-// velocity minus the part pointing back in. Leaving always upward with a fixed kick let water pass through thin
-// ceilings and pumped energy into anything stuck against a one-cell wall.
 vec3 escapeSolid(vec3 x, inout vec3 v) {
     ivec3 c = ivec3(floor(x));
     vec3 f = x - vec3(c);
@@ -222,6 +223,108 @@ vec3 pumpWater(vec3 x, inout vec3 v, inout uint seed) {
     return x;
 }
 
+#define THERMAL_SHIFT 20u
+#define LATENT_HEAT 540.0
+
+uint thermalAt(vec3 x) {
+    int res = max(int(G.camGrid.w + 0.5), 1);
+    ivec3 n = max(G.dims.xyz / res, ivec3(1));
+    ivec3 b = ivec3(floor(x / float(res)));
+    if (any(lessThan(b, ivec3(0))) || any(greaterThanEqual(b, n))) {
+        return 0u;
+    }
+    return (regionLight[b.x + n.x * (b.y + n.y * b.z)] >> THERMAL_SHIFT) & 7u;
+}
+
+void heatEvent(vec3 x, float kind) {
+    uint o = atomicAdd(eventCount, 1u);
+    if (o < uint(pc.b.z)) {
+        events[o] = vec4(x, kind);
+    }
+}
+
+bool stepHeat(vec3 x, inout vec3 v, inout float temp, inout uint seed, out bool heated) {
+    heated = false;
+    float res = G.camGrid.w;
+    ivec3 c = ivec3(floor(x));
+    int sumHeat = 0;
+    int sumCount = 0;
+    for (int k = 0; k < 27; k++) {
+        ivec3 q = c + ivec3(k % 3, (k / 3) % 3, k / 9) - 1;
+        if (inBox(q)) {
+            int i = cellIndex(q);
+            sumHeat += cellHeat[i];
+            sumCount += cellCount[i];
+        }
+    }
+    if (sumCount > 0) {
+        float around = float(sumHeat) / (float(sumCount) * HEAT_FP);
+        temp += (around - temp) * (1.0 - exp(-G.heatA.z * res * res * DT));
+    }
+    temp += (G.heatA.y - temp) * (1.0 - exp(-G.heatA.w * DT));
+    float reach = 0.5 * res;
+    for (int k = 0; k < 7; k++) {
+        vec3 o = vec3(0.0);
+        if (k > 0) {
+            o[(k - 1) >> 1] = (k & 1) == 1 ? reach : -reach;
+        }
+        uint code = thermalAt(x + o);
+        if (code >= 1u && code <= 4u) {
+            float target = code == 1u ? G.heatC.x : code == 2u ? G.heatC.y : code == 3u ? G.heatC.z : G.heatC.w;
+            temp += (target - temp) * (1.0 - exp(-G.heatB.x * DT));
+            heated = true;
+        } else if (code >= 5u) {
+            temp += (0.0 - temp) * (1.0 - exp(-G.heatB.y * DT));
+        }
+    }
+    temp = max(temp, 0.0);
+    if (temp > 100.0) {
+        float excess = temp - 100.0;
+        temp = 100.0;
+        // Vapour forming at the hot spot stirs the water around it.
+        vec3 kick = vec3(rand(seed) - 0.5, rand(seed), rand(seed) - 0.5);
+        v += kick * G.heatB.z * DT;
+        if (rand(seed) < excess / LATENT_HEAT) {
+            return false;
+        }
+    }
+    if (temp > G.heatB.w && countAt(c + ivec3(0, 1, 0)) == 0
+        && rand(seed) < 0.05 * (temp - G.heatB.w) / max(100.0 - G.heatB.w, 1.0) * DT) {
+        heatEvent(x, 1.0);
+    }
+    return true;
+}
+
+void spawnBubble(vec3 x, vec3 v, float kind, float size, inout uint seed) {
+    if (pc.b.y == 0) {
+        return;
+    }
+    uint o = atomicAdd(counters[pc.b.x], 1u);
+    if (o < uint(G.caps.y)) {
+        float life = kind >= WW_CLING ? 1.5 + 3.0 * rand(seed) : 8.0;
+        wwDst[o] = Particle(vec4(x, life), vec4(v, kind + clamp(size, 0.02, 0.999)));
+    }
+}
+
+void boilBubbles(vec3 x, inout vec3 v, float temp, bool heated, inout uint seed) {
+    if (heated && temp >= 85.0 && temp < 99.5 && rand(seed) < 0.05 * DT) {
+        heatEvent(x, 2.0);
+    }
+    if (heated && temp >= G.heatD.w && temp < 99.0 && rand(seed) < 0.06 * DT) {
+        spawnBubble(x, vec3(0.0), WW_CLING, 0.08 + 0.15 * rand(seed), seed);
+    }
+    if (heated && temp >= 96.0) {
+        uint site = hash(uint(worldCell(x).x) * 73856093u ^ uint(worldCell(x).y) * 19349663u ^ uint(worldCell(x).z) * 83492791u);
+        float strength = clamp((temp - 96.0) / 4.0, 0.0, 1.0);
+        if ((site & 15u) == 0u && rand(seed) < G.heatD.z / G.simA.y * strength * DT) {
+            spawnBubble(x, vec3(0.0, 0.3 * G.heatD.y * G.camGrid.w, 0.0), WW_VAPOUR, 0.25 + 0.5 * strength * rand(seed), seed);
+        }
+    }
+    if (temp >= 99.5 && countAt(ivec3(floor(x)) + ivec3(0, 1, 0)) == 0 && rand(seed) < 2.0 * DT) {
+        v.y += 0.08 * G.heatB.z * rand(seed);
+    }
+}
+
 void emitWhitewater(uint id, vec3 x, vec3 v) {
     ivec3 c = ivec3(floor(x));
     if (!inBox(c)) {
@@ -266,6 +369,7 @@ void main() {
     vec3 v = p.vel.xyz;
     float tag = p.pos.w;
     float rest = 0.0;
+    float temp = p.vel.w;
     float maxSpeed = G.simB.x;
     bool gridded = inInnerBox(x);
     vec3 dx;
@@ -276,6 +380,24 @@ void main() {
         dx = DT * sampleVel(x + 0.5 * DT * uNew);
         if (!waterFilm(x, v, dx, tag)) {
             return;
+        }
+        if (heatOn()) {
+            temp = p.vel.w;
+            uint heatSeed = hash(i * 2246822519u + uint(pc.a.w) * 3266489917u);
+            bool heated;
+            bool kept = stepHeat(x, v, temp, heatSeed, heated);
+            uint groupHeated = subgroupAdd(heated ? 1u : 0u);
+            float groupHot = subgroupMax(temp);
+            if (subgroupElect()) {
+                atomicAdd(counters[5], groupHeated);
+                atomicMax(counters[15], floatBitsToUint(groupHot));
+            }
+            if (!kept) {
+                heatEvent(x, 0.0);
+                spawnBubble(x, v * 0.3, WW_VAPOUR, 0.35 + 0.4 * rand(heatSeed), heatSeed);
+                return;
+            }
+            boilBubbles(x, v, temp, heated, heatSeed);
         }
         bool squeezed = isSlime() && float(countAt(ivec3(floor(x)))) > G.simA.y * 1.5;
         if (isSlime() && squeezed) {
@@ -329,7 +451,7 @@ void main() {
     if (o >= uint(G.caps.x)) {
         return;
     }
-    dst[o] = Particle(vec4(xn, tag), vec4(v, rest));
+    dst[o] = Particle(vec4(xn, tag), vec4(v, isWater() ? temp : rest));
     uvec3 cell = uvec3(ivec3(floor(xn)) + AABB_BIAS);
     uvec3 lo = uvec3(subgroupMin(cell.x), subgroupMin(cell.y), subgroupMin(cell.z));
     uvec3 hi = uvec3(subgroupMax(cell.x), subgroupMax(cell.y), subgroupMax(cell.z));

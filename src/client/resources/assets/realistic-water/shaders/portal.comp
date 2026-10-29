@@ -1,0 +1,26 @@
+#version 450
+#include "common.glsl"
+layout(local_size_x = 256) in;
+layout(std430, binding = 1) buffer Parts { Particle parts[]; };
+layout(std430, binding = 2) readonly buffer Counters { uint counters[]; };
+layout(std430, binding = 3) readonly buffer Boxes { vec4 boxes[]; };
+layout(std430, binding = 4) buffer Taken { uint taken[]; };
+layout(push_constant) uniform PC { ivec4 a; } pc;
+
+void main() {
+    uint i = GID_U;
+    if (i >= counters[pc.a.x]) {
+        return;
+    }
+    vec4 p = parts[i].pos;
+    if (p.w < 0.0) {
+        return;
+    }
+    for (int k = 0; k < pc.a.y; k++) {
+        if (all(greaterThanEqual(p.xyz, boxes[2 * k].xyz)) && all(lessThan(p.xyz, boxes[2 * k + 1].xyz))) {
+            parts[i].pos.w = -1.0;
+            atomicAdd(taken[k], 1u);
+            return;
+        }
+    }
+}

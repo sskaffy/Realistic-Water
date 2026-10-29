@@ -4,6 +4,7 @@
   "block.realistic-water.realistic_sand": "Realistic Sand",
   "block.realistic-water.realistic_leaves": "Realistic Leaves",
   "item.realistic-water.realistic_water_bucket": "Realistic Water Bucket",
+  "item.realistic-water.small_realistic_water_bucket": "Small Realistic Water Bucket",
   "item.realistic-water.realistic_lava_bucket": "Realistic Lava Bucket",
   "block.realistic-water.realistic_slime": "Realistic Slime",
   "item.realistic-water.realistic_slime_bucket": "Realistic Slime Bucket",
@@ -24,5 +25,8 @@
   "block.realistic-water.wave_maker.speed.slow": "slow",
   "block.realistic-water.wave_maker.speed.medium": "medium",
   "block.realistic-water.wave_maker.speed.fast": "fast",
-  "subtitles.realistic-water.block.wave_maker.run": "Water Pump hums"
+  "subtitles.realistic-water.block.wave_maker.run": "Water Pump hums",
+  "death.attack.realistic-water.boilingWater": "%1$s was boiled alive",
+  "death.attack.realistic-water.boilingWater.player": "%1$s was boiled alive while fighting %2$s",
+  "subtitles.realistic-water.block.realistic_water.boil": "Water boils"
 }

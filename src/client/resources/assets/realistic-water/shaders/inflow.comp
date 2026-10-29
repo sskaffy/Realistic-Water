@@ -39,6 +39,6 @@ void main() {
             return;
         }
         vec3 p = vec3(float(c.x) + rand(seed), bottom + rand(seed) * frac, float(c.z) + rand(seed));
-        dst[o] = Particle(vec4(p, 0.0), vec4(0.0));
+        dst[o] = Particle(vec4(p, 0.0), vec4(0.0, 0.0, 0.0, isWater() ? G.heatA.y : 0.0));
     }
 }

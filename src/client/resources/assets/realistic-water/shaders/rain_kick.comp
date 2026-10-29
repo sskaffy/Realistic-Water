@@ -1,0 +1,37 @@
+#version 450
+#include "common.glsl"
+layout(local_size_x = 256) in;
+layout(std430, binding = 1) buffer Parts { Particle parts[]; };
+layout(std430, binding = 2) readonly buffer Counters { uint counters[]; };
+layout(std430, binding = 3) readonly buffer Map { uint map[]; };
+layout(push_constant) uniform PC { ivec4 a; vec4 b; } pc;
+
+void main() {
+    uint i = GID_U;
+    if (i >= counters[pc.a.x]) {
+        return;
+    }
+    Particle p = parts[i];
+    if (p.pos.w < 0.0) {
+        return;
+    }
+    ivec3 c = ivec3(floor(p.pos.xyz));
+    if (c.x < 0 || c.z < 0 || c.x >= NX || c.z >= NZ) {
+        return;
+    }
+    int col = c.x + c.z * NX;
+    uint n = map[col];
+    if (n == 0u) {
+        return;
+    }
+    float surface = float(map[NX * NZ + col]);
+    float depth = surface - p.pos.y;
+    if (depth < -1.0 || depth > pc.b.y) {
+        return;
+    }
+    uint seed = hash(i * 747796405u + uint(pc.a.y) * 2891336453u);
+    float strength = pc.b.x * min(float(n), 6.0) * (1.0 - clamp(depth / pc.b.y, 0.0, 1.0));
+    p.vel.y -= strength * (0.6 + 0.8 * rand(seed));
+    p.vel.xz += (vec2(rand(seed), rand(seed)) - 0.5) * strength;
+    parts[i].vel = p.vel;
+}

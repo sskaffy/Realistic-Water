@@ -8,6 +8,7 @@ layout(location = 1) in vec3 vCenter;
 layout(location = 2) in float vRadius;
 layout(location = 3) in vec4 vData;
 layout(location = 0) out vec4 outFoam;
+layout(location = 1) out float outSurface;
 
 float linearDepth(float device) {
     vec4 v = G.invProj * vec4(0.0, 0.0, device, 1.0);
@@ -27,7 +28,12 @@ void main() {
     float type = vData.y;
     float a = vData.z;
     vec3 color = vec3(1.0);
-    if (type < 0.5) {
+    if (type > 2.5) {
+        float rim = smoothstep(0.55, 1.0, r2);
+        float spot = 1.0 - smoothstep(0.0, 0.08, dot(vUV - vec2(-0.35, 0.4), vUV - vec2(-0.35, 0.4)));
+        a *= 0.08 + 0.55 * rim + 0.6 * spot;
+        color = vec3(0.92, 0.97, 1.0);
+    } else if (type < 0.5) {
         a *= G.foamA.w;
         color = vec3(0.85, 0.92, 1.0);
     } else if (type > 1.5) {
@@ -37,13 +43,18 @@ void main() {
         a *= 0.9 * clamp(vData.x * 0.8, 0.0, 1.0) * exp(-2.5 * r2);
     }
     float fd = texture(gbuffer, uv).w;
+    float submerged = 0.0;
     if (viewState.x > 0.5) {
         if (type > 0.5 && type < 1.5) {
             a *= 0.15;
         }
         a *= exp(-myDist * G.scatter.w * G.misc.x * 2.0);
     } else if (fd > 0.0 && myDist > fd + 0.08) {
-        a *= exp(-(myDist - fd) * 1.8);
+        submerged = myDist - fd;
+        float path = submerged * G.misc.x;
+        color *= exp(-G.absorb.rgb * path);
+        a *= exp(-G.scatter.w * path);
     }
     outFoam = vec4(color * a, a);
+    outSurface = submerged > 0.0 ? 0.0 : a;
 }

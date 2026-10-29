@@ -6,9 +6,12 @@ layout(std430, binding = 2) readonly buffer Start { uint start[]; };
 layout(std430, binding = 3) readonly buffer Occupancy { uint occupancy[]; };
 layout(std430, binding = 4) readonly buffer Depth { uint depth[]; };
 layout(std430, binding = 5) writeonly buffer Field { float field[]; };
+layout(std430, binding = 6) writeonly buffer BlockMask { uint blockMask[]; };
 layout(push_constant) uniform PC { ivec4 a; vec4 b; ivec4 c; } pc;
 
 const float ZB_SCALE = 16384.0;
+
+shared uint blockParticles;
 
 void main() {
     int block = int(GROUP_ID);
@@ -17,17 +20,42 @@ void main() {
     }
     int lid = int(gl_LocalInvocationID.x);
     ivec3 bc = ivec3(block % pc.c.x, (block / pc.c.x) % pc.c.y, block / (pc.c.x * pc.c.y));
-    ivec3 v = G.fineBoxMin.xyz + bc * ivec3(8, 8, 4) + ivec3(lid & 7, (lid >> 3) & 7, lid >> 6);
+    ivec3 blockMin = G.fineBoxMin.xyz + bc * ivec3(8, 8, 4);
+    ivec3 v = blockMin + ivec3(lid & 7, (lid >> 3) & 7, lid >> 6);
+    int sub = G.fine.w;
+    float R = pc.b.x;
+    ivec3 blockMax = min(blockMin + ivec3(8, 8, 4), G.fineBoxMax.xyz) - 1;
+    ivec3 cLo = max(ivec3(floor((vec3(blockMin) + 0.5 - R) / float(sub))), G.boxMin.xyz);
+    ivec3 cHi = min(ivec3(floor((vec3(blockMax) + 0.5 + R) / float(sub))), G.boxMax.xyz - 1);
+    ivec3 cDim = max(cHi - cLo + 1, ivec3(0));
+    int nCells = cDim.x * cDim.y * cDim.z;
+    if (lid == 0) {
+        blockParticles = 0u;
+    }
+    barrier();
+    uint found = 0u;
+    for (int k = lid; k < nCells && found == 0u; k += 256) {
+        found = occupancy[boxIndex(cLo + ivec3(k % cDim.x, (k / cDim.x) % cDim.y, k / (cDim.x * cDim.y)))];
+    }
+    if (found != 0u) {
+        blockParticles = 1u;
+    }
+    barrier();
+    if (lid == 0) {
+        blockMask[block] = blockParticles;
+    }
     if (!inFine(v)) {
         return;
     }
-    int sub = G.fine.w;
     int i = fineIndex(v);
     if (pc.a.z > 0 && depth[boxIndex(v / sub)] >= uint(pc.a.z)) {
         field[i] = 1.0;
         return;
     }
-    float R = pc.b.x;
+    if (blockParticles == 0u) {
+        field[i] = 0.0;
+        return;
+    }
     float invR2 = 1.0 / (R * R);
     vec3 centre = vec3(v) + 0.5;
     ivec3 lo = max(ivec3(floor((centre - R) / float(sub))), G.boxMin.xyz);

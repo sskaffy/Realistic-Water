@@ -1,7 +1,11 @@
 package me.skaffy.client.mixin;
 
 import me.skaffy.block.RealisticSandBlock;
+import me.skaffy.client.water.WaterSettings;
 import me.skaffy.client.water.WaterWorld;
+import net.minecraft.core.particles.ParticleOptions;
+import net.minecraft.core.particles.ParticleTypes;
+import org.spongepowered.asm.mixin.injection.Redirect;
 import me.skaffy.fluid.RealisticLavaFluid;
 import me.skaffy.fluid.RealisticSlimeFluid;
 import me.skaffy.fluid.RealisticWaterFluid;
@@ -38,6 +42,15 @@ public class ClientLevelMixin {
 		if (realisticWater$invisibleSwap(oldState, newState)) {
 			ci.cancel();
 		}
+	}
+
+	@Redirect(method = "tickWeatherEffects", at = @At(value = "INVOKE",
+		target = "Lnet/minecraft/client/multiplayer/ClientLevel;addParticle(Lnet/minecraft/core/particles/ParticleOptions;DDDDDD)V"))
+	private void realisticWater$noRainSplash(ClientLevel level, ParticleOptions particle, double x, double y, double z, double xd, double yd, double zd) {
+		if (WaterSettings.realisticRain && particle == ParticleTypes.RAIN) {
+			return;
+		}
+		level.addParticle(particle, x, y, z, xd, yd, zd);
 	}
 
 	@Inject(method = "setBlocksDirty", at = @At("HEAD"), cancellable = true)

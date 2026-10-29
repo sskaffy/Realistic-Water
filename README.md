@@ -1,7 +1,7 @@
 # Realistic Water
 A Minecraft mod that adds a lot of cool, realistic stuff from Minecraft Blender animations.
 
-<img width="2560" height="1440" alt="2026-10-25_13 38 34" src="https://github.com/user-attachments/assets/763ad9c4-3169-44e1-b085-c127f5e2c3d7" />
+![Project Screenshot](images/1.png)
 
 #
 
@@ -16,9 +16,7 @@ How to use:
 7. Remove them: use "/water remove" to remove water and "/water remove <block>" for everything else (op only) 
 8. Use "Water Pump" to move water in ways it couldn't flow by itself (has to be powered by redstone)
 9. Customize most things about how things look/move in "/water gui" (or just "/water" if you aren't op)
-8. Use shaders with Vitrail! Any OF/Iris shaders will work, download Vitrail from: https://modrinth.com/mod/vitrail-shaders
-
-Realistic water finally got full support with Sodium and Vitrail shaders, if there are still any bugs, let me know!
+8. Use shaders with Vitrail! Any OF/Iris shaders (even Complementary Shaders) will work, download Vitrail from: https://modrinth.com/mod/vitrail-shaders
 
 #
 
@@ -30,16 +28,46 @@ A: Later
 Q: OpenGL support?
 A: Never
 
+### What the mod contains:
+
+- Realistic water
+- Small Bucket of Realistic water (puts down only 1 block of realistic water instead of an infinite source)
+- Realistic water boiling, moving with pumps, ultra realistic physics, reacting to entities, swim in it, react to realistic blocks
+- Realistic blocks (can be obtained by right clicking a Realistic Convertor and putting any block inside)
+- Realistic boat, works the best with realistic water, can be obtained via the Realistic Convertor
+- Realistic lava, burns things, converts into cobble stone on realistic water contact, burns flameable realistic blocks, burns leaves
+- Realistic sand
+- Realistic leaves
+- Realistic slime
+- Realistic things react to TNT
+- Realistic rain that the realistic water reacts to and the rain feeds the water (makes steam in lava)
+- Sodium menu support
+- Clip rendering and packing it into a mp4 with ffmpeg (the mod doesnt contain ffmpeg, you have to download it manually though you only need this if you wanna render clips inside the mod. you can just use obs)
+- Water pumps, moves the water from its input to its output when powered by redstone (you can change the speed of it by right clicking on it)
+- Water starts disappearing after being boiled for too long on too high temperature
+- Water makes steam, boiling sounds, boiling particles on high temperature
+- Water heats up by being too close to hot things like Magma Block, Campfire, Lava, Fire
+- Too hot water damages you if you are inside
+- Water cools down by having cold blocks around it like Ice, Snow Block, Snow or being in cold biomes. Putting more water in hot water will just make warm water which then cools down to the biome's temperature
+- Realistic things like water, lava can go through any portals
+- Vitrail shader loader support (Vitrail can load in any OF/Iris shader on Vulkan)
+
 **Showcase:** https://www.youtube.com/watch?v=GG2-psEHUI4
 
 #
 
-**Water pumps:**
+**House made out of Realistic Blocks float on water:**
 
-<img width="1920" height="1080" alt="Still 2026-10-24 125037_1 78 1" src="https://github.com/user-attachments/assets/0b443877-8610-4ed4-9aa7-7e3a6ae1f6ad" />
+![Project Screenshot](images/2.png)
+![Project Screenshot](images/3.png)
 
-**Everything else:**
+**Realistic Block burns in Realistic Lava:**
 
-<img width="1280" height="720" alt="New Project - 2026-10-24T125259 436" src="https://github.com/user-attachments/assets/5559a179-8878-4f9e-a3c3-4126bc5fccd6" />
+![Project Screenshot](images/4.png)
+
+**Realistic Water turns into steam after entering the nether:**
+
+![Project Screenshot](images/5.png)
+![Project Screenshot](images/6.png)
 
 Credits: https://github.com/claude and https://github.com/eva-akselrad

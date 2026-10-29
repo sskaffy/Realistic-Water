@@ -8,6 +8,10 @@ layout(std430, binding = 3) writeonly buffer Visible { SurfaceParticle visible[]
 layout(std430, binding = 4) buffer Args { uint args[]; };
 layout(std430, binding = 5) readonly buffer Counters { uint counters[]; };
 layout(push_constant) uniform PC { ivec4 a; ivec4 b; } pc;
+#define REGION_LIGHT_BINDING 6
+#include "region_light.glsl"
+#define PACK_SHADOW_BINDING 7
+#include "sun_shadow.glsl"
 
 #define ARGS_GRAIN_INSTANCES 21
 
@@ -41,5 +45,5 @@ void main() {
     n = normalize(vec3(n.x, max(n.y, 0.0) + 0.05, n.z));
     float shade = mix(1.0, 0.82, smoothstep(iso, 1.0, densAt(fp)));
     uint o = atomicAdd(args[ARGS_GRAIN_INSTANCES], 1u);
-    visible[o] = SurfaceParticle(vec4(p.pos.xyz, max(p.pos.w, 1.0)), vec4(n, shade), vec4(p.vel.w, 0.0, 0.0, 0.0));
+    visible[o] = SurfaceParticle(vec4(p.pos.xyz, max(p.pos.w, 1.0)), vec4(n, shade), vec4(p.vel.w, sunShadowFactor(p.pos.xyz), 0.0, 0.0));
 }

@@ -24,6 +24,8 @@ final class SolidCache {
 	final boolean ignoreSand;
 	private final int bitsPerBlock;
 	private final Long2ObjectOpenHashMap<Section> sections = new Long2ObjectOpenHashMap<>();
+	private int minSectionY = Integer.MAX_VALUE;
+	private int maxSectionY = Integer.MIN_VALUE;
 
 	private static final class Section {
 		final byte[] kind = new byte[4096];
@@ -42,10 +44,14 @@ final class SolidCache {
 
 	void clear() {
 		this.sections.clear();
+		this.minSectionY = Integer.MAX_VALUE;
+		this.maxSectionY = Integer.MIN_VALUE;
 	}
 
 	void invalidateChunk(int chunkX, int chunkZ) {
-		this.sections.keySet().removeIf(key -> SectionPos.x(key) == chunkX && SectionPos.z(key) == chunkZ);
+		for (int sy = this.minSectionY; sy <= this.maxSectionY; sy++) {
+			this.sections.remove(SectionPos.asLong(chunkX, sy, chunkZ));
+		}
 	}
 
 	boolean update(ClientLevel level, BlockPos pos) {
@@ -69,7 +75,7 @@ final class SolidCache {
 		int sectionIndex = level.getSectionIndexFromSectionY(sy);
 		if (sectionIndex >= level.getSectionsCount()) {
 			s = new Section();
-			this.sections.put(key, s);
+			this.put(key, sy, s);
 			return s;
 		}
 		if (sectionIndex < 0 || !level.hasChunk(sx, sz)) {
@@ -92,8 +98,14 @@ final class SolidCache {
 				this.voxelizeBlock(level, pos, state, s, i);
 			}
 		}
-		this.sections.put(key, s);
+		this.put(key, sy, s);
 		return s;
+	}
+
+	private void put(long key, int sy, Section section) {
+		this.sections.put(key, section);
+		this.minSectionY = Math.min(this.minSectionY, sy);
+		this.maxSectionY = Math.max(this.maxSectionY, sy);
 	}
 
 	private void voxelizeBlock(ClientLevel level, BlockPos pos, BlockState state, Section s, int i) {

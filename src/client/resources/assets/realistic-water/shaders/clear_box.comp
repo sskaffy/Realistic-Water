@@ -5,6 +5,7 @@ layout(std430, binding = 1) writeonly buffer Accum { int accum[]; };
 layout(std430, binding = 2) writeonly buffer Count { int cellCount[]; };
 layout(std430, binding = 3) writeonly buffer Dens { int cellDens[]; };
 layout(std430, binding = 4) writeonly buffer WwCount { int wwCount[]; };
+layout(std430, binding = 5) writeonly buffer Heat { int cellHeat[]; };
 
 void main() {
     int t = int(GID_U);
@@ -13,6 +14,7 @@ void main() {
         cellCount[i] = 0;
         cellDens[i] = 0;
         wwCount[i] = 0;
+        cellHeat[i] = 0;
         return;
     }
     int comp;

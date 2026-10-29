@@ -23,6 +23,39 @@ bool solidFine(ivec3 p) {
     return (f & 0xFFu) == CELL_SOLID && e >= 0 && entIsBody(e);
 }
 
+bool solidCell(ivec3 c) {
+    if (!inGrid(c)) {
+        return false;
+    }
+    int i = cellIndex(c);
+    if (staticSolid[i] != 0u) {
+        return true;
+    }
+    uint f = cellFlags[i];
+    int e = int(f >> 8) - 1;
+    return (f & 0xFFu) == CELL_SOLID && e >= 0 && entIsBody(e);
+}
+
+bool solidWithinReach(ivec3 p, int reach) {
+    int sub = G.fine.w;
+    ivec3 c = ivec3(floor(vec3(p) / float(sub)));
+    if (solidCell(c)) {
+        return true;
+    }
+    for (int a = 0; a < 3; a++) {
+        int lo = int(floor(float(p[a] - reach) / float(sub)));
+        int hi = int(floor(float(p[a] + reach) / float(sub)));
+        for (int k = lo; k <= hi; k++) {
+            ivec3 q = c;
+            q[a] = k;
+            if (k != c[a] && solidCell(q)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 float load(ivec3 p) {
     return inFine(p) ? src[fineIndex(p)] : 0.0;
 }
@@ -36,6 +69,10 @@ void main() {
     ivec3 p = G.fineBoxMin.xyz + ivec3(t % bd.x, (t / bd.x) % bd.y, t / (bd.x * bd.y));
     int reach = pc.a.x;
     float v = load(p);
+    if (!solidWithinReach(p, reach)) {
+        dst[fineIndex(p)] = v;
+        return;
+    }
     if (solidFine(p)) {
         float best = v;
         for (int d = 0; d < 6; d++) {

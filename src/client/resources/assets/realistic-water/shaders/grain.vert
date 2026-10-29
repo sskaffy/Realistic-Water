@@ -10,6 +10,7 @@ layout(location = 3) flat out uint vSeed;
 layout(location = 4) flat out vec3 vWorld;
 layout(location = 5) flat out vec3 vNormal;
 layout(location = 6) flat out float vShade;
+layout(location = 7) flat out float vSun;
 
 const vec2 CORNERS[6] = vec2[](vec2(-1, -1), vec2(1, -1), vec2(1, 1), vec2(-1, -1), vec2(1, 1), vec2(-1, 1));
 
@@ -53,4 +54,5 @@ void main() {
     vWorld = G.misc.yzw + rel;
     vNormal = mat3(G.view) * nWorld;
     vShade = p.normal.w;
+    vSun = p.extra.y;
 }

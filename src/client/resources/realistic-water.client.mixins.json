@@ -4,7 +4,9 @@
 	"compatibilityLevel": "JAVA_25",
 	"client": [
 		"RealisticBlockMinecraftMixin",
+		"BlockEntityRenderDistanceMixin",
 		"BlockLightEngineMixin",
+		"ClientChunkCacheGridMixin",
 		"CameraMixin",
 		"ClientLevelMixin",
 		"ClientPacketListenerMixin",
@@ -17,7 +19,9 @@
 		"LocalPlayerMixin",
 		"MinecraftMixin",
 		"MouseHandlerMixin",
-		"compat.VitrailPackChainMixin"
+		"WeatherEffectRendererMixin",
+		"compat.VitrailPackChainMixin",
+		"compat.VitrailShadowGeometryMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

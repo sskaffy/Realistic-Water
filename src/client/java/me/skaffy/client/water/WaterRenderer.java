@@ -44,6 +44,7 @@ public final class WaterRenderer implements AutoCloseable {
 	private VkTex materialId;
 	private VkTex thickness;
 	private VkTex foam;
+	private VkTex foamSurface;
 
 	public WaterRenderer() {
 		this.thicknessFormat = blendable(VkTex.R32F) ? VkTex.R32F : VkTex.R16F;
@@ -55,12 +56,13 @@ public final class WaterRenderer implements AutoCloseable {
 		GraphicsProgram.State add = new GraphicsProgram.State(this.thicknessFormat, VK10.VK_FORMAT_UNDEFINED, false, false, VK10.VK_COMPARE_OP_ALWAYS,
 			GraphicsProgram.Blend.ADD);
 		Map<String, String> droplets = Map.of("DROPLETS", "1", "VIEW_BINDING", "3");
-		this.meshFront = new GraphicsProgram("mesh.vert", "mesh_front.frag", Map.of(), front, U, S, S, S, S);
+		this.meshFront = new GraphicsProgram("mesh.vert", "mesh_front.frag", Map.of(), front, U, S, S, S, S, T);
 		this.dropletFront = new GraphicsProgram("particle.vert", "droplet_front.frag", droplets, front, U, S, S, S, S);
 		this.meshThickness = new GraphicsProgram("mesh.vert", "mesh_thickness.frag", Map.of(), add, U, S, S, S, T);
 		this.dropletThickness = new GraphicsProgram("particle.vert", "droplet_thickness.frag", droplets, add, U, S, S, S, T);
 		this.whitewaterProgram = new GraphicsProgram("particle.vert", "whitewater.frag", Map.of("VIEW_BINDING", "4"),
-			new GraphicsProgram.State(VkTex.RGBA16F, VK10.VK_FORMAT_UNDEFINED, false, false, VK10.VK_COMPARE_OP_ALWAYS, GraphicsProgram.Blend.ADD),
+			new GraphicsProgram.State(VkTex.RGBA16F, VK10.VK_FORMAT_UNDEFINED, false, false, VK10.VK_COMPARE_OP_ALWAYS, GraphicsProgram.Blend.ADD,
+				this.thicknessFormat),
 			U, S, T, T, S);
 		this.dropletCull = new ComputeProgram("droplet_cull.comp", U, S, S, S, S, S, S);
 	}
@@ -69,7 +71,7 @@ public final class WaterRenderer implements AutoCloseable {
 		return this.composites.computeIfAbsent(colorFormat * 2 + (layer ? 1 : 0), key -> new GraphicsProgram("fullscreen.vert", "composite.frag", Map.of(),
 			new GraphicsProgram.State(colorFormat, VkTex.D32, true, true, VK10.VK_COMPARE_OP_ALWAYS,
 				layer ? GraphicsProgram.Blend.PREMULTIPLIED : GraphicsProgram.Blend.NONE),
-			Desc.UBO, Desc.TEX, Desc.TEX, Desc.TEX, Desc.TEX, Desc.TEX, Desc.TEX, Desc.SSBO, Desc.SSBO, Desc.TEX));
+			Desc.UBO, Desc.TEX, Desc.TEX, Desc.TEX, Desc.TEX, Desc.TEX, Desc.TEX, Desc.SSBO, Desc.SSBO, Desc.TEX, Desc.TEX));
 	}
 
 	private static boolean blendable(int format) {
@@ -95,10 +97,13 @@ public final class WaterRenderer implements AutoCloseable {
 		this.materialId = new VkTex(VkTex.RGBA16F, w, h, VkTex.COLOR | VkTex.SAMPLED);
 		this.thickness = new VkTex(this.thicknessFormat, w, h, VkTex.COLOR | VkTex.SAMPLED);
 		this.foam = new VkTex(VkTex.RGBA16F, w, h, VkTex.COLOR | VkTex.SAMPLED);
+		this.foamSurface = new VkTex(this.thicknessFormat, w, h, VkTex.COLOR | VkTex.SAMPLED);
 	}
 
 	private void releaseTargets() {
-		for (VkTex t : new VkTex[]{this.sceneDepth, this.fluidZ, this.sceneColor, this.gbuffer, this.materialId, this.thickness, this.foam}) {
+		for (VkTex t : new VkTex[]{
+			this.sceneDepth, this.fluidZ, this.sceneColor, this.gbuffer, this.materialId, this.thickness, this.foam, this.foamSurface
+		}) {
 			if (t != null) {
 				Vk.destroyLater(t);
 			}
@@ -156,7 +161,8 @@ public final class WaterRenderer implements AutoCloseable {
 		for (Body body : bodies) {
 			WaterRegion r = body.region();
 			float radius = WaterSettings.particleRadius / r.res;
-			this.meshFront.bind(cb, body.ubo(), Desc.ssbo(r.mesher.verts), Desc.ssbo(r.mesher.quads), view, Desc.ssbo(r.light()));
+			this.meshFront.bind(cb, body.ubo(), Desc.ssbo(r.mesher.verts), Desc.ssbo(r.mesher.quads), view, Desc.ssbo(r.light()),
+				Desc.tex(WaterWorld.packShadowView != 0L ? WaterWorld.packShadowView : lightmap, this.nearest.handle));
 			this.meshFront.drawIndirect(cb, r.mesher.meshCounters, SurfaceMesher.DRAW_ARGS_OFFSET);
 			this.dropletFront.bind(cb, body.ubo(), Desc.ssbo(r.currentParticles()), Desc.ssbo(r.dropletIds), view, Desc.ssbo(r.light()));
 			this.dropletFront.push(cb, Program.f(radius), Program.f(0.0F), Program.f(0.15F));
@@ -177,7 +183,7 @@ public final class WaterRenderer implements AutoCloseable {
 		GraphicsProgram.end(cb);
 		Vk.barrier(cb);
 
-		GraphicsProgram.begin(cb, w, h, this.foam.view, new float[]{0, 0, 0, 0}, 0L);
+		GraphicsProgram.begin(cb, w, h, this.foam.view, new float[]{0, 0, 0, 0}, this.foamSurface.view, new float[]{0, 0, 0, 0}, 0L);
 		if (WaterSettings.whitewater) {
 			for (Body body : bodies) {
 				WaterRegion r = body.region();
@@ -216,7 +222,8 @@ public final class WaterRenderer implements AutoCloseable {
 				matTex,
 				view,
 				Desc.ssbo(this.slimeTexture),
-				Desc.tex(lightmap, this.linear.handle));
+				Desc.tex(lightmap, this.linear.handle),
+				Desc.tex(this.foamSurface, this.linear.handle));
 			composite.push(cb, Program.f(readable[0]), Program.f(readable[1]), Program.f(readable[2]), Program.f(readable[3]),
 				Program.f(material.shaderId()));
 			composite.draw(cb, 3, 1);

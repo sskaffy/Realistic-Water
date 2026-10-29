@@ -5,8 +5,12 @@ import java.util.List;
 import me.skaffy.net.BodyPushPayload;
 import me.skaffy.net.BodyStatePayload;
 import me.skaffy.physics.PhysicsWorld;
+import me.skaffy.client.water.WaterSettings;
 import me.skaffy.physics.RigidBody;
+import me.skaffy.physics.SweptCollider;
+import me.skaffy.realistic.BlockMaterials;
 import me.skaffy.realistic.RealisticBlockEntity;
+import me.skaffy.realistic.RealisticCollision;
 import me.skaffy.realistic.RealisticPhysics;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.Minecraft;
@@ -68,6 +72,7 @@ public final class ClientBodies {
 			view = null;
 			viewLevel = null;
 			incoming.clear();
+			ClientGrid.clear();
 			simulated.clear();
 			return;
 		}
@@ -77,6 +82,7 @@ public final class ClientBodies {
 		if (!stepped) {
 			step(mc.level);
 		}
+		syncGrid(mc.level, mc.player);
 		claimAndRelease(mc.level, mc.player);
 		for (RealisticBlockEntity e : simulated) {
 			boolean touching = e.touchedTick == tick || e.hasPassenger(mc.player);
@@ -123,6 +129,10 @@ public final class ClientBodies {
 		}
 		incoming.clear();
 		if (!simulated.isEmpty()) {
+			BlockMaterials.gravity = WaterSettings.blockGravity;
+			BlockMaterials.setGravityOverrides(WaterSettings.blockGravityPerBlock);
+			world.gravity = BlockMaterials.gravity;
+			world.gravityOf = BlockMaterials.hasGravityOverrides() ? BlockMaterials::gravityOf : null;
 			double dt = 0.05 / RealisticPhysics.SUBSTEPS;
 			for (int s = 0; s < RealisticPhysics.SUBSTEPS; s++) {
 				world.step(view, dt, (body, cell) -> {
@@ -196,6 +206,19 @@ public final class ClientBodies {
 	}
 
 
+	private static void syncGrid(ClientLevel level, LocalPlayer player) {
+		for (RealisticBlockEntity e : level.getEntitiesOfClass(RealisticBlockEntity.class,
+			player.getBoundingBox().inflate(RealisticBlockEntity.CLAIM_RANGE * 2.0))) {
+			if (!e.clientGridDirty) {
+				continue;
+			}
+			e.clientGridDirty = false;
+			ClientGrid.forget(e.gridBlocks());
+			ClientGrid.sync(e);
+			e.reapplyClientBlockEntities();
+		}
+	}
+
 	private static void pushesFrom(LocalPlayer player, Vec3 movement) {
 		AABB box = player.getBoundingBox();
 		AABB sweep = box.expandTowards(movement).inflate(1.0E-3);
@@ -203,25 +226,28 @@ public final class ClientBodies {
 			if (!e.isSimulated()) {
 				asObstacle(e);
 			}
-			List<VoxelShape> shapes = e.collisionShapes(sweep);
-			if (shapes.isEmpty()) {
+			List<SweptCollider.Oriented> boxes = e.orientedBoxes(sweep);
+			if (boxes.isEmpty()) {
 				continue;
 			}
+			double[] bounds = {box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ};
 			for (Direction.Axis axis : AXES) {
 				double want = movement.get(axis);
 				if (Math.abs(want) < 1.0E-7) {
 					continue;
 				}
 				double reach = axis == Direction.Axis.Y ? want : want + Math.signum(want) * LOOKAHEAD;
-				double allowed = Shapes.collide(axis, box, shapes, reach);
+				int index = axis == Direction.Axis.X ? 0 : axis == Direction.Axis.Y ? 1 : 2;
+				double allowed = SweptCollider.allowedAlong(bounds, index, reach, boxes, RealisticCollision.MAX_SLOPE);
 				if (Math.abs(reach - allowed) > 1.0E-7) {
-					contact(player, e, box, shapes, axis, want, Math.min(Math.abs(allowed), Math.abs(want)) * Math.signum(want));
+					contact(player, e, box, boxes, axis, want, Math.min(Math.abs(allowed), Math.abs(want)) * Math.signum(want));
 				}
 			}
 		}
 	}
 
-	private static void contact(LocalPlayer player, RealisticBlockEntity e, AABB box, List<VoxelShape> shapes, Direction.Axis axis, double want, double allowed) {
+	private static void contact(LocalPlayer player, RealisticBlockEntity e, AABB box, List<SweptCollider.Oriented> shapes, Direction.Axis axis, double want,
+		double allowed) {
 		double sign = Math.signum(want);
 		double nx = axis == Direction.Axis.X ? sign : 0.0;
 		double ny = axis == Direction.Axis.Y ? sign : 0.0;
@@ -229,8 +255,9 @@ public final class ClientBodies {
 		AABB moved = box.move(nx * Math.abs(want), ny * Math.abs(want), nz * Math.abs(want));
 		Vector3d p = new Vector3d();
 		double weight = 0.0;
-		for (VoxelShape shape : shapes) {
-			AABB b = shape.bounds();
+		for (SweptCollider.Oriented shape : shapes) {
+			double[] s = shape.bounds();
+			AABB b = new AABB(s[0], s[1], s[2], s[3], s[4], s[5]);
 			if (!b.intersects(moved)) {
 				continue;
 			}

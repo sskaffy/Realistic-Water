@@ -10,6 +10,7 @@ layout(std430, binding = 7) readonly buffer ViewState { vec4 viewState; };
 layout(std430, binding = 8) readonly buffer SlimeTex { int slimeTex[]; };
 #define LIGHTMAP_BINDING 9
 #include "fluid_light.glsl"
+layout(binding = 10) uniform sampler2D foamSurfaceTex;
 layout(push_constant) uniform Push { vec4 area; float filterMat; } pc;
 
 bool readable(vec2 uv) {
@@ -301,7 +302,7 @@ vec3 shadePixel(vec2 uv) {
         vec3 slime = behindAt(uv);
         float slimeDepth = sceneDev;
         if (hasFluid && matTagged) {
-            slime = shadeSlime(uv, g.xyz, fd, surfaceLight);
+            slime = shadeSlime(uv, g.xyz, fd, surfaceLight) * (1.0 - matSample.a);
             vec4 clip = G.proj * vec4(viewPosAt(uv, fd), 1.0);
             slimeDepth = clip.z / clip.w;
         }
@@ -353,9 +354,11 @@ vec3 shadePixel(vec2 uv) {
         float coverage = min(1.0 - exp(-foam.a * G.foamA.y), 0.9);
         if (hasFluid && !underwater) {
             vec3 world = G.misc.yzw + (G.invView * vec4(viewPosAt(uv, fd), 1.0)).xyz;
-            coverage *= foamLace(world.xz, coverage, pixelFootprint(fd));
+            float surface = clamp(texture(foamSurfaceTex, uv).r / foam.a, 0.0, 1.0);
+            coverage *= mix(1.0, foamLace(world.xz, coverage, pixelFootprint(fd)), surface);
         }
-        color = mix(color, foamColor * mix(0.25, 1.0, ambient), coverage);
+        vec3 foamLight = vanillaLight(hasFluid && matTagged ? surfaceLight : vec2(0.0, 1.0));
+        color = mix(color, foamColor * foamLight, coverage);
     }
 
     gDepth = outDepth;

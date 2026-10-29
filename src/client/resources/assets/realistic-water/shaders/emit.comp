@@ -45,6 +45,10 @@ void main() {
     float tag = isSand() ? 0.001 + 0.998 * rand(seed) : 0.0;
     if (isLeaves()) {
         tag = float(hash(seed) & 0x3FFFFu);
+    } else if (isSteam()) {
+        tag = rand(seed);
+    } else if (isWater()) {
+        tag = G.heatA.y;
     }
     dst[o] = Particle(vec4(p, 0.0), vec4(e.vel.xyz, tag));
 }

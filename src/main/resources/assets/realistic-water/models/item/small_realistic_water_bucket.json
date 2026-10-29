@@ -1,0 +1,6 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "realistic-water:item/small_realistic_water_bucket"
+  }
+}

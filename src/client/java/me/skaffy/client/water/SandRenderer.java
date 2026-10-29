@@ -26,11 +26,12 @@ final class SandRenderer implements AutoCloseable {
 	private final ComputeProgram cull;
 	private final VkBuf texture;
 	private final Sampler linear = new Sampler(true);
+	private final Sampler nearest = new Sampler(false);
 
 	SandRenderer() {
 		int U = Desc.UBO;
 		int S = Desc.SSBO;
-		this.cull = new ComputeProgram("grain_cull.comp", U, S, S, S, S, S);
+		this.cull = new ComputeProgram("grain_cull.comp", U, S, S, S, S, S, S, Desc.TEX);
 		this.texture = loadTexture();
 	}
 
@@ -104,7 +105,7 @@ final class SandRenderer implements AutoCloseable {
 		for (WaterRenderer.Body body : bodies) {
 			WaterRegion r = body.region();
 			this.cull.bind(cb, body.ubo(), Desc.ssbo(r.currentParticles()), Desc.ssbo(r.mesher.densA), Desc.ssbo(r.surfaceParticles), Desc.ssbo(r.args),
-				Desc.ssbo(r.counters));
+				Desc.ssbo(r.counters), Desc.ssbo(r.light()), Desc.tex(WaterWorld.packShadowView != 0L ? WaterWorld.packShadowView : lightmap, this.nearest.handle));
 			this.cull.push(cb, WaterRegion.C_FLUID + r.cur);
 			this.cull.dispatchIndirect(cb, r.args, WaterRegion.ARGS_FLUID_DISPATCH);
 		}
@@ -125,5 +126,6 @@ final class SandRenderer implements AutoCloseable {
 		this.cull.close();
 		this.texture.close();
 		this.linear.close();
+		this.nearest.close();
 	}
 }

@@ -93,6 +93,10 @@ public final class RealisticPhysics {
 		LEVELS.clear();
 	}
 
+	public static void forget(ServerLevel level) {
+		LEVELS.remove(level);
+	}
+
 	public static void push(RealisticBlockEntity e, double px, double py, double pz, double dx, double dy, double dz, double target, double force, double kick) {
 		if (!(e.level() instanceof ServerLevel server) || e.body.mass <= 0.0) {
 			return;
@@ -123,6 +127,11 @@ public final class RealisticPhysics {
 	}
 
 	private void step() {
+		this.world.gravity = BlockMaterials.gravity;
+		this.world.gravityOf = BlockMaterials.hasGravityOverrides() ? BlockMaterials::gravityOf : null;
+		for (RealisticBlockEntity body : List.copyOf(this.owners.values())) {
+			body.pullFromGrid();
+		}
 		this.owners.entrySet().removeIf(entry -> {
 			if (entry.getValue().isRemoved() || entry.getKey().cells.isEmpty()) {
 				this.world.bodies.remove(entry.getKey());

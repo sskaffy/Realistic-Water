@@ -31,6 +31,8 @@ public final class WaterSettings {
 	public static float volumeCorrection = 2.0F;
 	public static float maxSpeed = 40.0F;
 	public static float gravity = 9.81F;
+	public static float blockGravity = 9.81F;
+	public static String blockGravityPerBlock = "";
 
 	public static boolean whitewater = true;
 	public static float wwTrappedAirRate = 30.0F;
@@ -213,6 +215,58 @@ public final class WaterSettings {
 	public static float tntScatter = 0.25F;
 
 	public static boolean vitrailInsidePack = true;
+	public static float packWaterVisibility = 0.5F;
+	public static float packWaterTint = 0.5F;
+	public static boolean packShadows = true;
+	public static float packShadowStrength = 0.55F;
+	public static boolean packShadowPerLeaf = true;
+	public static int packShadowDetail = 4;
+	public static boolean packDrawMaterials = true;
+
+	public static boolean realisticRain = true;
+	public static int rainRadius = 32;
+	public static float rainDensity = 9.0F;
+	public static float rainFallSpeed = 9.0F;
+	public static float rainStreakTime = 0.03F;
+	public static float rainOpacity = 0.3F;
+	public static float rainWind = 1.5F;
+	public static float rainSplashDroplets = 3.0F;
+	public static float rainKick = 0.6F;
+	public static float rainLavaSteam = 0.05F;
+	public static float rainFeed = 0.02F;
+
+	public static boolean waterTemperature = true;
+	public static float waterHeatRate = 0.1F;
+	public static float waterHeatSpread = 0.05F;
+	public static float waterCoolTime = 3600.0F;
+	public static float waterIceCooling = 0.05F;
+	public static float magmaHeat = 300.0F;
+	public static float lavaHeat = 700.0F;
+	public static float fireHeat = 450.0F;
+	public static float furnaceHeat = 250.0F;
+	public static float boilChurn = 6.0F;
+	public static float boilSteam = 1.0F;
+	public static float steamWispTemperature = 60.0F;
+	public static float boilingDamage = 1.0F;
+	public static boolean boilingSounds = true;
+	public static float boilingSoundVolume = 0.4F;
+	public static float boilBubbleSize = 0.12F;
+	public static float boilBubbleRise = 1.0F;
+	public static float boilBubbleRate = 10.0F;
+	public static float boilClingTemperature = 70.0F;
+
+	public static int steamResolution = 4;
+	public static float steamParticleSize = 0.08F;
+	public static float steamExpansion = 6.0F;
+	public static float steamLifetime = 8.0F;
+	public static float steamBuoyancy = 1.2F;
+	public static float steamDrag = 1.0F;
+	public static float steamSwirl = 0.6F;
+	public static float steamBurst = 1.2F;
+	public static float steamEntityPush = 0.6F;
+	public static float steamOpacity = 0.35F;
+	public static float steamDarkShade = 0.45F;
+	public static float steamLightShade = 0.95F;
 
 	public static String ffmpeg = "";
 	public static boolean renderFreezeWorld = true;

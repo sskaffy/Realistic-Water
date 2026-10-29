@@ -10,6 +10,8 @@ import me.skaffy.client.realistic.RealisticPlatform;
 import me.skaffy.client.compat.ShaderCompat;
 import me.skaffy.client.mixin.FogRendererAccessor;
 import me.skaffy.client.water.SlimeFogEnvironment;
+import me.skaffy.client.water.SteamParticle;
+import net.fabricmc.fabric.api.client.particle.v1.ParticleProviderRegistry;
 import me.skaffy.client.water.WaterCommands;
 import me.skaffy.client.water.WaterSettings;
 import me.skaffy.client.water.WaterSettingsScreen;
@@ -24,6 +26,12 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import me.skaffy.net.BodyPushPayload;
+import me.skaffy.net.SteamPayload;
+import me.skaffy.realistic.RealisticBlockEntity;
+import me.skaffy.net.GridBlockEntityPayload;
+import me.skaffy.net.GridBlockEventPayload;
+import me.skaffy.net.GridLevelEventPayload;
+import me.skaffy.net.GridSoundPayload;
 import net.fabricmc.fabric.api.client.render.fluid.v1.FluidRenderHandler;
 import net.fabricmc.fabric.api.client.render.fluid.v1.FluidRenderingRegistry;
 import net.minecraft.client.color.block.BlockTintSources;
@@ -54,7 +62,29 @@ public class RealisticWaterClient implements ClientModInitializer {
 		ClientTickEvents.END_CLIENT_TICK.register(ClientBodies::endTick);
 		ClientTickEvents.END_CLIENT_TICK.register(RealisticPlatform::tick);
 		ClientTickEvents.END_CLIENT_TICK.register(DynamicLights::tick);
+		ClientPlayNetworking.registerGlobalReceiver(SteamPayload.TYPE, (payload, context) -> context.client().execute(
+			() -> WaterWorld.get().addSteam(payload.x(), payload.y(), payload.z(), payload.eighths())));
 		ClientPlayNetworking.registerGlobalReceiver(BodyPushPayload.TYPE, (payload, context) -> context.client().execute(() -> ClientBodies.receive(payload)));
+		ClientPlayNetworking.registerGlobalReceiver(GridBlockEntityPayload.TYPE, (payload, context) -> context.client().execute(() -> {
+			if (context.client().level != null && context.client().level.getEntity(payload.entityId()) instanceof RealisticBlockEntity body) {
+				body.applyClientBlockEntity(payload.x(), payload.y(), payload.z(), payload.tag().orElse(null));
+			}
+		}));
+		ClientPlayNetworking.registerGlobalReceiver(GridBlockEventPayload.TYPE, (payload, context) -> context.client().execute(() -> {
+			if (context.client().level != null && context.client().level.getEntity(payload.entityId()) instanceof RealisticBlockEntity body) {
+				body.applyClientBlockEvent(payload.x(), payload.y(), payload.z(), payload.paramA(), payload.paramB());
+			}
+		}));
+		ClientPlayNetworking.registerGlobalReceiver(GridSoundPayload.TYPE, (payload, context) -> context.client().execute(() -> {
+			if (context.client().level != null) {
+				me.skaffy.client.realistic.GridEffects.sound(context.client().level, payload);
+			}
+		}));
+		ClientPlayNetworking.registerGlobalReceiver(GridLevelEventPayload.TYPE, (payload, context) -> context.client().execute(() -> {
+			if (context.client().level != null) {
+				me.skaffy.client.realistic.GridEffects.levelEvent(context.client().level, payload);
+			}
+		}));
 		ClientChunkEvents.CHUNK_LOAD.register(water::onChunkLoad);
 		ClientChunkEvents.CHUNK_UNLOAD.register(water::onChunkUnload);
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> water.clear());
@@ -90,5 +120,6 @@ public class RealisticWaterClient implements ClientModInitializer {
 			BlockTintSources.constant(0x7EDB5C)
 		);
 		FluidRenderingRegistry.register(ModContent.REALISTIC_SLIME, ModContent.FLOWING_REALISTIC_SLIME, slimeModel, invisible);
+		ParticleProviderRegistry.getInstance().register(ModContent.STEAM, SteamParticle.Provider::new);
 	}
 }

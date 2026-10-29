@@ -1,4 +1,6 @@
 #version 450
+#extension GL_KHR_shader_subgroup_arithmetic : enable
+#extension GL_KHR_shader_subgroup_ballot : enable
 #include "common.glsl"
 layout(local_size_x = 256) in;
 layout(std430, binding = 1) readonly buffer Src { Particle src[]; };
@@ -8,6 +10,7 @@ layout(std430, binding = 4) readonly buffer Vel { float vel[]; };
 layout(std430, binding = 5) readonly buffer Count { int cellCount[]; };
 layout(std430, binding = 6) readonly buffer Static { uint staticSolid[]; };
 layout(std430, binding = 7) buffer WwCount { int wwCount[]; };
+layout(std430, binding = 8) readonly buffer Heat { int cellHeat[]; };
 layout(push_constant) uniform PC { ivec4 a; ivec4 b; } pc;
 
 #include "gridsample.glsl"
@@ -21,6 +24,74 @@ int countAt(ivec3 c) {
     return inBox(c) ? cellCount[cellIndex(c)] : 0;
 }
 
+float tempAt(ivec3 c) {
+    if (!inBox(c)) {
+        return 0.0;
+    }
+    int n = cellCount[cellIndex(c)];
+    return n > 0 ? float(cellHeat[cellIndex(c)]) / (float(n) * HEAT_FP) : 0.0;
+}
+
+void keep(vec3 x, float life, vec3 v, float kind) {
+    uint groupTotal = subgroupAdd(1u);
+    uint prefix = subgroupExclusiveAdd(1u);
+    uint base = 0u;
+    if (subgroupElect()) {
+        base = atomicAdd(counters[pc.a.y], groupTotal);
+    }
+    uint o = subgroupBroadcastFirst(base) + prefix;
+    if (o < uint(G.caps.y)) {
+        dst[o] = Particle(vec4(x, life), vec4(v, kind));
+    }
+}
+
+void vapour(vec3 x, float life, vec3 v, float kind, inout uint seed) {
+    bool cling = kind >= WW_CLING;
+    float size = fract(kind);
+    ivec3 c = ivec3(floor(x));
+    float temp = tempAt(c);
+    float res = G.camGrid.w;
+    if (cling) {
+        life -= DT;
+        if (temp >= 99.0 && rand(seed) < 1.5 * DT) {
+            keep(x, 8.0, vec3(0.0, 0.3 * G.heatD.y * res, 0.0), WW_VAPOUR + size);
+        } else if (life > 0.0) {
+            keep(x, life, vec3(0.0), kind);
+        }
+        return;
+    }
+    bool inWater = countAt(c) > 0 || countAt(c + ivec3(0, 1, 0)) > 0;
+    if (!inWater) {
+        int drops = rand(seed) < size ? 2 : 1;
+        for (int k = 0; k < drops; k++) {
+            vec3 spray = (vec3(rand(seed) - 0.5, 0.0, rand(seed) - 0.5) * 0.6 + vec3(0.0, 0.5 + rand(seed), 0.0)) * size * res;
+            keep(x, 0.4 + 0.4 * rand(seed), spray, 0.0);
+        }
+        return;
+    }
+    if (temp < 99.0) {
+        size -= (99.0 - temp) * 0.08 * DT;
+        if (size <= 0.02) {
+            return;
+        }
+    } else {
+        size = min(size + 0.05 * DT, 0.999);
+    }
+    float phase = life * 9.0 + (x.x + x.z) * 0.7;
+    vec3 target = sampleVel(x) + vec3(sin(phase) * 0.15, 1.0, cos(phase * 0.8) * 0.15) * G.heatD.y * res * (0.6 + 0.6 * size);
+    v = mix(v, target, 1.0 - exp(-6.0 * DT));
+    vec3 xn = x + v * DT;
+    if (solidAt(xn)) {
+        xn = x;
+        v = vec3(0.0);
+    }
+    life -= DT;
+    if (life <= 0.0 || any(lessThan(xn, vec3(0.0))) || any(greaterThanEqual(xn, vec3(NX, NY, NZ)))) {
+        return;
+    }
+    keep(xn, life, v, WW_VAPOUR + size);
+}
+
 void main() {
     uint i = GID_U;
     if (i >= counters[pc.a.x]) {
@@ -30,6 +101,11 @@ void main() {
     vec3 x = p.pos.xyz;
     float life = p.pos.w;
     vec3 v = p.vel.xyz;
+    if (p.vel.w > 2.5) {
+        uint seed = hash(i * 2654435761u + uint(pc.a.w));
+        vapour(x, life, v, p.vel.w, seed);
+        return;
+    }
 
     ivec3 c = ivec3(floor(x));
     int n = countAt(c) + countAt(c + ivec3(1, 0, 0)) + countAt(c - ivec3(1, 0, 0))
@@ -63,7 +139,13 @@ void main() {
     if (life <= 0.0 || any(lessThan(xn, vec3(0.0))) || any(greaterThanEqual(xn, vec3(NX, NY, NZ)))) {
         return;
     }
-    uint o = atomicAdd(counters[pc.a.y], 1u);
+    uint groupTotal = subgroupAdd(1u);
+    uint prefix = subgroupExclusiveAdd(1u);
+    uint base = 0u;
+    if (subgroupElect()) {
+        base = atomicAdd(counters[pc.a.y], groupTotal);
+    }
+    uint o = subgroupBroadcastFirst(base) + prefix;
     if (o >= uint(G.caps.y)) {
         return;
     }

@@ -1,5 +1,8 @@
 package me.skaffy.client.realistic;
 
+import java.util.ArrayList;
+import java.util.List;
+import me.skaffy.physics.SweptCollider;
 import me.skaffy.realistic.RealisticBlockEntity;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
@@ -34,7 +37,6 @@ public final class RealisticPlatform {
 				player.setPos(player.getX() + dx, player.getY() + dy, player.getZ() + dz);
 			}
 		}
-		lift(player, mc);
 		pushOut(player, mc);
 
 		under = null;
@@ -55,15 +57,23 @@ public final class RealisticPlatform {
 		e.syncClientBody(e.position(), e.renderRotation(1.0F));
 	}
 
-	private static void lift(LocalPlayer player, Minecraft mc) {
-		AABB box = player.getBoundingBox();
-		double top = Double.NEGATIVE_INFINITY;
+	private static void pushOut(LocalPlayer player, Minecraft mc) {
+		AABB box = player.getBoundingBox().deflate(0.001);
+		List<SweptCollider.Oriented> boxes = new ArrayList<>();
 		for (RealisticBlockEntity e : mc.level.getEntitiesOfClass(RealisticBlockEntity.class, box)) {
 			sync(e);
-			top = Math.max(top, topUnder(e, box));
+			boxes.addAll(e.orientedBoxes(box));
 		}
-		if (top > box.minY + 1.0E-4 && top < box.minY + STEP) {
-			player.setPos(player.getX(), top, player.getZ());
+		if (boxes.isEmpty()) {
+			return;
+		}
+		double[] bounds = {box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ};
+		double[] out = SweptCollider.pushOut(bounds, boxes);
+		if (out == null || out[0] * out[0] + out[1] * out[1] + out[2] * out[2] > 4.0) {
+			return;
+		}
+		player.setPos(player.getX() + out[0], player.getY() + out[1], player.getZ() + out[2]);
+		if (out[1] > 1.0E-4) {
 			Vec3 v = player.getDeltaMovement();
 			if (v.y < 0.0) {
 				player.setDeltaMovement(v.x, 0.0, v.z);
@@ -72,44 +82,13 @@ public final class RealisticPlatform {
 		}
 	}
 
-	private static void pushOut(LocalPlayer player, Minecraft mc) {
-		for (int pass = 0; pass < 3; pass++) {
-			AABB box = player.getBoundingBox().deflate(0.01);
-			double bestX = 0.0;
-			double bestZ = 0.0;
-			double bestDepth = Double.MAX_VALUE;
-			for (RealisticBlockEntity e : mc.level.getEntitiesOfClass(RealisticBlockEntity.class, box)) {
-				sync(e);
-				for (VoxelShape shape : e.collisionShapes(box)) {
-					AABB b = shape.bounds();
-					if (!b.intersects(box) || b.maxY <= box.minY + STEP) {
-						continue;
-					}
-					double[] out = {b.maxX - box.minX, -(box.maxX - b.minX), b.maxZ - box.minZ, -(box.maxZ - b.minZ)};
-					for (int k = 0; k < 4; k++) {
-						double depth = Math.abs(out[k]);
-						if (depth < bestDepth) {
-							bestDepth = depth;
-							bestX = k < 2 ? out[k] : 0.0;
-							bestZ = k >= 2 ? out[k] : 0.0;
-						}
-					}
-				}
-			}
-			if (bestDepth == Double.MAX_VALUE || bestDepth > 0.6) {
-				return;
-			}
-			player.setPos(player.getX() + bestX * 1.02, player.getY(), player.getZ() + bestZ * 1.02);
-		}
-	}
-
 	private static double topUnder(RealisticBlockEntity e, AABB box) {
 		AABB column = new AABB(box.minX + 0.05, box.minY - 0.6, box.minZ + 0.05, box.maxX - 0.05, box.minY + STEP, box.maxZ - 0.05);
 		double top = Double.NEGATIVE_INFINITY;
-		for (VoxelShape shape : e.collisionShapes(column)) {
-			AABB b = shape.bounds();
-			if (b.maxY <= box.minY + STEP) {
-				top = Math.max(top, b.maxY);
+		for (SweptCollider.Oriented shape : e.orientedBoxes(column)) {
+			double[] b = shape.bounds();
+			if (b[4] <= box.minY + STEP) {
+				top = Math.max(top, b[4]);
 			}
 		}
 		return top;

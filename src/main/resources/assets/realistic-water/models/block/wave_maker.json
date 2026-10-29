@@ -1,8 +1,23 @@
 {
-  "parent": "minecraft:block/orientable",
+  "parent": "minecraft:block/block",
   "textures": {
+    "particle": "realistic-water:block/wave_maker_front",
     "top": "realistic-water:block/wave_maker_top",
     "front": "realistic-water:block/wave_maker_front",
     "side": "realistic-water:block/wave_maker_side"
-  }
+  },
+  "elements": [
+    {
+      "from": [0, 0, 0],
+      "to": [16, 16, 16],
+      "faces": {
+        "down": {"uv": [0, 0, 16, 16], "texture": "#top", "cullface": "down", "rotation": 180},
+        "up": {"uv": [0, 0, 16, 16], "texture": "#top", "cullface": "up"},
+        "north": {"uv": [0, 0, 16, 16], "texture": "#front", "cullface": "north"},
+        "south": {"uv": [0, 0, 16, 16], "texture": "#side", "cullface": "south"},
+        "west": {"uv": [0, 0, 16, 16], "texture": "#side", "cullface": "west"},
+        "east": {"uv": [0, 0, 16, 16], "texture": "#side", "cullface": "east"}
+      }
+    }
+  ]
 }

@@ -3,12 +3,17 @@
 #include "leaf.glsl"
 layout(std430, binding = 1) readonly buffer Parts { Particle parts[]; };
 layout(std430, binding = 5) readonly buffer Static { uint staticSolid[]; };
+#define REGION_LIGHT_BINDING 3
+#include "region_light.glsl"
+#define PACK_SHADOW_BINDING 6
+#include "sun_shadow.glsl"
 
 layout(location = 0) out vec2 vUV;
 layout(location = 1) out vec3 vView;
 layout(location = 2) flat out uint vVariant;
 layout(location = 3) flat out vec3 vNormal;
 layout(location = 4) flat out float vBurn;
+layout(location = 5) flat out float vSun;
 
 const vec2 CORNERS[6] = vec2[](vec2(-1, -1), vec2(1, -1), vec2(1, 1), vec2(-1, -1), vec2(1, 1), vec2(-1, 1));
 
@@ -75,4 +80,5 @@ void main() {
     vVariant = bits & 3u;
     vNormal = normal;
     vBurn = burn;
+    vSun = sunShadowFactor(sim);
 }

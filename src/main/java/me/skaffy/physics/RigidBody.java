@@ -8,6 +8,7 @@ import java.util.List;
 import org.joml.Matrix3d;
 import org.joml.Quaterniond;
 import org.joml.Vector3d;
+import org.jspecify.annotations.Nullable;
 
 public final class RigidBody {
 	public static final class Cell {
@@ -417,6 +418,54 @@ public final class RigidBody {
 		this.maxX = x1;
 		this.maxY = y1;
 		this.maxZ = z1;
+	}
+
+	public record Hit(int x, int y, int z, int face, double distance) {
+	}
+
+	private static final double[][] UNIT_BOX = {{0, 0, 0, 1, 1, 1}};
+
+	public @Nullable Hit rayCast(double ox, double oy, double oz, double dx, double dy, double dz, double maxDistance) {
+		if (this.cells.isEmpty()) {
+			return null;
+		}
+		Vector3d origin = this.toGrid(ox, oy, oz, new Vector3d());
+		Vector3d dir = this.dirToGrid(dx, dy, dz, new Vector3d());
+		double[] o = {origin.x, origin.y, origin.z};
+		double[] d = {dir.x, dir.y, dir.z};
+		Hit best = null;
+		double bestT = maxDistance;
+		for (Cell cell : this.cells) {
+			for (double[] box : cell.boxes == null ? UNIT_BOX : cell.boxes) {
+				double[] lo = {cell.x + box[0], cell.y + box[1], cell.z + box[2]};
+				double[] hi = {cell.x + box[3], cell.y + box[4], cell.z + box[5]};
+				double t0 = 0.0;
+				double t1 = bestT;
+				int enter = -1;
+				boolean miss = false;
+				for (int a = 0; a < 3 && !miss; a++) {
+					if (Math.abs(d[a]) < 1.0E-12) {
+						miss = o[a] < lo[a] || o[a] > hi[a];
+						continue;
+					}
+					double ta = (lo[a] - o[a]) / d[a];
+					double tb = (hi[a] - o[a]) / d[a];
+					double near = Math.min(ta, tb);
+					double far = Math.max(ta, tb);
+					if (near > t0) {
+						t0 = near;
+						enter = 2 * a + (d[a] > 0.0 ? 0 : 1);
+					}
+					t1 = Math.min(t1, far);
+					miss = t0 > t1;
+				}
+				if (!miss && t0 < bestT && enter >= 0) {
+					bestT = t0;
+					best = new Hit(cell.x, cell.y, cell.z, enter, t0);
+				}
+			}
+		}
+		return best;
 	}
 
 	public Vector3d toWorld(double gx, double gy, double gz, Vector3d out) {

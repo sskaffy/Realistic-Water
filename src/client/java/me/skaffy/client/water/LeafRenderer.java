@@ -24,6 +24,7 @@ final class LeafRenderer implements AutoCloseable {
 	private final Map<Integer, GraphicsProgram> leaves = new HashMap<>();
 	private final VkBuf textures = loadTextures();
 	private final Sampler linear = new Sampler(true);
+	private final Sampler nearest = new Sampler(false);
 
 	private static VkBuf loadTextures() {
 		int w = 0;
@@ -69,7 +70,7 @@ final class LeafRenderer implements AutoCloseable {
 	private GraphicsProgram leaves(int colorFormat) {
 		return this.leaves.computeIfAbsent(colorFormat, format -> new GraphicsProgram("leaf.vert", "leaf.frag", Map.of(),
 			new GraphicsProgram.State(format, VkTex.D32, true, true, VK10.VK_COMPARE_OP_GREATER, GraphicsProgram.Blend.NONE), Desc.UBO, Desc.SSBO, Desc.SSBO,
-			Desc.SSBO, Desc.TEX, Desc.SSBO));
+			Desc.SSBO, Desc.TEX, Desc.SSBO, Desc.TEX));
 	}
 
 	void record(VkCommandBuffer cb, List<WaterRenderer.Body> bodies, int width, int height, int colorFormat, long mainColorView, long mainDepthView,
@@ -79,7 +80,8 @@ final class LeafRenderer implements AutoCloseable {
 		for (WaterRenderer.Body body : bodies) {
 			WaterRegion r = body.region();
 			leaves.bind(cb, body.ubo(), Desc.ssbo(r.currentParticles()), Desc.ssbo(this.textures), Desc.ssbo(r.light()),
-				Desc.tex(lightmap, this.linear.handle), Desc.ssbo(r.staticSolid));
+				Desc.tex(lightmap, this.linear.handle), Desc.ssbo(r.staticSolid),
+				Desc.tex(WaterWorld.packShadowView != 0L ? WaterWorld.packShadowView : lightmap, this.nearest.handle));
 			leaves.drawIndirect(cb, r.args, WaterRegion.ARGS_FLUID_DRAW);
 		}
 		GraphicsProgram.end(cb);
@@ -90,5 +92,6 @@ final class LeafRenderer implements AutoCloseable {
 		this.leaves.values().forEach(GraphicsProgram::close);
 		this.textures.close();
 		this.linear.close();
+		this.nearest.close();
 	}
 }

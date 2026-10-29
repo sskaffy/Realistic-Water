@@ -1,0 +1,118 @@
+#version 450
+#extension GL_KHR_shader_subgroup_arithmetic : enable
+#extension GL_KHR_shader_subgroup_ballot : enable
+#include "common.glsl"
+layout(local_size_x = 256) in;
+layout(std430, binding = 1) readonly buffer Src { Particle src[]; };
+layout(std430, binding = 2) writeonly buffer Dst { Particle dst[]; };
+layout(std430, binding = 3) buffer Counters { uint counters[]; };
+layout(std430, binding = 4) readonly buffer Static { uint staticSolid[]; };
+layout(push_constant) uniform PC { ivec4 a; ivec4 b; } pc;
+
+#define C_AWAKE 14
+#define LIFE G.matA.y
+#define BUOYANCY G.matA.z
+#define DRAG G.matA.w
+#define SWIRL G.matB.x
+#define BURST G.matB.y
+#define ENTITY_PUSH G.matB.z
+
+bool solidAt(ivec3 c) {
+    return inGrid(c) && staticSolid[cellIndex(c)] != 0u;
+}
+
+vec3 swirl(vec3 x, float t) {
+    vec3 p = x * 0.11;
+    return vec3(sin(p.y * 1.7 + t * 0.9) + sin(p.z * 2.3 - t * 0.6),
+        0.5 * (sin(p.x * 1.9 + t * 0.7) + sin(p.z * 1.3 + t * 1.1)),
+        sin(p.x * 2.1 - t * 0.8) + sin(p.y * 1.5 + t * 0.5));
+}
+
+void main() {
+    uint i = GID_U;
+    if (i >= counters[pc.a.x]) {
+        return;
+    }
+    Particle p = src[i];
+    if (p.pos.w < 0.0) {
+        return;
+    }
+    float res = G.camGrid.w;
+    uint seed = hash(i * 747796405u + uint(pc.a.w) * 2891336453u);
+    float age = p.pos.w;
+    float r = p.vel.w;
+    float life = LIFE * (0.6 + 0.8 * r);
+    if (age >= life) {
+        return;
+    }
+    vec3 x = p.pos.xyz;
+    vec3 v = p.vel.xyz;
+    if (age == 0.0) {
+        v += randInSphere(seed) * BURST * res;
+    }
+    float heat = 1.0 - age / life;
+    v.y += BUOYANCY * res * heat * DT;
+    v += swirl(x / res, G.simB.z) * SWIRL * res * DT;
+    v += randInSphere(seed) * SWIRL * res * 0.6 * DT;
+
+    for (int e = 0; e < numEntities(); e++) {
+        vec3 surface;
+        vec3 normal;
+        if (!entInside(e, x, 0.2 * res, surface, normal)) {
+            continue;
+        }
+        vec3 ve = entVel(e);
+        v = mix(v, ve, 0.35) + normal * ENTITY_PUSH * res;
+    }
+    v *= exp(-DRAG * DT);
+
+    vec3 xn = x;
+    vec3 step = v * DT;
+    for (int axis = 0; axis < 3; axis++) {
+        vec3 trial = xn;
+        trial[axis] += step[axis];
+        if (solidAt(ivec3(floor(trial)))) {
+            float hit = abs(v[axis]);
+            v[axis] *= -0.1;
+            vec3 spread = randInSphere(seed);
+            spread[axis] = 0.0;
+            v += spread * (hit * 0.6 + 0.2 * res);
+        } else {
+            xn = trial;
+        }
+    }
+    age += DT;
+
+    if (any(isnan(xn)) || any(isinf(xn)) || any(isnan(v))) {
+        return;
+    }
+    float killMargin = G.killInfo.y;
+    if (any(lessThan(xn, vec3(-killMargin))) || any(greaterThanEqual(xn, vec3(NX, NY, NZ) + killMargin)) || xn.y < G.killInfo.x) {
+        return;
+    }
+    uint groupTotal = subgroupAdd(1u);
+    uint prefix = subgroupExclusiveAdd(1u);
+    float groupMax = subgroupMax(length(v));
+    uint base = 0u;
+    if (subgroupElect()) {
+        base = atomicAdd(counters[pc.a.y], groupTotal);
+        atomicMax(counters[6], floatBitsToUint(groupMax));
+        atomicAdd(counters[C_AWAKE], groupTotal);
+    }
+    uint o = subgroupBroadcastFirst(base) + prefix;
+    if (o >= uint(G.caps.x)) {
+        return;
+    }
+    dst[o] = Particle(vec4(xn, age), vec4(v, r));
+    uvec3 cell = uvec3(ivec3(floor(xn)) + AABB_BIAS);
+    uvec3 lo = uvec3(subgroupMin(cell.x), subgroupMin(cell.y), subgroupMin(cell.z));
+    uvec3 hi = uvec3(subgroupMax(cell.x), subgroupMax(cell.y), subgroupMax(cell.z));
+    if (subgroupElect()) {
+        atomicMin(counters[8], lo.x);
+        atomicMin(counters[9], lo.y);
+        atomicMin(counters[10], lo.z);
+        atomicMax(counters[11], hi.x);
+        atomicMax(counters[12], hi.y);
+        atomicMax(counters[13], hi.z);
+    }
+}

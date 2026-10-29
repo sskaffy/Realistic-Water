@@ -457,6 +457,15 @@ public final class WaterSettingsInfo {
 		toggle("leafSounds", "Leaf sounds", Cost.LOW, "Plays a few sounds per second near moving leaves.",
 			"Rustling sounds from leaves that are kicked up or blown around.");
 
+		category("Realistic blocks");
+		text("blockGravityPerBlock", "Gravity per block", Cost.NONE, "Only read when a body's gravity is worked out.",
+			"Gravity for particular blocks, overriding the slider above. Write them as a list, like "
+				+ "minecraft:stone=32, minecraft:white_wool=3. A body of mixed blocks falls at the mass-weighted average, so one "
+				+ "stone block in a crate of wool barely changes it. Unknown names are ignored.");
+		num("blockGravity", "Gravity", Cost.NONE, "Changes one number in the rigid body solver; it costs nothing.", 0, 40, 0.1,
+			"How hard realistic blocks fall, in blocks per second squared. 9.81 is real gravity, which looks floaty next to "
+				+ "Minecraft's own falling blocks at about 32. Applies to every realistic block, including boats.");
+
 		category("Water pump");
 		num("waveMakerRate", "Pump rate", Cost.NONE, LOOK, 0.1, 30, 0.1,
 			"How much of the water behind a fully powered water pump it moves to the front each second (4 = about four blocks of water per second). Weaker redstone signals pump less.");
@@ -478,6 +487,10 @@ public final class WaterSettingsInfo {
 		category("Sounds");
 		toggle("flowSounds", "Water sounds", Cost.LOW, "Plays a few sounds per second near moving water.",
 			"Flowing and splashing sounds from moving water.");
+		toggle("boilingSounds", "Boiling sounds", Cost.LOW, "A few looping sounds near hot water.",
+			"The hiss of water about to boil and the bubbling of a rolling boil, loudest just before it boils like a real pot.");
+		num("boilingSoundVolume", "Boiling sound volume", Cost.NONE, "Only changes volume.", 0, 2, 0.05,
+			"Volume of boiling and simmering water, on top of the fluid sound volume.");
 		num("flowSoundVolume", "Fluid sound volume", Cost.NONE, "Only changes volume.", 0, 3, 0.05,
 			"Volume of all realistic water, lava, slime and sand sounds.");
 
@@ -487,6 +500,111 @@ public final class WaterSettingsInfo {
 			"With a Vitrail shader pack running, draws fluids into the pack's image before its effects, so its fog, bloom, tone mapping "
 				+ "and colour grading reach them. Fluids then can't refract what's behind them, and glass behind water is drawn over it. "
 				+ "Off draws fluids over the finished pack image instead.");
+		num("packWaterVisibility", "Water visibility with packs", Cost.NONE, LOOK, 0, 3, 0.05,
+			"While a shader pack runs, water glows with this much more of its own blue-green scattered colour, so it stands out "
+				+ "through the pack's fog and grading. It adds light, so it doesn't darken the water. 0 looks the same as without a pack.");
+		num("packWaterTint", "Water tint with packs", Cost.NONE, LOOK, 0, 3, 0.05,
+			"While a shader pack runs, water filters what's behind it this much more toward blue-green. The total amount of light "
+				+ "it takes stays the same, so it gets more coloured, not darker. 0 looks the same as without a pack.");
+		toggle("packShadows", "Shadows with packs", Cost.MEDIUM, "Reads sand, leaves and slime back from the GPU a few times a second and marches toward the sun per grain, leaf and pixel.",
+			"While a shader pack runs, sand, leaves and slime get shadows from blocks, trees and each other, and cast shadows into the pack's "
+				+ "shadow map. Casting works with Vitrail packs that draw entity shadows.");
+		num("packShadowStrength", "Shadow darkness", Cost.NONE, LOOK, 0, 1, 0.01,
+			"How much sunlight sand, leaves and slime lose in full shadow. 0 turns the shadows on them off but keeps the ones they cast.");
+		toggle("packShadowPerLeaf", "Shadow for every leaf", Cost.MEDIUM, "Reads every leaf's position back and adds one quad per leaf to the shadow pass.",
+			"Every realistic leaf casts its own leaf-shaped shadow. Off, leaf piles cast shadows shaped like sand piles instead.");
+		toggle("packDrawMaterials", "Pack draws sand, slime, leaves", Cost.MEDIUM, "Reads their surfaces and every leaf back from the GPU each frame.",
+			"While a Vitrail pack runs, sand and slime (as smooth surfaces) and leaves are drawn by the pack itself, so they get all of its lighting, "
+				+ "shadows, fog, reflections and colour grading. They then trail the simulation by a few frames. Off draws them ourselves.");
+		integer("packShadowDetail", "Shadow shape detail", Cost.MEDIUM, "Higher reads back and draws many more caster boxes; 8 and above is heavy on big piles.", 1, 16,
+			"How many pieces per block the shadow of sand and slime (and leaves, with every-leaf shadows off) is built from. "
+				+ "1 casts block-sized steps, 4 follows the pile's shape closely.");
+
+		category("Rain");
+		toggle("realisticRain", "Realistic rain", Cost.MEDIUM, "Simulates and draws every drop on the GPU.",
+			"Replaces vanilla's rain sheets with falling drops that streak, splash back off the ground, push realistic water and hiss on lava. Snow stays vanilla.");
+		integer("rainRadius", "Rain radius", Cost.MEDIUM, "The number of drops grows with the square of it.", 4, 512,
+			"How far around you, in blocks, realistic drops fall.");
+		num("rainDensity", "Rain density", Cost.MEDIUM, "More drops to move and draw.", 0, 20, 0.05,
+			"Drops per square block at full rain; thunderstorms double it.");
+		num("rainFallSpeed", "Drop speed", Cost.NONE, LOOK, 1, 40, 0.5,
+			"How fast drops fall, in blocks per second. Real heavy rain falls at about 9.");
+		num("rainStreakTime", "Streak length", Cost.NONE, LOOK, 0, 0.2, 0.005,
+			"The exposure each streak shows, in seconds: longer streaks look like heavier, faster rain.");
+		num("rainOpacity", "Drop opacity", Cost.NONE, LOOK, 0, 1, 0.01,
+			"How visible each streak is.");
+		num("rainWind", "Rain wind", Cost.NONE, LOOK, 0, 10, 0.1,
+			"How hard the wind slants the rain, in blocks per second; storms blow harder.");
+		num("rainSplashDroplets", "Splash droplets", Cost.LOW, "More small particles per impact.", 0, 12, 0.5,
+			"Droplets thrown up where a drop hits the ground.");
+		num("rainKick", "Rain stirs water", Cost.LOW, "Two small passes over rained-on realistic water.", 0, 5, 0.05,
+			"How hard each drop pushes realistic water it lands on, in blocks per second, so the surface really dimples. 0 turns it off.");
+		num("rainLavaSteam", "Steam from rain on lava", Cost.LOW, "Steam points over rained-on lava.", 0, 1, 0.005,
+			"Eighths of a block of water each drop on lava turns to steam. 0 turns it off.");
+		num("rainFeed", "Rain feeds water", Cost.LOW, "Adds a few particles to realistic water now and then.", 0, 2, 0.005,
+			"How many blocks of depth a minute rain adds to realistic water it falls on. 0 turns it off.");
+
+		category("Water temperature");
+		toggle("waterTemperature", "Water temperature", Cost.LOW, "A few more reads per particle each substep; heated water stays awake instead of sleeping.",
+			"Water has a temperature: magma, lava, fire, campfires and lit furnaces heat it, ice and snow cool it, hot and cold water mix, and at 100 degrees it boils away into steam.");
+		num("waterHeatRate", "Heating speed", Cost.NONE, LOOK, 0, 2, 0.01,
+			"How fast water within half a block of a heat source takes on its heat, per second. Higher boils a pot sooner.");
+		num("waterHeatSpread", "Heat spread", Cost.NONE, LOOK, 0, 1, 0.005,
+			"How quickly heat spreads through water, in blocks squared per second: how fast hot and cold water even out.");
+		num("waterCoolTime", "Cooling time", Cost.LOW, "Hot water keeps simulating while it is above the steam wisp temperature.", 60, 36000, 60,
+			"Seconds for water to lose most of the difference to the biome's temperature on its own. 3600 is an hour.");
+		num("waterIceCooling", "Ice and snow cooling", Cost.NONE, LOOK, 0, 2, 0.01,
+			"How fast water next to ice or snow cools toward 0 degrees, per second.");
+		num("magmaHeat", "Magma heat", Cost.NONE, LOOK, 0, 1500, 10,
+			"Temperature water next to a magma block heats toward. Above 100 the extra boils it.");
+		num("lavaHeat", "Lava heat", Cost.NONE, LOOK, 0, 1500, 10,
+			"Temperature water next to lava heats toward.");
+		num("fireHeat", "Fire heat", Cost.NONE, LOOK, 0, 1500, 10,
+			"Temperature water next to fire or a lit campfire heats toward.");
+		num("furnaceHeat", "Furnace heat", Cost.NONE, LOOK, 0, 1500, 10,
+			"Temperature water next to a lit furnace, smoker or blast furnace heats toward.");
+		num("boilChurn", "Boiling churn", Cost.NONE, LOOK, 0, 40, 0.5,
+			"How hard boiling stirs the water at the hot spot, in blocks per second squared.");
+		num("boilSteam", "Boiling steam", Cost.MEDIUM, "More steam means more steam points.", 0, 5, 0.05,
+			"How much steam boiling water and hot water give off. 1 turns each boiled-away bit of water into its own volume of steam.");
+		num("steamWispTemperature", "Steam wisp temperature", Cost.LOW, "Water above it keeps simulating so it can steam.", 30, 100, 1,
+			"Water hotter than this lets off thin wisps of steam from its surface before it boils.");
+		num("boilBubbleSize", "Boiling bubble size", Cost.NONE, LOOK, 0, 0.5, 0.01,
+			"Diameter of the biggest vapour bubbles in boiling water, in blocks. Needs whitewater on.");
+		num("boilBubbleRise", "Boiling bubble rise", Cost.NONE, LOOK, 0.1, 5, 0.05,
+			"How fast vapour bubbles rise through the water, in blocks per second.");
+		num("boilBubbleRate", "Boiling bubble streams", Cost.LOW, "Each bubble is one whitewater particle.", 0, 40, 0.5,
+			"Bubbles a second rising from one nucleation spot at a full boil. Bubbles come from a few fixed spots on the hot surface, like in a real pot.");
+		num("boilClingTemperature", "Clinging bubbles from", Cost.NONE, LOOK, 30, 99, 1,
+			"Above this temperature, tiny bubbles start forming and clinging to the heated bottom and sides before the water boils.");
+		num("boilingDamage", "Boiling damage", Cost.NONE, "Only checked by the server for blocks that are boiling.", 0, 4, 0.5,
+			"Damage boiling water does to players and mobs standing in it, per hit (2 is one heart). Hits come as often as vanilla allows, like a magma block. 0 turns it off.");
+
+		category("Steam");
+		num("steamParticleSize", "Steam particle size", Cost.HIGH, "Halving it makes eight times as many points for the same steam.", 0.005, 1, 0.005,
+			"Size of each soft point steam is made of, in blocks. Smaller is finer and smoother, with many more points.");
+		integer("steamResolution", "Steam collision cells", Cost.LOW, "Only the grid steam bumps into blocks with.", 1, 16,
+			"Cells per block for how exactly steam follows block shapes.");
+		num("steamExpansion", "Steam expansion", Cost.MEDIUM, "More volume means more points.", 0.5, 30, 0.5,
+			"How many times its volume water puffs up to when it turns to steam.");
+		num("steamLifetime", "Steam lifetime", Cost.LOW, "Longer keeps more points alive at once.", 0.5, 60, 0.5,
+			"Seconds a puff of steam lasts before it has thinned away.");
+		num("steamBuoyancy", "Steam rise", Cost.NONE, LOOK, 0, 10, 0.05,
+			"How hard hot steam rises, in blocks per second squared; it weakens as the steam cools.");
+		num("steamDrag", "Steam drag", Cost.NONE, LOOK, 0, 10, 0.05,
+			"How quickly steam loses speed in the air.");
+		num("steamSwirl", "Steam swirl", Cost.NONE, LOOK, 0, 5, 0.05,
+			"How much steam curls and drifts around.");
+		num("steamBurst", "Steam burst", Cost.NONE, LOOK, 0, 10, 0.05,
+			"How fast fresh steam bursts outward, in blocks per second.");
+		num("steamEntityPush", "Steam push", Cost.NONE, LOOK, 0, 5, 0.05,
+			"How strongly players and mobs shove steam aside as they walk through it.");
+		num("steamOpacity", "Steam opacity", Cost.NONE, LOOK, 0, 1, 0.01,
+			"How opaque each point is at its centre. Dense steam you can't see through comes from many points overlapping.");
+		num("steamDarkShade", "Steam dark shade", Cost.NONE, LOOK, 0, 1, 0.01,
+			"Brightness of the darkest points; each point is somewhere between this and the light shade.");
+		num("steamLightShade", "Steam light shade", Cost.NONE, LOOK, 0, 1, 0.01,
+			"Brightness of the lightest points.");
 
 		category("Clip recording");
 		integer("renderMaxStepsPerFrame", "Max substeps per clip frame", Cost.HIGH, "Only while /water render records; higher makes recording slower but more accurate.", 1, 256,

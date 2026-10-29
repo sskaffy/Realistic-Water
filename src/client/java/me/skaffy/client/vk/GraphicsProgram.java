@@ -60,15 +60,17 @@ public final class GraphicsProgram extends Program {
 			VkPipelineColorBlendAttachmentState.Buffer blend = VkPipelineColorBlendAttachmentState.calloc(colorAttachments, stack);
 			for (int i = 0; i < colorAttachments; i++) {
 				blend.get(i).colorWriteMask(0xF);
-			}
-			if (state.blend == Blend.ADD) {
-				blend.get(0).blendEnable(true)
-					.srcColorBlendFactor(VK10.VK_BLEND_FACTOR_ONE).dstColorBlendFactor(VK10.VK_BLEND_FACTOR_ONE).colorBlendOp(VK10.VK_BLEND_OP_ADD)
-					.srcAlphaBlendFactor(VK10.VK_BLEND_FACTOR_ONE).dstAlphaBlendFactor(VK10.VK_BLEND_FACTOR_ONE).alphaBlendOp(VK10.VK_BLEND_OP_ADD);
-			} else if (state.blend == Blend.PREMULTIPLIED) {
-				blend.get(0).blendEnable(true)
-					.srcColorBlendFactor(VK10.VK_BLEND_FACTOR_ONE).dstColorBlendFactor(VK10.VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA).colorBlendOp(VK10.VK_BLEND_OP_ADD)
-					.srcAlphaBlendFactor(VK10.VK_BLEND_FACTOR_ONE).dstAlphaBlendFactor(VK10.VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA).alphaBlendOp(VK10.VK_BLEND_OP_ADD);
+				if (state.blend == Blend.ADD) {
+					blend.get(i).blendEnable(true)
+						.srcColorBlendFactor(VK10.VK_BLEND_FACTOR_ONE).dstColorBlendFactor(VK10.VK_BLEND_FACTOR_ONE).colorBlendOp(VK10.VK_BLEND_OP_ADD)
+						.srcAlphaBlendFactor(VK10.VK_BLEND_FACTOR_ONE).dstAlphaBlendFactor(VK10.VK_BLEND_FACTOR_ONE).alphaBlendOp(VK10.VK_BLEND_OP_ADD);
+				} else if (state.blend == Blend.PREMULTIPLIED) {
+					blend.get(i).blendEnable(true)
+						.srcColorBlendFactor(VK10.VK_BLEND_FACTOR_ONE).dstColorBlendFactor(VK10.VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA)
+						.colorBlendOp(VK10.VK_BLEND_OP_ADD)
+						.srcAlphaBlendFactor(VK10.VK_BLEND_FACTOR_ONE).dstAlphaBlendFactor(VK10.VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA)
+						.alphaBlendOp(VK10.VK_BLEND_OP_ADD);
+				}
 			}
 			VkPipelineColorBlendStateCreateInfo colorBlend = VkPipelineColorBlendStateCreateInfo.calloc(stack).sType$Default()
 				.attachmentCount(colorAttachments)

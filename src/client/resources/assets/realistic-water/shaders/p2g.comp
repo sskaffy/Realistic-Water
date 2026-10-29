@@ -1,4 +1,6 @@
 #version 450
+#extension GL_KHR_shader_subgroup_arithmetic : enable
+#extension GL_KHR_shader_subgroup_basic : enable
 #include "common.glsl"
 layout(local_size_x = 256) in;
 layout(std430, binding = 1) readonly buffer Src { Particle src[]; };
@@ -6,7 +8,32 @@ layout(std430, binding = 2) buffer Accum { int accum[]; };
 layout(std430, binding = 3) buffer Count { int cellCount[]; };
 layout(std430, binding = 4) buffer Dens { int cellDens[]; };
 layout(std430, binding = 5) readonly buffer Counters { uint counters[]; };
+layout(std430, binding = 6) buffer Heat { int cellHeat[]; };
 layout(push_constant) uniform PC { ivec4 a; ivec4 b; } pc;
+
+#ifndef P2G_TILE
+#define P2G_TILE 640
+#endif
+const int SLOTS = 9;
+shared int tile[P2G_TILE * SLOTS];
+shared int boxLo[3];
+shared int boxHi[3];
+
+ivec3 tileLo;
+ivec3 tileDim;
+bool tiled;
+
+void addFace(int comp, int idx, ivec3 c, int m, int w) {
+    if (tiled) {
+        ivec3 l = c - tileLo;
+        int t = (l.x + tileDim.x * (l.y + tileDim.y * l.z)) * SLOTS + 2 * comp;
+        atomicAdd(tile[t], m);
+        atomicAdd(tile[t + 1], w);
+    } else {
+        atomicAdd(accum[2 * idx], m);
+        atomicAdd(accum[2 * idx + 1], w);
+    }
+}
 
 void splat(int comp, vec3 x, float value) {
     ivec3 d = faceDims(comp);
@@ -23,8 +50,7 @@ void splat(int comp, vec3 x, float value) {
                 }
                 float w = (i == 1 ? f.x : 1.0 - f.x) * (j == 1 ? f.y : 1.0 - f.y) * (k == 1 ? f.z : 1.0 - f.z);
                 int idx = base + c.x + d.x * (c.y + d.y * c.z);
-                atomicAdd(accum[2 * idx], int(round(w * value * FP_SCALE)));
-                atomicAdd(accum[2 * idx + 1], int(round(w * FP_SCALE)));
+                addFace(comp, idx, c, int(round(w * value * FP_SCALE)), int(round(w * FP_SCALE)));
             }
         }
     }
@@ -32,36 +58,115 @@ void splat(int comp, vec3 x, float value) {
 
 void main() {
     uint i = GID_U;
-    if (i >= counters[pc.a.x]) {
-        return;
+    int lid = int(gl_LocalInvocationID.x);
+    bool live = i < counters[pc.a.x];
+    Particle p;
+    if (live) {
+        p = src[i];
+        live = p.pos.w >= 0.0 && inInnerBox(p.pos.xyz);
     }
-    Particle p = src[i];
-    vec3 x = p.pos.xyz;
-    vec3 v = p.vel.xyz;
-    if (p.pos.w < 0.0 || !inInnerBox(x)) {
-        return;
-    }
-    splat(0, x, v.x);
-    splat(1, x, v.y);
-    splat(2, x, v.z);
-
+    vec3 x = live ? p.pos.xyz : vec3(0.0);
+    vec3 v = live ? p.vel.xyz : vec3(0.0);
+    int heat = live && heatOn() ? int(round(p.vel.w * HEAT_FP)) : 0;
     ivec3 cell = ivec3(floor(x));
-    if (inBox(cell)) {
-        atomicAdd(cellCount[cellIndex(cell)], 1);
+
+    if (lid < 3) {
+        boxLo[lid] = 0x7FFFFFFF;
+        boxHi[lid] = -0x7FFFFFFF;
     }
-    vec3 g = x - 0.5;
-    ivec3 b = ivec3(floor(g));
-    vec3 f = g - vec3(b);
-    for (int k = 0; k < 2; k++) {
-        for (int j = 0; j < 2; j++) {
-            for (int ii = 0; ii < 2; ii++) {
-                ivec3 c = b + ivec3(ii, j, k);
-                if (!inBox(c)) {
-                    continue;
+    barrier();
+    ivec3 lo = live ? cell : ivec3(0x7FFFFFFF);
+    ivec3 hi = live ? cell : ivec3(-0x7FFFFFFF);
+    lo = ivec3(subgroupMin(lo.x), subgroupMin(lo.y), subgroupMin(lo.z));
+    hi = ivec3(subgroupMax(hi.x), subgroupMax(hi.y), subgroupMax(hi.z));
+    if (subgroupElect()) {
+        atomicMin(boxLo[0], lo.x);
+        atomicMin(boxLo[1], lo.y);
+        atomicMin(boxLo[2], lo.z);
+        atomicMax(boxHi[0], hi.x);
+        atomicMax(boxHi[1], hi.y);
+        atomicMax(boxHi[2], hi.z);
+    }
+    barrier();
+    tileLo = ivec3(boxLo[0], boxLo[1], boxLo[2]) - 1;
+    tileDim = ivec3(boxHi[0], boxHi[1], boxHi[2]) + 2 - tileLo;
+    bool hasParticles = boxHi[0] >= boxLo[0];
+    tiled = hasParticles && tileDim.x * tileDim.y * tileDim.z <= P2G_TILE;
+    int tileCells = tiled ? tileDim.x * tileDim.y * tileDim.z : 0;
+    for (int k = lid; k < tileCells * SLOTS; k += 256) {
+        tile[k] = 0;
+    }
+    barrier();
+
+    if (live) {
+        splat(0, x, v.x);
+        splat(1, x, v.y);
+        splat(2, x, v.z);
+        if (inBox(cell)) {
+            if (tiled) {
+                ivec3 l = cell - tileLo;
+                int t = (l.x + tileDim.x * (l.y + tileDim.y * l.z)) * SLOTS;
+                atomicAdd(tile[t + 7], 1);
+                if (heat != 0) {
+                    atomicAdd(tile[t + 8], heat);
                 }
-                float w = (ii == 1 ? f.x : 1.0 - f.x) * (j == 1 ? f.y : 1.0 - f.y) * (k == 1 ? f.z : 1.0 - f.z);
-                atomicAdd(cellDens[cellIndex(c)], int(round(w * FP_SCALE)));
+            } else {
+                atomicAdd(cellCount[cellIndex(cell)], 1);
+                if (heat != 0) {
+                    atomicAdd(cellHeat[cellIndex(cell)], heat);
+                }
             }
+        }
+        vec3 g = x - 0.5;
+        ivec3 b = ivec3(floor(g));
+        vec3 f = g - vec3(b);
+        for (int k = 0; k < 2; k++) {
+            for (int j = 0; j < 2; j++) {
+                for (int ii = 0; ii < 2; ii++) {
+                    ivec3 c = b + ivec3(ii, j, k);
+                    if (!inBox(c)) {
+                        continue;
+                    }
+                    float w = (ii == 1 ? f.x : 1.0 - f.x) * (j == 1 ? f.y : 1.0 - f.y) * (k == 1 ? f.z : 1.0 - f.z);
+                    int add = int(round(w * FP_SCALE));
+                    if (tiled) {
+                        ivec3 l = c - tileLo;
+                        atomicAdd(tile[(l.x + tileDim.x * (l.y + tileDim.y * l.z)) * SLOTS + 6], add);
+                    } else {
+                        atomicAdd(cellDens[cellIndex(c)], add);
+                    }
+                }
+            }
+        }
+    }
+    if (!tiled) {
+        return;
+    }
+    barrier();
+    for (int k = lid; k < tileCells; k += 256) {
+        ivec3 c = tileLo + ivec3(k % tileDim.x, (k / tileDim.x) % tileDim.y, k / (tileDim.x * tileDim.y));
+        int t = k * SLOTS;
+        for (int comp = 0; comp < 3; comp++) {
+            int m = tile[t + 2 * comp];
+            int w = tile[t + 2 * comp + 1];
+            if (m != 0 || w != 0) {
+                int idx = faceIndex(comp, c);
+                if (m != 0) {
+                    atomicAdd(accum[2 * idx], m);
+                }
+                if (w != 0) {
+                    atomicAdd(accum[2 * idx + 1], w);
+                }
+            }
+        }
+        if (tile[t + 6] != 0) {
+            atomicAdd(cellDens[cellIndex(c)], tile[t + 6]);
+        }
+        if (tile[t + 7] != 0) {
+            atomicAdd(cellCount[cellIndex(c)], tile[t + 7]);
+        }
+        if (tile[t + 8] != 0) {
+            atomicAdd(cellHeat[cellIndex(c)], tile[t + 8]);
         }
     }
 }

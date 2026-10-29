@@ -7,5 +7,13 @@
         "stream": true
       }
     ]
+  },
+  "block.realistic_water.boil": {
+    "subtitle": "subtitles.realistic-water.block.realistic_water.boil",
+    "sounds": [
+      {
+        "name": "realistic-water:block/boiling"
+      }
+    ]
   }
 }

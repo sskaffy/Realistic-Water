@@ -28,6 +28,10 @@ void main() {
     if (foam) {
         r *= pc.b.x;
     }
+    if (p.vel.w > 2.5) {
+        r = fract(p.vel.w) * G.heatD.x * 0.5;
+        foam = true;
+    }
 #else
     bool foam = false;
 #endif

@@ -1,4 +1,6 @@
 #version 450
+#extension GL_KHR_shader_subgroup_arithmetic : enable
+#extension GL_KHR_shader_subgroup_basic : enable
 #include "common.glsl"
 #include "mpm.glsl"
 layout(local_size_x = 256) in;
@@ -9,51 +11,122 @@ layout(std430, binding = 4) buffer Count { int cellCount[]; };
 layout(std430, binding = 5) readonly buffer Counters { uint counters[]; };
 layout(push_constant) uniform PC { ivec4 a; ivec4 b; } pc;
 
+#ifndef P2G_TILE
+#define P2G_TILE 640
+#endif
+const int SLOTS = 5;
+shared int tile[P2G_TILE * SLOTS];
+shared int boxLo[3];
+shared int boxHi[3];
+
 void main() {
     uint i = GID_U;
-    if (i >= counters[pc.a.x]) {
-        return;
+    int lid = int(gl_LocalInvocationID.x);
+    bool live = i < counters[pc.a.x];
+    Particle p;
+    if (live) {
+        p = src[i];
+        live = p.pos.w >= 0.0 && inInnerBox(p.pos.xyz);
     }
-    Particle p = src[i];
-    vec3 x = p.pos.xyz;
-    if (p.pos.w < 0.0 || !inInnerBox(x)) {
-        return;
+    vec3 x = live ? p.pos.xyz : vec3(0.0);
+
+    if (lid < 3) {
+        boxLo[lid] = 0x7FFFFFFF;
+        boxHi[lid] = -0x7FFFFFFF;
     }
-    mat3 C = mat3(0.0);
-    mat3 tau = mat3(0.0);
-    if (p.pos.w >= 0.5) {
-        int o = int(i) * STATE_STRIDE;
-        C = LOAD_MAT(state, o);
-        int t = o + STATE_TAU;
-        tau = mat3(state[t], state[t + 3], state[t + 4], state[t + 3], state[t + 1], state[t + 5], state[t + 4], state[t + 5], state[t + 2]);
+    barrier();
+    ivec3 base = ivec3(floor(x - 1.0));
+    ivec3 lo = live ? base : ivec3(0x7FFFFFFF);
+    ivec3 hi = live ? base + 2 : ivec3(-0x7FFFFFFF);
+    lo = ivec3(subgroupMin(lo.x), subgroupMin(lo.y), subgroupMin(lo.z));
+    hi = ivec3(subgroupMax(hi.x), subgroupMax(hi.y), subgroupMax(hi.z));
+    if (subgroupElect()) {
+        atomicMin(boxLo[0], lo.x);
+        atomicMin(boxLo[1], lo.y);
+        atomicMin(boxLo[2], lo.z);
+        atomicMax(boxHi[0], hi.x);
+        atomicMax(boxHi[1], hi.y);
+        atomicMax(boxHi[2], hi.z);
     }
-    float squeeze = C[0][0] + C[1][1] + C[2][2];
-    if (squeeze < 0.0) {
-        tau += MPM_IMPACT_VISCOSITY / MPM_VOLUME * squeeze * mat3(1.0);
+    barrier();
+    ivec3 tileLo = ivec3(boxLo[0], boxLo[1], boxLo[2]);
+    ivec3 tileDim = ivec3(boxHi[0], boxHi[1], boxHi[2]) + 1 - tileLo;
+    bool tiled = boxHi[0] >= boxLo[0] && tileDim.x * tileDim.y * tileDim.z <= P2G_TILE;
+    int tileCells = tiled ? tileDim.x * tileDim.y * tileDim.z : 0;
+    for (int k = lid; k < tileCells * SLOTS; k += 256) {
+        tile[k] = 0;
     }
-    mat3 affine = -DT * MPM_VOLUME * 4.0 * tau + C;
-    vec3 v = p.vel.xyz;
-    Stencil s = stencil(x);
-    for (int k = 0; k < 3; k++) {
-        for (int j = 0; j < 3; j++) {
-            for (int ii = 0; ii < 3; ii++) {
-                ivec3 c = s.base + ivec3(ii, j, k);
-                if (!inBox(c)) {
-                    continue;
+    barrier();
+
+    if (live) {
+        mat3 C = mat3(0.0);
+        mat3 tau = mat3(0.0);
+        if (p.pos.w >= 0.5) {
+            int o = int(i) * STATE_STRIDE;
+            C = LOAD_MAT(state, o);
+            int t = o + STATE_TAU;
+            tau = mat3(state[t], state[t + 3], state[t + 4], state[t + 3], state[t + 1], state[t + 5], state[t + 4], state[t + 5], state[t + 2]);
+        }
+        float squeeze = C[0][0] + C[1][1] + C[2][2];
+        if (squeeze < 0.0) {
+            tau += MPM_IMPACT_VISCOSITY / MPM_VOLUME * squeeze * mat3(1.0);
+        }
+        mat3 affine = -DT * MPM_VOLUME * 4.0 * tau + C;
+        vec3 v = p.vel.xyz;
+        Stencil s = stencil(x);
+        for (int k = 0; k < 3; k++) {
+            for (int j = 0; j < 3; j++) {
+                for (int ii = 0; ii < 3; ii++) {
+                    ivec3 c = s.base + ivec3(ii, j, k);
+                    if (!inBox(c)) {
+                        continue;
+                    }
+                    float w = s.w[ii].x * s.w[j].y * s.w[k].z;
+                    vec3 dpos = vec3(ii, j, k) - s.fx;
+                    vec3 mom = w * (v + affine * dpos);
+                    ivec4 add = ivec4(int(round(w * MASS_FP)), int(round(mom.x * MOM_FP)), int(round(mom.y * MOM_FP)), int(round(mom.z * MOM_FP)));
+                    if (tiled) {
+                        ivec3 l = c - tileLo;
+                        int t = (l.x + tileDim.x * (l.y + tileDim.y * l.z)) * SLOTS;
+                        atomicAdd(tile[t], add.x);
+                        atomicAdd(tile[t + 1], add.y);
+                        atomicAdd(tile[t + 2], add.z);
+                        atomicAdd(tile[t + 3], add.w);
+                    } else {
+                        int n = 4 * cellIndex(c);
+                        atomicAdd(grid[n], add.x);
+                        atomicAdd(grid[n + 1], add.y);
+                        atomicAdd(grid[n + 2], add.z);
+                        atomicAdd(grid[n + 3], add.w);
+                    }
                 }
-                float w = s.w[ii].x * s.w[j].y * s.w[k].z;
-                vec3 dpos = vec3(ii, j, k) - s.fx;
-                vec3 mom = w * (v + affine * dpos);
-                int n = 4 * cellIndex(c);
-                atomicAdd(grid[n], int(round(w * MASS_FP)));
-                atomicAdd(grid[n + 1], int(round(mom.x * MOM_FP)));
-                atomicAdd(grid[n + 2], int(round(mom.y * MOM_FP)));
-                atomicAdd(grid[n + 3], int(round(mom.z * MOM_FP)));
+            }
+        }
+        ivec3 cell = ivec3(floor(x));
+        if (inBox(cell)) {
+            if (tiled) {
+                ivec3 l = cell - tileLo;
+                atomicAdd(tile[(l.x + tileDim.x * (l.y + tileDim.y * l.z)) * SLOTS + 4], 1);
+            } else {
+                atomicAdd(cellCount[cellIndex(cell)], 1);
             }
         }
     }
-    ivec3 cell = ivec3(floor(x));
-    if (inBox(cell)) {
-        atomicAdd(cellCount[cellIndex(cell)], 1);
+    if (!tiled) {
+        return;
+    }
+    barrier();
+    for (int k = lid; k < tileCells; k += 256) {
+        int t = k * SLOTS;
+        ivec3 c = tileLo + ivec3(k % tileDim.x, (k / tileDim.x) % tileDim.y, k / (tileDim.x * tileDim.y));
+        int n = 4 * cellIndex(c);
+        for (int q = 0; q < 4; q++) {
+            if (tile[t + q] != 0) {
+                atomicAdd(grid[n + q], tile[t + q]);
+            }
+        }
+        if (tile[t + 4] != 0) {
+            atomicAdd(cellCount[cellIndex(c)], tile[t + 4]);
+        }
     }
 }

@@ -4,6 +4,7 @@ layout(local_size_x = 256) in;
 layout(std430, binding = 1) readonly buffer SrcInt { int srcInt[]; };
 layout(std430, binding = 2) readonly buffer SrcFloat { float srcFloat[]; };
 layout(std430, binding = 3) writeonly buffer Dst { float dst[]; };
+layout(std430, binding = 4) readonly buffer NearMask { uint nearMask[]; };
 layout(push_constant) uniform PC { ivec4 a; ivec4 b; } pc;
 
 float load(ivec3 p) {
@@ -23,11 +24,20 @@ void main() {
     ivec3 p = G.fineBoxMin.xyz + ivec3(t % bd.x, (t / bd.x) % bd.y, t / (bd.x * bd.y));
     int i = fineIndex(p);
     ivec3 e = ivec3(pc.a.x == 0 ? 1 : 0, pc.a.x == 1 ? 1 : 0, pc.a.x == 2 ? 1 : 0);
-    float inv2s2 = 0.5 / max(G.waterA.w * G.waterA.w, 1e-4);
-    float w1 = exp(-inv2s2);
-    float w2 = exp(-4.0 * inv2s2);
-    float v = (w2 * (load(p - 2 * e) + load(p + 2 * e)) + w1 * (load(p - e) + load(p + e)) + load(p))
-        / (1.0 + 2.0 * w1 + 2.0 * w2);
+    float v = 0.0;
+    bool empty = false;
+    if (pc.a.w != 0) {
+        ivec3 l = p - G.fineBoxMin.xyz;
+        ivec3 nb = (bd + ivec3(7, 7, 3)) / ivec3(8, 8, 4);
+        empty = nearMask[(l.x >> 3) + nb.x * ((l.y >> 3) + nb.y * (l.z >> 2))] == 0u;
+    }
+    if (!empty) {
+        float inv2s2 = 0.5 / max(G.waterA.w * G.waterA.w, 1e-4);
+        float w1 = exp(-inv2s2);
+        float w2 = exp(-4.0 * inv2s2);
+        v = (w2 * (load(p - 2 * e) + load(p + 2 * e)) + w1 * (load(p - e) + load(p + e)) + load(p))
+            / (1.0 + 2.0 * w1 + 2.0 * w2);
+    }
     if (pc.a.z != 0 && G.flags.z != 0) {
         float S = float(G.fine.w);
         vec3 sp = (vec3(p) + 0.5) / S;

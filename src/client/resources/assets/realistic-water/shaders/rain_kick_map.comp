@@ -1,0 +1,24 @@
+#version 450
+#include "common.glsl"
+layout(local_size_x = 64) in;
+layout(std430, binding = 1) readonly buffer Events { uvec4 eventCount; vec4 events[]; };
+layout(std430, binding = 2) buffer Map { uint map[]; };
+layout(push_constant) uniform PC { vec4 off; ivec4 info; } pc;
+
+void main() {
+    uint i = GID_U;
+    if (i >= min(eventCount.x, uint(pc.info.x))) {
+        return;
+    }
+    vec4 e = events[i];
+    if (abs(e.w - 1.0) > 0.5) {
+        return;
+    }
+    ivec3 cell = ivec3(floor((e.xyz + pc.off.xyz) * pc.off.w));
+    if (cell.x < 0 || cell.z < 0 || cell.y < 0 || cell.x >= NX || cell.z >= NZ || cell.y >= NY) {
+        return;
+    }
+    int col = cell.x + cell.z * NX;
+    atomicAdd(map[col], 1u);
+    atomicMax(map[NX * NZ + col], uint(cell.y) + 1u);
+}

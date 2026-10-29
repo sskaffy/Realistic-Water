@@ -7,6 +7,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import me.skaffy.block.WaveMakerBlock;
 import me.skaffy.physics.RigidBody;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.EmptyBlockGetter;
 import net.minecraft.world.phys.AABB;
@@ -20,6 +22,56 @@ import net.minecraft.world.level.block.state.BlockState;
 
 public final class BlockMaterials {
 	public static final double WEIGHT = 0.5;
+
+	public static volatile double gravity = 9.81;
+
+	private static volatile Map<Block, Double> gravityOverrides = Map.of();
+
+	public static void setGravityOverrides(String text) {
+		Map<Block, Double> parsed = new java.util.HashMap<>();
+		for (String entry : text.split("[,;\n]")) {
+			String[] halves = entry.trim().split("=");
+			if (halves.length != 2) {
+				continue;
+			}
+			Identifier id = Identifier.tryParse(halves[0].trim());
+			if (id == null) {
+				continue;
+			}
+			Block block = BuiltInRegistries.BLOCK.getOptional(id).orElse(null);
+			if (block == null) {
+				continue;
+			}
+			try {
+				parsed.put(block, Double.parseDouble(halves[1].trim()));
+			} catch (NumberFormatException ignored) {
+			}
+		}
+		gravityOverrides = Map.copyOf(parsed);
+	}
+
+	public static boolean hasGravityOverrides() {
+		return !gravityOverrides.isEmpty();
+	}
+
+	public static double gravityFor(BlockState state) {
+		Double own = gravityOverrides.get(state.getBlock());
+		return own != null ? own : gravity;
+	}
+
+	public static double gravityOf(RigidBody body) {
+		if (gravityOverrides.isEmpty() || body.mass <= 0.0) {
+			return gravity;
+		}
+		double weighted = 0.0;
+		double total = 0.0;
+		for (RigidBody.Cell cell : body.cells) {
+			double w = cell.density * cell.volume;
+			total += w;
+			weighted += w * (cell.payload instanceof BlockState state ? gravityFor(state) : gravity);
+		}
+		return total > 0.0 ? weighted / total : gravity;
+	}
 
 	private static final Set<SoundType> METAL = Set.of(SoundType.METAL, SoundType.ANVIL, SoundType.NETHERITE_BLOCK, SoundType.ANCIENT_DEBRIS,
 		SoundType.LODESTONE, SoundType.CHAIN, SoundType.COPPER, SoundType.COPPER_BULB, SoundType.COPPER_GRATE, SoundType.HEAVY_CORE, SoundType.IRON,

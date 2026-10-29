@@ -7,6 +7,7 @@ import org.joml.Vector3d;
 
 public final class PhysicsWorld {
 	public double gravity = 9.81;
+	public java.util.function.@org.jspecify.annotations.Nullable ToDoubleFunction<RigidBody> gravityOf;
 	public int iterations = 10;
 	public double friction = 0.6;
 	public double restitution = 0.1;
@@ -94,7 +95,7 @@ public final class PhysicsWorld {
 				this.fluidForces(b, view, dt, events, false);
 				continue;
 			}
-			b.vel.y -= this.gravity * dt;
+			b.vel.y -= (this.gravityOf == null ? this.gravity : this.gravityOf.applyAsDouble(b)) * dt;
 			this.fluidForces(b, view, dt, events, true);
 		}
 		this.applyPushes(dt);

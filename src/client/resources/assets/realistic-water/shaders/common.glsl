@@ -57,7 +57,31 @@ layout(std140, set = 0, binding = 0) uniform Globals {
     vec4 matD;
     vec4 matE;
     vec4 compat;
+    mat4 packShadowMV;
+    mat4 packShadowProj;
+    vec4 packShadow;
+    vec4 heatA;
+    vec4 heatB;
+    vec4 heatC;
+    vec4 heatD;
 } G;
+
+bool isWater() {
+    return G.matA.x < 0.5;
+}
+
+bool heatOn() {
+    return G.heatA.x > 0.5 && isWater();
+}
+
+#define HEAT_FP 256.0
+
+#define WW_VAPOUR 3.0
+#define WW_CLING 4.0
+
+ivec3 worldCell(vec3 x) {
+    return ivec3(floor(x - G.camGrid.xyz + G.misc.yzw * G.camGrid.w));
+}
 
 bool isSand() {
     return G.matA.x > 0.5 && G.matA.x < 1.5;
@@ -72,7 +96,11 @@ bool isSlime() {
 }
 
 bool isLeaves() {
-    return G.matA.x > 3.5;
+    return abs(G.matA.x - 4.0) < 0.5;
+}
+
+bool isSteam() {
+    return G.matA.x > 4.5;
 }
 
 #define NX G.dims.x

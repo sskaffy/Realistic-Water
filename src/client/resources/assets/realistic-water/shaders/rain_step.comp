@@ -1,0 +1,90 @@
+#version 450
+#include "rain_common.glsl"
+layout(local_size_x = 256) in;
+layout(std430, binding = 1) buffer Drops { Drop drops[]; };
+layout(std430, binding = 2) buffer Splashes { Drop splashes[]; };
+layout(std430, binding = 3) buffer Cursor { uint cursor[]; };
+layout(std430, binding = 4) readonly buffer Columns { ivec4 cols[]; };
+layout(std430, binding = 5) buffer Events { uvec4 eventCount; vec4 events[]; };
+
+void event(vec3 at, float kind) {
+    uint e = atomicAdd(eventCount.x, 1u);
+    if (e < uint(R.extra.x)) {
+        events[e] = vec4(at, kind);
+    }
+}
+
+void respawn(inout Drop d, inout uint seed, bool top) {
+    float radius = R.fall.y;
+    vec2 xz = R.cam.xz + (vec2(rrand(seed), rrand(seed)) * 2.0 - 1.0) * radius;
+    float y = top ? R.cam.y + R.fall.z * (0.8 + 0.4 * rrand(seed))
+        : R.cam.y - R.fall.w + rrand(seed) * (R.fall.z + R.fall.w);
+    float speed = R.fall.x * (0.85 + 0.3 * rrand(seed));
+    d.pos = vec4(xz.x, y, xz.y, 1.0);
+    d.vel = vec4(R.wind.x, -speed, R.wind.z, rrand(seed));
+}
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= uint(R.counts.x)) {
+        return;
+    }
+    uint seed = rhash(i * 747796405u + uint(R.counts.z) * 2891336453u);
+    Drop d = drops[i];
+    d.pos.xyz += R.shift.xyz;
+    if (d.pos.w <= 0.0) {
+        respawn(d, seed, false);
+    }
+    if (i >= uint(R.counts.w)) {
+        d.pos.y = R.cam.y + R.fall.z;
+        drops[i] = d;
+        return;
+    }
+    float radius = R.fall.y;
+    vec2 rel = d.pos.xz - R.cam.xz;
+    if (abs(rel.x) > radius) {
+        d.pos.x -= sign(rel.x) * 2.0 * radius;
+    }
+    if (abs(rel.y) > radius) {
+        d.pos.z -= sign(rel.y) * 2.0 * radius;
+    }
+    d.pos.xyz += d.vel.xyz * R.shift.w;
+
+    ivec2 c = ivec2(floor(d.pos.xz + R.grid.yz));
+    ivec4 col = cols[columnIndex(c)];
+    bool known = col.x == c.x && col.y == c.y;
+    int flags = col.w & 0xFF;
+    if (known && (flags & COL_RAINS) == 0) {
+        respawn(d, seed, true);
+    } else if (known && d.pos.y <= intBitsToFloat(col.z)) {
+        float top = intBitsToFloat(col.z);
+        bool water = (flags & COL_WATER) != 0;
+        bool lava = (flags & COL_LAVA) != 0;
+        if (water || lava) {
+            event(vec3(d.pos.x, top, d.pos.z), lava ? EVENT_LAVA : EVENT_WATER);
+        }
+        int droplets = lava ? 0 : water ? int(rrand(seed) < 0.4) : int(R.splash.x + rrand(seed));
+        int ripple = water ? 1 : 0;
+        uint total = uint(droplets + ripple);
+        uint base = total > 0u ? atomicAdd(cursor[0], total) : 0u;
+        uint cap = uint(R.counts.y);
+        for (int k = 0; k < droplets; k++) {
+            float a = rrand(seed) * 6.2831853;
+            float out_ = R.splash.y * (0.25 + 0.55 * rrand(seed));
+            Drop s;
+            s.pos = vec4(d.pos.x, top + 0.02, d.pos.z, 0.0);
+            s.vel = vec4(cos(a) * out_, R.splash.y * (0.6 + 0.9 * rrand(seed)), sin(a) * out_, R.splash.z * (0.6 + 0.8 * rrand(seed)));
+            splashes[(base + uint(k)) % cap] = s;
+        }
+        if (ripple == 1) {
+            Drop s;
+            s.pos = vec4(d.pos.x, top + 0.004, d.pos.z, 0.0);
+            s.vel = vec4(0.0, 0.0, 0.0, -R.splash.w * (0.7 + 0.6 * rrand(seed)));
+            splashes[(base + uint(droplets)) % cap] = s;
+        }
+        respawn(d, seed, true);
+    } else if (d.pos.y < R.cam.y - R.fall.w) {
+        respawn(d, seed, true);
+    }
+    drops[i] = d;
+}
