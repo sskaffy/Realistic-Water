@@ -52,7 +52,7 @@ A: Never
 - Realistic things like water, lava can go through any portals
 - Vitrail shader loader support (Vitrail can load in any OF/Iris shader on Vulkan)
 
-**Showcase:** https://www.youtube.com/watch?v=GG2-psEHUI4
+**Showcase:** https://www.youtube.com/watch?v=9DmMckBt_tM
 
 #
 
