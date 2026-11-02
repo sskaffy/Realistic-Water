@@ -99,6 +99,8 @@ public final class WaterSettingsInfo {
 			"How many simulation cells fit along one block for water. Higher gives finer splashes, thinner sheets and smaller drops. Changing it rebuilds every water body.");
 		integer("boxMargin", "Box margin", Cost.MEDIUM, "Every extra cell of margin adds a shell of cells that are solved each step.", 0, 24,
 			"Empty cells kept around the water so it has room to move into before the simulated area grows.");
+		toggle("modelShapes", "Flow through visible gaps", Cost.LOW, "Each block shape is worked out once from its model.",
+			"Lets fluids through gaps you can see in a block, like under fence rails or between iron bars. Glass and leaves stay solid and gaps thinner than one simulation cell stay closed. Takes effect after /water reload.");
 		num("cfl", "CFL number", Cost.HIGH, "Lower means more substeps per frame for fast water.", 0.25, 6, 0.05,
 			"How many cells water may travel in one substep. Lower is more stable and accurate for fast flows but runs more substeps.");
 		num("maxDt", "Max substep time", Cost.HIGH, "Lower forces more substeps every frame, even for calm water.", 0.002, 0.1, 0.001,

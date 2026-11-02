@@ -11,10 +11,12 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import java.lang.reflect.Field;
 import java.util.Map;
+import me.skaffy.RealisticWater;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.minecraft.client.Minecraft;
 import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.permissions.Permissions;
 import net.minecraft.world.phys.Vec3;
@@ -95,6 +97,10 @@ public final class WaterCommands {
 					.suggests((c, b) -> SharedSuggestionProvider.suggest(WaterSettings.fields().keySet(), b))
 					.then(argument("value", StringArgumentType.greedyString()).executes(WaterCommands::set))))
 			.then(op("settings").executes(WaterCommands::listSettings))
+			.then(op("shape")
+				.then(argument("x", IntegerArgumentType.integer())
+					.then(argument("y", IntegerArgumentType.integer())
+						.then(argument("z", IntegerArgumentType.integer()).executes(WaterCommands::shape)))))
 			.then(op("render")
 				.executes(c -> {
 					c.getSource().sendFeedback(Component.literal(ClipRecorder.get().statusLine()));
@@ -116,6 +122,16 @@ public final class WaterCommands {
 		WaterWorld.get().addEmitter(new WaterRegion.Emitter(
 			center.x - half, center.y - half, center.z - half, center.x + half, center.y + half, center.z + half, 0, 0, 0), material);
 		c.getSource().sendFeedback(Component.literal("Dropped a " + size + "^3 block cube of " + material.label()));
+		return 1;
+	}
+
+	private static int shape(CommandContext<FabricClientCommandSource> c) {
+		BlockPos pos = new BlockPos(IntegerArgumentType.getInteger(c, "x"), IntegerArgumentType.getInteger(c, "y"), IntegerArgumentType.getInteger(c, "z"));
+		SolidCache cache = new SolidCache(WaterWorld.resolutionFor(Material.WATER), false);
+		for (String line : cache.describe(c.getSource().getLevel(), pos)) {
+			RealisticWater.LOGGER.info("[RW shape] {}", line);
+			c.getSource().sendFeedback(Component.literal(line));
+		}
 		return 1;
 	}
 
