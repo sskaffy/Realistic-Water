@@ -116,14 +116,54 @@ final class SolidCache {
 			s.kind[i] = EMPTY;
 			return;
 		}
-		if (Block.isShapeFullBlock(shape)) {
+		boolean full = Block.isShapeFullBlock(shape);
+		// opaque full cubes can't have gaps, see-through ones like grates still check the model
+		long[] drawn = WaterSettings.modelShapes && (!full || !state.canOcclude()) ? ModelShapes.cells(state, this.res) : null;
+		if (full && drawn == null) {
 			s.kind[i] = FULL;
 			return;
 		}
+		long[] bits = this.cells(full ? List.of(new AABB(0.0, 0.0, 0.0, 1.0, 1.0, 1.0)) : shape.toAabbs());
+		if (drawn != null) {
+			for (int w = 0; w < bits.length; w++) {
+				bits[w] &= drawn[w];
+			}
+		}
+		int count = 0;
+		for (long w : bits) {
+			count += Long.bitCount(w);
+		}
+		s.kind[i] = count == 0 ? EMPTY : count == this.bitsPerBlock ? FULL : PARTIAL;
+		s.partial[i] = s.kind[i] == PARTIAL ? bits : null;
+	}
+
+	// for /water shape: one line per cell layer from the bottom, z rows split by '|', '#' is solid
+	List<String> describe(ClientLevel level, BlockPos pos) {
+		BlockState state = level.getBlockState(pos);
+		Section s = new Section();
+		this.voxelizeBlock(level, pos, state, s, 0);
+		List<String> out = new java.util.ArrayList<>();
+		out.add(state + " kind=" + new String[]{"empty", "full", "partial"}[s.kind[0]] + " model=" + (ModelShapes.cells(state, this.res) != null));
 		int r = this.res;
-		List<AABB> boxes = shape.toAabbs().stream().map(box -> atLeastOneCell(box, r)).toList();
+		for (int j = 0; j < r; j++) {
+			StringBuilder line = new StringBuilder("y" + j + " ");
+			for (int k = 0; k < r; k++) {
+				for (int c = 0; c < r; c++) {
+					int bit = c + r * (j + r * k);
+					boolean solid = s.kind[0] == FULL || s.kind[0] == PARTIAL && ((s.partial[0][bit >> 6] >>> (bit & 63)) & 1L) != 0L;
+					line.append(solid ? '#' : '.');
+				}
+				line.append(k < r - 1 ? "|" : "");
+			}
+			out.add(line.toString());
+		}
+		return out;
+	}
+
+	private long[] cells(List<AABB> shapeBoxes) {
+		int r = this.res;
+		List<AABB> boxes = shapeBoxes.stream().map(box -> atLeastOneCell(box, r)).toList();
 		long[] bits = new long[(this.bitsPerBlock + 63) / 64];
-		boolean any = false;
 		for (int k = 0; k < r; k++) {
 			for (int j = 0; j < r; j++) {
 				for (int c = 0; c < r; c++) {
@@ -135,15 +175,13 @@ final class SolidCache {
 							&& cz >= box.minZ - 1e-4 && cz <= box.maxZ + 1e-4) {
 							int bit = c + r * (j + r * k);
 							bits[bit >> 6] |= 1L << (bit & 63);
-							any = true;
 							break;
 						}
 					}
 				}
 			}
 		}
-		s.kind[i] = any ? PARTIAL : EMPTY;
-		s.partial[i] = any ? bits : null;
+		return bits;
 	}
 
 	private static AABB atLeastOneCell(AABB box, int r) {

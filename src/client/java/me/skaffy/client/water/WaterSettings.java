@@ -17,6 +17,7 @@ import java.util.TreeMap;
 public final class WaterSettings {
 	public static int resolution = 6;
 	public static int boxMargin = 6;
+	public static boolean modelShapes = true;
 
 	public static float cfl = 2.0F;
 	public static float maxDt = 1.0F / 40.0F;

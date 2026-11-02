@@ -562,6 +562,9 @@ public final class WaterWorld {
 	public void reload(ClientLevel level) {
 		this.closeRegions();
 		this.chunkScanQueue.clear();
+		for (SolidCache cache : this.solidCaches.values()) {
+			cache.clear();
+		}
 		int radius = Minecraft.getInstance().options.renderDistance().get();
 		ChunkPos center = ChunkPos.containing(Minecraft.getInstance().gameRenderer.gameRenderState().levelRenderState.cameraRenderState.blockPos);
 		for (int dz = -radius; dz <= radius; dz++) {
