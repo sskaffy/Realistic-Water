@@ -31,7 +31,7 @@ public final class RealisticCollision {
 	}
 
 	private static String describe(Entity entity, AABB area) {
-		var near = entity.level().getEntitiesOfClass(RealisticBlockEntity.class, area.inflate(8.0));
+		var near = RealisticBlockEntity.near(entity.level(), area.inflate(8.0));
 		if (near.isEmpty()) {
 			return "no bodies within 8 blocks of " + entity.blockPosition();
 		}
@@ -53,9 +53,14 @@ public final class RealisticCollision {
 		return SweptCollider.allowedAlong(bounds, 1, -depth, boxes, MAX_SLOPE) > -depth + 1.0E-9;
 	}
 
+	public static volatile @Nullable RealisticBlockEntity carried;
+
 	private static @Nullable List<SweptCollider.Oriented> gather(Entity entity, AABB area) {
 		List<SweptCollider.Oriented> boxes = null;
-		for (RealisticBlockEntity body : entity.level().getEntitiesOfClass(RealisticBlockEntity.class, area)) {
+		for (RealisticBlockEntity body : RealisticBlockEntity.near(entity.level(), area)) {
+			if (body == carried && entity instanceof net.minecraft.world.entity.player.Player) {
+				continue;
+			}
 			List<SweptCollider.Oriented> some = body.orientedBoxes(area);
 			if (some.isEmpty()) {
 				continue;

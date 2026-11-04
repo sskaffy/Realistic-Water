@@ -1,8 +1,13 @@
 package me.skaffy.realistic;
 
+import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.WeakHashMap;
 import me.skaffy.ModContent;
 import me.skaffy.RealisticWater;
 import me.skaffy.net.BodyStatePayload;
@@ -51,6 +56,7 @@ import net.minecraft.world.level.block.SoundType;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.entity.EntityInLevelCallback;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 import net.minecraft.world.phys.AABB;
@@ -72,6 +78,7 @@ public class RealisticBlockEntity extends Entity {
 	private static final EntityDataAccessor<Vector3fc> DATA_VEL = SynchedEntityData.defineId(RealisticBlockEntity.class, EntityDataSerializers.VECTOR3);
 	private static final EntityDataAccessor<Vector3fc> DATA_SPIN = SynchedEntityData.defineId(RealisticBlockEntity.class, EntityDataSerializers.VECTOR3);
 	private static final EntityDataAccessor<BlockPos> DATA_ORIGIN = SynchedEntityData.defineId(RealisticBlockEntity.class, EntityDataSerializers.BLOCK_POS);
+	private static final EntityDataAccessor<Integer> DATA_FUSE = SynchedEntityData.defineId(RealisticBlockEntity.class, EntityDataSerializers.INT);
 	public static final int FREE = -1;
 	public static final int LOCKED = -2;
 	private static final int LOCK_TICKS = 10;
@@ -96,9 +103,38 @@ public class RealisticBlockEntity extends Entity {
 	private final Vector3d renderFrom = new Vector3d();
 	private final Vector3d renderTo = new Vector3d();
 
+	private static final Map<Level, Set<RealisticBlockEntity>> LOADED = Collections.synchronizedMap(new WeakHashMap<>());
+
 	public RealisticBlockEntity(EntityType<? extends RealisticBlockEntity> type, Level level) {
 		super(type, level);
 		this.noPhysics = true;
+	}
+
+	@Override
+	public void setLevelCallback(final EntityInLevelCallback callback) {
+		super.setLevelCallback(callback);
+		if (callback == EntityInLevelCallback.NULL) {
+			Set<RealisticBlockEntity> set = LOADED.get(this.level());
+			if (set != null) {
+				set.remove(this);
+			}
+		} else {
+			LOADED.computeIfAbsent(this.level(), level -> new ReferenceOpenHashSet<>()).add(this);
+		}
+	}
+
+	public static List<RealisticBlockEntity> near(Level level, AABB area) {
+		Set<RealisticBlockEntity> set = LOADED.get(level);
+		if (set == null || set.isEmpty()) {
+			return List.of();
+		}
+		List<RealisticBlockEntity> out = new ArrayList<>();
+		for (RealisticBlockEntity e : set) {
+			if (!e.isRemoved() && e.getBoundingBox().intersects(area)) {
+				out.add(e);
+			}
+		}
+		return out;
 	}
 
 	public static RealisticBlockEntity spawn(ServerLevel level, List<RigidBody.Cell> cells, Vector3d center, @Nullable RigidBody like) {
@@ -131,6 +167,7 @@ public class RealisticBlockEntity extends Entity {
 		builder.define(DATA_VEL, new Vector3f());
 		builder.define(DATA_SPIN, new Vector3f());
 		builder.define(DATA_ORIGIN, BlockPos.ZERO);
+		builder.define(DATA_FUSE, -1);
 	}
 
 	public BlockPos gridOrigin() {
@@ -280,7 +317,7 @@ public class RealisticBlockEntity extends Entity {
 	}
 
 	protected double[][] playerBoxes(RigidBody.Cell cell) {
-		return cell.payload instanceof BlockState state ? BlockMaterials.collisionBoxes(state) : CUBE;
+		return cell.boxes != null ? cell.boxes : CUBE;
 	}
 
 	public void addLoads(PhysicsWorld world, @Nullable Input driver) {
@@ -417,6 +454,9 @@ public class RealisticBlockEntity extends Entity {
 			grid.randomTick(((ServerLevel) this.level()).getGameRules().get(GameRules.RANDOM_TICK_SPEED));
 		}
 		this.setSharedFlagOnFire(this.burningTicks > 0);
+		if (this.fuse >= 0 && this.tickFuse((ServerLevel) this.level())) {
+			return;
+		}
 		if (this.getY() < this.level().getMinY() - 64) {
 			this.discard();
 			return;
@@ -692,7 +732,11 @@ public class RealisticBlockEntity extends Entity {
 	public void remove(final RemovalReason reason) {
 		super.remove(reason);
 		if (this.mirror != null) {
-			this.mirror.release();
+			if (reason == RemovalReason.KILLED || reason == RemovalReason.DISCARDED) {
+				this.mirror.release();
+			} else {
+				this.mirror.releaseMoved();
+			}
 			this.mirror = null;
 		}
 	}
@@ -1054,8 +1098,44 @@ public class RealisticBlockEntity extends Entity {
 	}
 
 
+	private boolean tickFuse(ServerLevel level) {
+		Vector3d c = new Vector3d(this.body.pos);
+		this.entityData.set(DATA_FUSE, this.fuse);
+		if (this.fuse-- > 0) {
+			level.sendParticles(net.minecraft.core.particles.ParticleTypes.SMOKE, c.x, c.y + 0.5, c.z, 1, 0.0, 0.0, 0.0, 0.0);
+			return false;
+		}
+		this.discard();
+		if (level.getGameRules().get(GameRules.TNT_EXPLODES)) {
+			level.explode(null, c.x, c.y, c.z, this.explosionPower, Level.ExplosionInteraction.TNT);
+		}
+		return true;
+	}
+
+	public int syncedFuse() {
+		return this.entityData.get(DATA_FUSE);
+	}
+
+	public int fuse = -1;
+	private float explosionPower = 4.0F;
+
+	public static boolean primeFromGrid(ServerLevel level, net.minecraft.world.entity.item.PrimedTnt tnt) {
+		GridSpace.Found found = GridSpace.find(level, tnt.getX(), tnt.getY() + 0.5, tnt.getZ());
+		if (found == null) {
+			return false;
+		}
+		net.minecraft.world.phys.Vec3 at = found.toWorld(tnt.getX(), tnt.getY() + 0.5, tnt.getZ());
+		RealisticBlockEntity e = spawn(level, List.of(BlockMaterials.cell(0, 0, 0, tnt.getBlockState())), new Vector3d(at.x, at.y, at.z),
+			found.body().body);
+		e.fuse = tnt.getFuse();
+		return true;
+	}
+
 	@Override
 	protected void addAdditionalSaveData(final ValueOutput output) {
+		if (this.fuse >= 0) {
+			output.putInt("fuse", this.fuse);
+		}
 		ValueOutput.ValueOutputList list = output.childrenList("cells");
 		for (RigidBody.Cell c : this.body.cells) {
 			ValueOutput o = list.addChild();
@@ -1082,6 +1162,7 @@ public class RealisticBlockEntity extends Entity {
 
 	@Override
 	protected void readAdditionalSaveData(final ValueInput input) {
+		this.fuse = input.getIntOr("fuse", -1);
 		List<RigidBody.Cell> cells = new ArrayList<>();
 		input.childrenListOrEmpty("cells").stream().forEach(o -> o.read("state", BlockState.CODEC).ifPresent(state -> {
 			RigidBody.Cell c = this.makeCell(o.getIntOr("x", 0), o.getIntOr("y", 0), o.getIntOr("z", 0), state);

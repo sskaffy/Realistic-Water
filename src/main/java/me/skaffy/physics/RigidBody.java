@@ -331,10 +331,15 @@ public final class RigidBody {
 	}
 
 	private void shapePoints(Cell cell, List<double[]> out) {
+		double thinnest = 1.0;
 		for (double[] b : cell.boxes) {
-			int nx = Math.max(1, (int) Math.ceil((b[3] - b[0]) * SAMPLES - 1.0E-6));
-			int ny = Math.max(1, (int) Math.ceil((b[4] - b[1]) * SAMPLES - 1.0E-6));
-			int nz = Math.max(1, (int) Math.ceil((b[5] - b[2]) * SAMPLES - 1.0E-6));
+			thinnest = Math.min(thinnest, Math.min(b[3] - b[0], Math.min(b[4] - b[1], b[5] - b[2])));
+		}
+		double perBlock = Math.clamp(2.0 / Math.max(thinnest, 1.0E-3), SAMPLES, 32.0);
+		for (double[] b : cell.boxes) {
+			int nx = Math.max(1, (int) Math.ceil((b[3] - b[0]) * perBlock - 1.0E-6));
+			int ny = Math.max(1, (int) Math.ceil((b[4] - b[1]) * perBlock - 1.0E-6));
+			int nz = Math.max(1, (int) Math.ceil((b[5] - b[2]) * perBlock - 1.0E-6));
 			for (int i = 0; i <= nx; i++) {
 				for (int j = 0; j <= ny; j++) {
 					for (int k = 0; k <= nz; k++) {

@@ -1,5 +1,7 @@
 package me.skaffy.client.mixin;
 
+import me.skaffy.client.kelp.RealisticKelp;
+import me.skaffy.client.realistic.RealisticGrab;
 import me.skaffy.client.realistic.RealisticMining;
 import me.skaffy.client.realistic.RealisticPicking;
 import me.skaffy.client.realistic.RealisticUse;
@@ -24,7 +26,13 @@ public class RealisticBlockMinecraftMixin {
 	@Inject(method = "startUseItem", at = @At("HEAD"), cancellable = true)
 	private void realisticWater$startUsing(CallbackInfo ci) {
 		Minecraft mc = (Minecraft) (Object) this;
-		if (mc.player != null && RealisticUse.start(mc)) {
+		if (mc.player != null && RealisticGrab.start(mc)) {
+			this.rightClickDelay = 4;
+			ci.cancel();
+		} else if (mc.player != null && RealisticUse.start(mc)) {
+			this.rightClickDelay = 4;
+			ci.cancel();
+		} else if (mc.player != null && RealisticKelp.get().tryGrab(mc)) {
 			this.rightClickDelay = 4;
 			ci.cancel();
 		}

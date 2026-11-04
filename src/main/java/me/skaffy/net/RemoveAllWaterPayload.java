@@ -1,6 +1,7 @@
 package me.skaffy.net;
 
 import me.skaffy.RealisticWater;
+import me.skaffy.block.RealisticWaterBlock;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
@@ -9,6 +10,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 
@@ -48,7 +50,8 @@ public record RemoveAllWaterPayload(int radiusChunks, byte material) implements 
 					}
 					int baseY = (level.getMinSectionY() + s) << 4;
 					for (int i = 0; i < 4096; i++) {
-						if (section.getBlockState(i & 15, (i >> 4) & 15, i >> 8).getBlock() == target) {
+						BlockState state = section.getBlockState(i & 15, (i >> 4) & 15, i >> 8);
+						if (state.getBlock() == target && !RealisticWaterBlock.isOcean(state)) {
 							pos.set(((cx + dx) << 4) + (i & 15), baseY + ((i >> 4) & 15), ((cz + dz) << 4) + (i >> 8));
 							level.setBlock(pos, Blocks.AIR.defaultBlockState(), Block.UPDATE_CLIENTS | Block.UPDATE_KNOWN_SHAPE | Block.UPDATE_SKIP_ON_PLACE);
 							removed++;

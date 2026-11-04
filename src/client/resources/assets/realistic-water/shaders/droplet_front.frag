@@ -19,5 +19,5 @@ void main() {
     vec4 clip = G.proj * vec4(pos, 1.0);
     gl_FragDepth = clip.z / clip.w;
     outG = vec4(n, -pos.z);
-    outMat = vec4(G.matA.x, regionLightAt(relToSim((G.invView * vec4(vCenter, 1.0)).xyz)), 0.0);
+    outMat = vec4(G.matA.x, regionLightAt(relToSim((G.invView * vec4(vCenter, 1.0)).xyz)), G.oceanA.x > 0.1 ? 2.0 : 0.0);
 }

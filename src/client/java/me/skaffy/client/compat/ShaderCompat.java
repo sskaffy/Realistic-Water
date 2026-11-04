@@ -14,6 +14,7 @@ import java.lang.reflect.Method;
 import java.util.function.Supplier;
 import me.skaffy.RealisticWater;
 import me.skaffy.client.water.WaterSettings;
+import me.skaffy.client.kelp.RealisticKelp;
 import me.skaffy.client.water.WaterWorld;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
@@ -257,7 +258,7 @@ public final class ShaderCompat {
 	}
 
 	public static void vitrailShadowGathered() {
-		if (!WaterWorld.get().hasShadowCasters()) {
+		if (!WaterWorld.get().hasShadowCasters() && !RealisticKelp.get().hasStrands()) {
 			return;
 		}
 		lookUpShadowGeometry();
@@ -282,6 +283,7 @@ public final class ShaderCompat {
 		try {
 			if (shadowStorage.get(null) instanceof SubmitNodeCollector collector) {
 				WaterWorld.get().submitShadowCasters(collector, camera);
+				RealisticKelp.get().submit(collector, camera);
 			}
 		} catch (IllegalAccessException | RuntimeException e) {
 			shadowStorage = null;

@@ -7,7 +7,7 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.server.level.ServerPlayer;
 
-public record BoilingWaterPayload(long[] positions, float damage) implements CustomPacketPayload {
+public record BoilingWaterPayload(long[] positions, byte[] degrees, float damage) implements CustomPacketPayload {
 	public static final Type<BoilingWaterPayload> TYPE = new Type<>(RealisticWater.id("boiling_water"));
 	public static final StreamCodec<RegistryFriendlyByteBuf, BoilingWaterPayload> CODEC = StreamCodec.of(BoilingWaterPayload::write, BoilingWaterPayload::read);
 	public static final int MAX_ENTRIES = 4096;
@@ -15,8 +15,9 @@ public record BoilingWaterPayload(long[] positions, float damage) implements Cus
 	private static void write(RegistryFriendlyByteBuf buf, BoilingWaterPayload payload) {
 		buf.writeFloat(payload.damage);
 		buf.writeVarInt(payload.positions.length);
-		for (long p : payload.positions) {
-			buf.writeLong(p);
+		for (int i = 0; i < payload.positions.length; i++) {
+			buf.writeLong(payload.positions[i]);
+			buf.writeByte(payload.degrees[i]);
 		}
 	}
 
@@ -24,10 +25,12 @@ public record BoilingWaterPayload(long[] positions, float damage) implements Cus
 		float damage = buf.readFloat();
 		int n = Math.min(buf.readVarInt(), MAX_ENTRIES);
 		long[] positions = new long[n];
+		byte[] degrees = new byte[n];
 		for (int i = 0; i < n; i++) {
 			positions[i] = buf.readLong();
+			degrees[i] = buf.readByte();
 		}
-		return new BoilingWaterPayload(positions, damage);
+		return new BoilingWaterPayload(positions, degrees, damage);
 	}
 
 	@Override
@@ -36,6 +39,6 @@ public record BoilingWaterPayload(long[] positions, float damage) implements Cus
 	}
 
 	public void apply(ServerPlayer player) {
-		BoilingWater.report(player.level(), player.blockPosition(), this.positions, this.damage);
+		BoilingWater.report(player.level(), player.blockPosition(), this.positions, this.degrees, this.damage);
 	}
 }

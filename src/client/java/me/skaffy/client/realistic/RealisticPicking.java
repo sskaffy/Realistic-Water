@@ -27,7 +27,7 @@ public final class RealisticPicking {
 		double limit = current == null || current.getType() == HitResult.Type.MISS || currentIsBody ? reach : eye.distanceTo(current.getLocation());
 		AABB area = new AABB(eye, eye.add(dir.scale(reach))).inflate(1.0);
 		RealisticHit best = null;
-		for (RealisticBlockEntity e : mc.level.getEntitiesOfClass(RealisticBlockEntity.class, area)) {
+		for (RealisticBlockEntity e : RealisticBlockEntity.near(mc.level, area)) {
 			e.syncClientBody(e.renderPosition(partialTicks), e.renderRotation(partialTicks));
 			RigidBody.Hit hit = e.body.rayCast(eye.x, eye.y, eye.z, dir.x, dir.y, dir.z, limit);
 			if (hit != null) {

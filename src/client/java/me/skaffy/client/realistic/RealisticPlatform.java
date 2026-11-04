@@ -15,6 +15,10 @@ import org.jspecify.annotations.Nullable;
 public final class RealisticPlatform {
 	private static final double STEP = 0.6;
 	private static @Nullable RealisticBlockEntity under;
+
+	public static @Nullable RealisticBlockEntity standingOn() {
+		return under;
+	}
 	private static final Vector3d anchorGrid = new Vector3d();
 	private static final Vector3d anchorWorld = new Vector3d();
 
@@ -41,7 +45,7 @@ public final class RealisticPlatform {
 
 		under = null;
 		AABB box = player.getBoundingBox();
-		for (RealisticBlockEntity e : mc.level.getEntitiesOfClass(RealisticBlockEntity.class, box.expandTowards(0.0, -0.3, 0.0))) {
+		for (RealisticBlockEntity e : RealisticBlockEntity.near(mc.level, box.expandTowards(0.0, -0.3, 0.0))) {
 			sync(e);
 			if (Math.abs(topUnder(e, box) - box.minY) < 0.08) {
 				under = e;
@@ -60,7 +64,7 @@ public final class RealisticPlatform {
 	private static void pushOut(LocalPlayer player, Minecraft mc) {
 		AABB box = player.getBoundingBox().deflate(0.001);
 		List<SweptCollider.Oriented> boxes = new ArrayList<>();
-		for (RealisticBlockEntity e : mc.level.getEntitiesOfClass(RealisticBlockEntity.class, box)) {
+		for (RealisticBlockEntity e : RealisticBlockEntity.near(mc.level, box)) {
 			sync(e);
 			boxes.addAll(e.orientedBoxes(box));
 		}

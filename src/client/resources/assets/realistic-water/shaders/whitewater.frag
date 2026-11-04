@@ -8,7 +8,7 @@ layout(location = 1) in vec3 vCenter;
 layout(location = 2) in float vRadius;
 layout(location = 3) in vec4 vData;
 layout(location = 0) out vec4 outFoam;
-layout(location = 1) out float outSurface;
+layout(location = 1) out vec4 outSurface;
 
 float linearDepth(float device) {
     vec4 v = G.invProj * vec4(0.0, 0.0, device, 1.0);
@@ -42,6 +42,11 @@ void main() {
     } else {
         a *= 0.9 * clamp(vData.x * 0.8, 0.0, 1.0) * exp(-2.5 * r2);
     }
+    if (type < 2.5) {
+        vec3 n = vec3(vUV.x, vUV.y, sqrt(max(1.0 - r2, 0.0)));
+        vec3 L = G.sunDir.w > 0.0 ? normalize(G.sunDir.xyz) : normalize(mat3(G.view) * vec3(0.0, 1.0, 0.0));
+        color *= mix(0.6, 1.12, clamp((dot(n, L) + 0.4) / 1.4, 0.0, 1.0));
+    }
     float fd = texture(gbuffer, uv).w;
     float submerged = 0.0;
     if (viewState.x > 0.5) {
@@ -56,5 +61,5 @@ void main() {
         a *= exp(-G.scatter.w * path);
     }
     outFoam = vec4(color * a, a);
-    outSurface = submerged > 0.0 ? 0.0 : a;
+    outSurface = vec4(submerged > 0.0 ? 0.0 : a, a * myDist, 0.0, 0.0);
 }

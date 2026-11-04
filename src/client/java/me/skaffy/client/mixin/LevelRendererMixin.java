@@ -60,6 +60,7 @@ public abstract class LevelRendererMixin {
 	@Inject(method = "submitEntities", at = @At("TAIL"))
 	private void realisticWater$submitPackMaterials(PoseStack poseStack, LevelRenderState levelRenderState, SubmitNodeCollector output, CallbackInfo ci) {
 		WaterWorld.get().submitPackMaterials(output, levelRenderState.cameraRenderState.pos);
+		me.skaffy.client.kelp.RealisticKelp.get().submit(output, levelRenderState.cameraRenderState.pos);
 	}
 
 	@Inject(method = "executeOutline", at = @At("HEAD"))

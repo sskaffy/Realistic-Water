@@ -8,7 +8,12 @@ import me.skaffy.realistic.RealisticBlockEntity;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.SubmitNodeCollector;
+import net.minecraft.client.renderer.block.BlockModelRenderState;
+import net.minecraft.client.renderer.block.BlockModelResolver;
 import net.minecraft.client.renderer.block.MovingBlockRenderState;
+import net.minecraft.client.renderer.entity.TntMinecartRenderer;
+import net.minecraft.client.renderer.entity.TntRenderer;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.client.renderer.blockentity.state.BlockEntityRenderState;
 import net.minecraft.client.renderer.block.dispatch.BlockStateModel;
 import net.minecraft.client.renderer.block.dispatch.BlockStateModelPart;
@@ -46,6 +51,10 @@ public class RealisticBlockRenderer extends EntityRenderer<RealisticBlockEntity,
 		int outlineIndex = -1;
 		VoxelShape outlineShape = Shapes.block();
 		float lineWidth = 1.0F;
+		int litIndex = -1;
+		float fuse = -1.0F;
+		final BlockModelRenderState litModel = new BlockModelRenderState();
+		int litLight;
 	}
 
 	static final class EvenlyLit extends MovingBlockRenderState {
@@ -78,9 +87,12 @@ public class RealisticBlockRenderer extends EntityRenderer<RealisticBlockEntity,
 		cell.block = block;
 	}
 
+	private final BlockModelResolver blockModelResolver;
+
 	public RealisticBlockRenderer(final EntityRendererProvider.Context context) {
 		super(context);
 		this.shadowRadius = 0.0F;
+		this.blockModelResolver = context.getBlockModelResolver();
 	}
 
 	@Override
@@ -102,6 +114,9 @@ public class RealisticBlockRenderer extends EntityRenderer<RealisticBlockEntity,
 		state.blockEntityOffsets.clear();
 		state.crackIndex = -1;
 		state.outlineIndex = -1;
+		state.litIndex = -1;
+		int fuse = entity.syncedFuse();
+		state.fuse = fuse >= 0 ? fuse - partialTicks + 1.0F : -1.0F;
 		RigidBody body = entity.body;
 		entity.syncClientBody(at, state.rotation);
 		ClientLevel level = entity.level() instanceof ClientLevel client ? client : null;
@@ -129,12 +144,14 @@ public class RealisticBlockRenderer extends EntityRenderer<RealisticBlockEntity,
 			}
 			if (hovered != null && hovered.x == cell.x && hovered.y == cell.y && hovered.z == cell.z) {
 				state.outlineIndex = state.blocks.size();
-				state.outlineShape = block.blockState.getShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO);
-				if (state.outlineShape.isEmpty()) {
-					state.outlineShape = Shapes.block();
-				}
+				state.outlineShape = outline(cell);
 			}
 			float[] offset = {(float) (cell.x - body.com.x), (float) (cell.y - body.com.y), (float) (cell.z - body.com.z)};
+			if (fuse >= 0 && state.litIndex < 0 && block.blockState.is(Blocks.TNT)) {
+				state.litIndex = state.blocks.size();
+				this.blockModelResolver.update(state.litModel, block.blockState, TntRenderer.BLOCK_DISPLAY_CONTEXT);
+				state.litLight = LightCoordsUtil.pack(block.getBrightness(LightLayer.BLOCK, block.blockPos), block.getBrightness(LightLayer.SKY, block.blockPos));
+			}
 			state.blocks.add(block);
 			state.offsets.add(offset);
 			this.extractBlockEntity(entity, cell, block, offset, state, partialTicks);
@@ -154,6 +171,21 @@ public class RealisticBlockRenderer extends EntityRenderer<RealisticBlockEntity,
 		beState.lightCoords = LightCoordsUtil.pack(lit.getBrightness(LightLayer.BLOCK, lit.blockPos), lit.getBrightness(LightLayer.SKY, lit.blockPos));
 		state.blockEntities.add(beState);
 		state.blockEntityOffsets.add(offset);
+	}
+
+	private static final java.util.Map<Object, VoxelShape> OUTLINES = new java.util.concurrent.ConcurrentHashMap<>();
+
+	private static VoxelShape outline(RigidBody.Cell cell) {
+		if (cell.boxes == null) {
+			return Shapes.block();
+		}
+		return OUTLINES.computeIfAbsent(cell.payload, k -> {
+			VoxelShape shape = Shapes.empty();
+			for (double[] b : cell.boxes) {
+				shape = Shapes.or(shape, Shapes.box(b[0], b[1], b[2], b[3], b[4], b[5]));
+			}
+			return shape.isEmpty() ? Shapes.block() : shape.optimize();
+		});
 	}
 
 	private static CardinalLighting turned(CardinalLighting base, RigidBody body) {
@@ -180,7 +212,19 @@ public class RealisticBlockRenderer extends EntityRenderer<RealisticBlockEntity,
 			float[] o = state.offsets.get(i);
 			poseStack.pushPose();
 			poseStack.translate(o[0], o[1], o[2]);
-			collector.submitMovingBlock(poseStack, block, state.outlineColor);
+			if (i == state.litIndex) {
+				poseStack.pushPose();
+				if (state.fuse < 10.0F) {
+					float scale = 1.0F + TntRenderer.getSwellAmount(state.fuse);
+					poseStack.translate(0.5F, 0.5F, 0.5F);
+					poseStack.scale(scale, scale, scale);
+					poseStack.translate(-0.5F, -0.5F, -0.5F);
+				}
+				TntMinecartRenderer.submitWhiteSolidBlock(state.litModel, poseStack, collector, state.litLight, TntRenderer.isLit(state.fuse), state.outlineColor);
+				poseStack.popPose();
+			} else {
+				collector.submitMovingBlock(poseStack, block, state.outlineColor);
+			}
 			if (i == state.crackIndex) {
 				BlockStateModel model = Minecraft.getInstance().getModelManager().getBlockStateModelSet().get(block.blockState);
 				List<BlockStateModelPart> parts = new ArrayList<>();

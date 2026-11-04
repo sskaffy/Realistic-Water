@@ -143,12 +143,27 @@ public final class BlockMaterials {
 	private static final Map<BlockState, double[][]> SOLID = new ConcurrentHashMap<>();
 	private static final Map<BlockState, double[][]> COLLISION = new ConcurrentHashMap<>();
 
+	private static volatile java.util.function.@Nullable Function<BlockState, double[][]> modelShapes;
+
+	public static void setModelShapes(java.util.function.Function<BlockState, double[][]> shapes) {
+		modelShapes = shapes;
+		SOLID.clear();
+	}
+
 	public static double @Nullable [][] solidBoxes(BlockState state) {
 		double[][] boxes = SOLID.computeIfAbsent(state, s -> {
 			if (s.getBlock() instanceof RedstoneWireBlock) {
 				s = s.getBlock().defaultBlockState();
 			}
-			double[][] b = boxes(s.getCollisionShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO));
+			VoxelShape collision = s.getCollisionShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO);
+			java.util.function.Function<BlockState, double[][]> fromModel = modelShapes;
+			if (fromModel != null && !Block.isShapeFullBlock(collision)) {
+				double[][] drawn = fromModel.apply(s);
+				if (drawn != null && drawn.length > 0) {
+					return drawn;
+				}
+			}
+			double[][] b = boxes(collision);
 			if (b.length == 0) {
 				b = boxes(s.getShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO));
 			}

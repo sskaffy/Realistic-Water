@@ -9,6 +9,7 @@ import me.skaffy.client.realistic.RealisticBoatRenderer;
 import me.skaffy.client.realistic.RealisticPlatform;
 import me.skaffy.client.compat.ShaderCompat;
 import me.skaffy.client.mixin.FogRendererAccessor;
+import me.skaffy.client.water.OceanMode;
 import me.skaffy.client.water.SlimeFogEnvironment;
 import me.skaffy.client.water.SteamParticle;
 import net.fabricmc.fabric.api.client.particle.v1.ParticleProviderRegistry;
@@ -22,6 +23,7 @@ import net.minecraft.client.gui.screens.MenuScreens;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientChunkEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
+import me.skaffy.client.kelp.RealisticKelp;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
@@ -43,6 +45,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
+import net.minecraft.world.level.material.Fluids;
 
 public class RealisticWaterClient implements ClientModInitializer {
 	@Override
@@ -56,12 +59,16 @@ public class RealisticWaterClient implements ClientModInitializer {
 		MenuScreens.register(ModContent.CONVERTER_MENU, ConverterScreen::new);
 		WaterWorld water = WaterWorld.get();
 		ClientCommandRegistrationCallback.EVENT.register(WaterCommands::register);
+		ClientTickEvents.START_CLIENT_TICK.register(OceanMode::tick);
 		ClientTickEvents.END_CLIENT_TICK.register(water::tick);
 		ClientTickEvents.END_CLIENT_TICK.register(WaterSettingsScreen::tick);
 		ClientTickEvents.START_CLIENT_TICK.register(ClientBodies::startTick);
 		ClientTickEvents.END_CLIENT_TICK.register(ClientBodies::endTick);
 		ClientTickEvents.END_CLIENT_TICK.register(RealisticPlatform::tick);
 		ClientTickEvents.END_CLIENT_TICK.register(DynamicLights::tick);
+		ClientTickEvents.END_CLIENT_TICK.register(mc -> RealisticKelp.get().tick(mc));
+		RealisticKelp.init();
+		me.skaffy.client.realistic.ModelShapes.install();
 		ClientPlayNetworking.registerGlobalReceiver(SteamPayload.TYPE, (payload, context) -> context.client().execute(
 			() -> WaterWorld.get().addSteam(payload.x(), payload.y(), payload.z(), payload.eighths())));
 		ClientPlayNetworking.registerGlobalReceiver(BodyPushPayload.TYPE, (payload, context) -> context.client().execute(() -> ClientBodies.receive(payload)));
@@ -86,6 +93,7 @@ public class RealisticWaterClient implements ClientModInitializer {
 			}
 		}));
 		ClientChunkEvents.CHUNK_LOAD.register(water::onChunkLoad);
+		ClientChunkEvents.CHUNK_LOAD.register((lvl, chunk) -> RealisticKelp.get().onChunkLoad(lvl, chunk));
 		ClientChunkEvents.CHUNK_UNLOAD.register(water::onChunkUnload);
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> water.clear());
 		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> water.shutdown());
@@ -105,7 +113,28 @@ public class RealisticWaterClient implements ClientModInitializer {
 			) {
 			}
 		};
-		FluidRenderingRegistry.register(ModContent.REALISTIC_WATER, ModContent.FLOWING_REALISTIC_WATER, waterModel, invisible);
+		FluidRenderHandler realisticWater = new FluidRenderHandler() {
+			@Override
+			public void renderFluid(
+				FluidRenderer fluidRenderer, BlockPos pos, BlockAndTintGetter level, FluidRenderer.Output output, BlockState blockState, FluidState fluidState
+			) {
+				if (OceanMode.drawsOceanBlockAsVanilla(blockState)) {
+					FluidRenderHandler.super.renderFluid(fluidRenderer, pos, level, output, blockState, fluidState);
+				}
+			}
+		};
+		FluidRenderingRegistry.register(ModContent.REALISTIC_WATER, ModContent.FLOWING_REALISTIC_WATER, waterModel, realisticWater);
+		FluidRenderHandler vanillaWater = new FluidRenderHandler() {
+			@Override
+			public void renderFluid(
+				FluidRenderer fluidRenderer, BlockPos pos, BlockAndTintGetter level, FluidRenderer.Output output, BlockState blockState, FluidState fluidState
+			) {
+				if (!OceanMode.hidesVanilla(level, pos, fluidState)) {
+					FluidRenderHandler.super.renderFluid(fluidRenderer, pos, level, output, blockState, fluidState);
+				}
+			}
+		};
+		FluidRenderingRegistry.register(Fluids.WATER, Fluids.FLOWING_WATER, waterModel, vanillaWater);
 		FluidModel.Unbaked lavaModel = new FluidModel.Unbaked(
 			new Material(Identifier.withDefaultNamespace("block/lava_still")),
 			new Material(Identifier.withDefaultNamespace("block/lava_flow")),

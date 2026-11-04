@@ -135,23 +135,24 @@ public final class GridMirror {
 
 	void saveBlockEntities(ValueOutput.ValueOutputList list) {
 		GridSpace.Slot at = this.slot;
-		if (at == null) {
-			return;
-		}
 		for (RigidBody.Cell cell : this.owner.body.cells) {
 			if (!(cell.payload instanceof BlockState state) || !state.hasBlockEntity()) {
 				continue;
 			}
-			at.world(cell.x, cell.y, cell.z, this.scratch);
-			BlockEntity be = this.level.getBlockEntity(this.scratch);
-			if (be == null) {
+			CompoundTag tag = this.loaded.get(BlockPos.asLong(cell.x, cell.y, cell.z));
+			if (tag == null && at != null) {
+				at.world(cell.x, cell.y, cell.z, this.scratch);
+				BlockEntity be = this.level.getBlockEntity(this.scratch);
+				tag = be != null ? be.saveWithFullMetadata(this.level.registryAccess()) : null;
+			}
+			if (tag == null) {
 				continue;
 			}
 			ValueOutput out = list.addChild();
 			out.putInt("x", cell.x);
 			out.putInt("y", cell.y);
 			out.putInt("z", cell.z);
-			out.store("data", CompoundTag.CODEC, be.saveWithFullMetadata(this.level.registryAccess()));
+			out.store("data", CompoundTag.CODEC, tag);
 		}
 	}
 
@@ -182,8 +183,14 @@ public final class GridMirror {
 		if (this.loaded.isEmpty()) {
 			return;
 		}
-		for (Long2ObjectMap.Entry<CompoundTag> entry : this.loaded.long2ObjectEntrySet()) {
+		for (var it = this.loaded.long2ObjectEntrySet().iterator(); it.hasNext(); ) {
+			Long2ObjectMap.Entry<CompoundTag> entry = it.next();
 			long key = entry.getLongKey();
+			RigidBody.Cell cell = this.owner.body.cellAt(BlockPos.getX(key), BlockPos.getY(key), BlockPos.getZ(key));
+			if (cell == null || !(cell.payload instanceof BlockState state) || !state.hasBlockEntity()) {
+				it.remove();
+				continue;
+			}
 			at.world(BlockPos.getX(key), BlockPos.getY(key), BlockPos.getZ(key), this.scratch);
 			BlockEntity be = this.level.getBlockEntity(this.scratch);
 			if (be == null) {
@@ -194,8 +201,8 @@ public final class GridMirror {
 				this.level.setBlockEntity(restored);
 			}
 			this.dirtyBlockEntities.add(key);
+			it.remove();
 		}
-		this.loaded.clear();
 	}
 
 	public void push() {
@@ -209,7 +216,8 @@ public final class GridMirror {
 			this.writing = true;
 			try {
 				if (was != null) {
-					this.clear(was, PUSH_FLAGS);
+					this.loaded.putAll(this.takeBlockEntityTags(this.owner.body.cells));
+					this.clear(was, PUSH_FLAGS | Block.UPDATE_SKIP_BLOCK_ENTITY_SIDEEFFECTS);
 					this.removeTickets(was);
 				}
 			} finally {

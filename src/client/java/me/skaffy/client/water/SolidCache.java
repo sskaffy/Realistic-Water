@@ -159,6 +159,15 @@ final class SolidCache {
 		return new AABB(lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]);
 	}
 
+	static void writeFull(int[] out, int cx, int cy, int cz, int nx, int ny, int r) {
+		for (int k = 0; k < r; k++) {
+			for (int j = 0; j < r; j++) {
+				int row = cx + nx * ((cy + j) + ny * (cz + k));
+				java.util.Arrays.fill(out, row, row + r, 1);
+			}
+		}
+	}
+
 	void writeBlock(ClientLevel level, int bx, int by, int bz, int[] out, int cx, int cy, int cz, int nx, int ny) {
 		Section s = this.section(level, bx >> 4, by >> 4, bz >> 4);
 		byte kind;

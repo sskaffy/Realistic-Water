@@ -14,11 +14,16 @@ float linearDepth(float device) {
 
 void main() {
     vec2 uv = gl_FragCoord.xy * G.screen.zw;
-    float dist = min(-vView.z, linearDepth(texture(sceneDepth, uv).r));
+    float scene = linearDepth(texture(sceneDepth, uv).r);
+    float dist = min(-vView.z, scene);
     vec3 gn = cross(dFdx(vView), dFdy(vView));
     if (dot(gn, vNormal) < 0.0) {
         gn = -gn;
     }
     bool entering = dot(gn, -vView) > 0.0;
+    if (G.oceanA.x > 0.5) {
+        outThickness = entering && vWall < 0.5 ? max(scene - dist, 0.0) : 0.0;
+        return;
+    }
     outThickness = entering ? -dist : dist;
 }

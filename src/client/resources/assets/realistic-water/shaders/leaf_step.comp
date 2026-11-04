@@ -111,7 +111,7 @@ void main() {
         myRank = (inBox(c) ? cellCount[cellIndex(c)] >> 16 : 0u) + (myRank & 0xFFFFu);
     }
     bool excess = myRank >= CAP;
-    bool hopUp = false;
+    ivec3 settleInto = ivec3(0);
 
     float t = G.simB.z;
     float gustNoise = 0.55 + 0.45 * sin(t * 1.7 + dot(x.xz / res, vec2(0.21, 0.17)))
@@ -170,19 +170,25 @@ void main() {
 
         if (excess) {
             int start = int(rand(seed) * 4.0);
-            ivec3 target = ivec3(0, 1, 0);
-            for (int k = 0; k < 4; k++) {
+            for (int k = 0; k < 4 && settleInto == ivec3(0); k++) {
                 ivec3 s = SIDES[(start + k) & 3];
-                if (freeAt(c + s)) {
-                    target = s;
-                    break;
+                if (freeAt(c + s) && fullAt(c + s - ivec3(0, 1, 0))) {
+                    settleInto = s;
                 }
             }
-            if (target.y > 0) {
-                hopUp = true;
-            } else {
-                v.xz = vec2(target.xz) * SHUFFLE;
+            if (settleInto == ivec3(0) && freeAt(c + ivec3(0, 1, 0))) {
+                settleInto = ivec3(0, 1, 0);
             }
+            for (int k = 0; k < 4 && settleInto == ivec3(0); k++) {
+                ivec3 s = SIDES[(start + k) & 3];
+                if (freeAt(c + s)) {
+                    settleInto = s;
+                }
+            }
+            if (settleInto == ivec3(0)) {
+                settleInto = ivec3(0, 1, 0);
+            }
+            v = vec3(0.0);
         } else if (grounded && !pushed && !lifted) {
             bool sliding = false;
             int start = int(rand(seed) * 4.0);
@@ -226,9 +232,8 @@ void main() {
                     xn = tpos;
                 }
             }
-            if (hopUp && !solidAt(c + ivec3(0, 1, 0))) {
-                xn = vec3(x.x, float(c.y + 1) + 0.01, x.z);
-                v.y = max(v.y, 0.0);
+            if (settleInto != ivec3(0) && !solidAt(c + settleInto)) {
+                xn = vec3(x.x + float(settleInto.x), float(c.y + settleInto.y) + 0.01, x.z + float(settleInto.z));
             }
             if (supported && floor(xn.y) < float(c.y) && floor(xn.x) == float(c.x) && floor(xn.z) == float(c.z)) {
                 xn.y = float(c.y) + 0.01;

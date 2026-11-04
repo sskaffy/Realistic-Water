@@ -38,7 +38,7 @@ public final class DynamicLights {
 		}
 		Long2IntOpenHashMap now = new Long2IntOpenHashMap();
 		Vector3d c = new Vector3d();
-		for (RealisticBlockEntity e : level.getEntitiesOfClass(RealisticBlockEntity.class, mc.player.getBoundingBox().inflate(RANGE))) {
+		for (RealisticBlockEntity e : RealisticBlockEntity.near(level, mc.player.getBoundingBox().inflate(RANGE))) {
 			for (RigidBody.Cell cell : e.body.cells) {
 				int light = cell.payload instanceof BlockState state ? state.getLightEmission() : 0;
 				if (light <= 0) {

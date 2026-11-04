@@ -34,7 +34,7 @@ public class ServerGamePacketListenerImplMixin {
 	@WrapOperation(method = "handlePlayerPositionChange", require = 0,
 		at = @At(value = "INVOKE", target = "Lnet/minecraft/server/level/ServerLevel;noCollision(Lnet/minecraft/world/entity/Entity;Lnet/minecraft/world/phys/AABB;)Z"))
 	private boolean realisticWater$trustClientOnBodies(final ServerLevel level, final Entity entity, final AABB box, final Operation<Boolean> original) {
-		if (!level.getEntitiesOfClass(RealisticBlockEntity.class, box.inflate(0.5)).isEmpty()) {
+		if (!RealisticBlockEntity.near(level, box.inflate(0.5)).isEmpty()) {
 			return false;
 		}
 		return original.call(level, entity, box);
@@ -47,7 +47,7 @@ public class ServerGamePacketListenerImplMixin {
 		}
 		AABB feet = this.player.getBoundingBox();
 		AABB below = new AABB(feet.minX, feet.minY - 0.6, feet.minZ, feet.maxX, feet.minY + 0.1, feet.maxZ);
-		if (!this.player.level().getEntitiesOfClass(RealisticBlockEntity.class, below).isEmpty()) {
+		if (!RealisticBlockEntity.near(this.player.level(), below).isEmpty()) {
 			this.clientIsFloating = false;
 			this.aboveGroundTickCount = 0;
 		}

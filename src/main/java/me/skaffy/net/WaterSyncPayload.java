@@ -65,7 +65,7 @@ public record WaterSyncPayload(long[] positions, byte[] amounts) implements Cust
 				continue;
 			}
 			BlockState current = level.getBlockState(pos);
-			if (RealisticWaterBlock.isInfinite(current)) {
+			if (RealisticWaterBlock.isInfinite(current) || RealisticWaterBlock.isOcean(current)) {
 				continue;
 			}
 			boolean ours = RealisticWaterFluid.isRealistic(current.getFluidState()) && current.getBlock() == ModContent.REALISTIC_WATER_BLOCK;

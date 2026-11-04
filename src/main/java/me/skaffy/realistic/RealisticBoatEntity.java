@@ -7,13 +7,18 @@ import me.skaffy.mixin.BoatItemAccessor;
 import me.skaffy.net.BodyStatePayload;
 import me.skaffy.physics.PhysicsWorld;
 import me.skaffy.physics.RigidBody;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.NonNullList;
+import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.sounds.SoundEvent;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.tags.FluidTags;
 import net.minecraft.util.Mth;
 import net.minecraft.world.Containers;
 import net.minecraft.world.ContainerHelper;
@@ -36,6 +41,8 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.gameevent.GameEvent;
+import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 import net.minecraft.world.phys.Vec3;
@@ -63,6 +70,7 @@ public class RealisticBoatEntity extends RealisticBlockEntity {
 	private final float[] paddlePositions = new float[2];
 	private byte drivenPaddles;
 	private float riderHeading = Float.NaN;
+	private @Nullable Boolean wasInWater;
 
 	public RealisticBoatEntity(EntityType<? extends RealisticBoatEntity> type, Level level) {
 		super(type, level);
@@ -290,6 +298,73 @@ public class RealisticBoatEntity extends RealisticBlockEntity {
 		if (this.isVehicle() && !this.upright()) {
 			this.ejectPassengers();
 		}
+		ServerLevel level = (ServerLevel) this.level();
+		boolean inWater = this.hullInWater(level);
+		if (inWater && this.wasInWater == Boolean.FALSE) {
+			this.splash(level);
+		}
+		this.wasInWater = inWater;
+		this.paddleSounds(level, inWater);
+	}
+
+	private void paddleSounds(ServerLevel level, boolean inWater) {
+		Vector3d f = this.body.dirToWorld(0, 0, 1, new Vector3d());
+		for (int side = 0; side < 2; side++) {
+			if (!this.paddling(side) || this.getControllingPassenger() == null) {
+				this.paddlePositions[side] = 0.0F;
+				continue;
+			}
+			float at = this.paddlePositions[side];
+			if (!this.isSilent() && at % (float) (Math.PI * 2) <= (float) (Math.PI / 4)
+				&& (at + (float) (Math.PI / 8)) % (float) (Math.PI * 2) >= (float) (Math.PI / 4)) {
+				SoundEvent sound = inWater ? SoundEvents.BOAT_PADDLE_WATER : this.hullOnGround(level) ? SoundEvents.BOAT_PADDLE_LAND : null;
+				if (sound != null) {
+					double dx = side == 1 ? -f.z : f.z;
+					double dz = side == 1 ? f.x : -f.x;
+					level.playSound(null, this.getX() + dx, this.getY(), this.getZ() + dz, sound, this.getSoundSource(), 1.0F,
+						0.8F + 0.4F * this.random.nextFloat());
+				}
+			}
+			this.paddlePositions[side] = at + (float) (Math.PI / 8);
+		}
+	}
+
+	private void splash(ServerLevel level) {
+		Vector3d v = this.body.vel;
+		double tx = v.x / 20.0;
+		double ty = v.y / 20.0;
+		double tz = v.z / 20.0;
+		float scale = this.getControllingPassenger() != null ? 0.9F : 0.2F;
+		float volume = Math.min(1.0F, (float) Math.sqrt(tx * tx * 0.2 + ty * ty + tz * tz * 0.2) * scale);
+		if (volume > 0.02F && !this.isSilent()) {
+			this.playSound(volume < 0.25F ? this.getSwimSplashSound() : this.getSwimHighSpeedSplashSound(), volume,
+				1.0F + (this.random.nextFloat() - this.random.nextFloat()) * 0.4F);
+		}
+		Vector3d c = this.body.toWorld(0, 0, 0, new Vector3d());
+		level.sendParticles(ParticleTypes.SPLASH, c.x, Math.floor(c.y) + 1.0, c.z, 28, BoatHull.HALF_WIDTH, 0.0, BoatHull.HALF_LENGTH, 0.0);
+		this.gameEvent(GameEvent.SPLASH, this.getControllingPassenger());
+	}
+
+	private boolean hullInWater(ServerLevel level) {
+		Vector3d p = new Vector3d();
+		BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+		for (int i = 0; i < 5; i++) {
+			double x = i == 4 ? 0.0 : (i & 1) == 0 ? -0.5 : 0.5;
+			double z = i == 4 ? 0.0 : (i & 2) == 0 ? -0.7 : 0.7;
+			this.body.toWorld(x, -0.1, z, p);
+			pos.set(Mth.floor(p.x), Mth.floor(p.y), Mth.floor(p.z));
+			FluidState fluid = level.getFluidState(pos);
+			if (fluid.is(FluidTags.WATER) && p.y <= pos.getY() + fluid.getHeight(level, pos) + 0.1) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private boolean hullOnGround(ServerLevel level) {
+		Vector3d p = this.body.toWorld(0, -0.1, 0, new Vector3d());
+		BlockPos pos = BlockPos.containing(p.x, p.y, p.z);
+		return !level.getBlockState(pos).getCollisionShape(level, pos).isEmpty();
 	}
 
 

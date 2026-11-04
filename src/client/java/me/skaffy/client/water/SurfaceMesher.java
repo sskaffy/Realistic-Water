@@ -7,6 +7,7 @@ import me.skaffy.client.vk.Desc;
 import me.skaffy.client.vk.Program;
 import me.skaffy.client.vk.Vk;
 import me.skaffy.client.vk.VkBuf;
+import me.skaffy.client.vk.VkOutOfMemory;
 import org.jspecify.annotations.Nullable;
 import org.lwjgl.vulkan.VkCommandBuffer;
 
@@ -63,6 +64,10 @@ final class SurfaceMesher implements AutoCloseable {
 
 	SurfaceMesher(int nx, int ny, int nz, int subdivision) {
 		this.subdivision = subdivision;
+		long fine = (long) nx * subdivision * ny * subdivision * nz * subdivision;
+		if (fine > Integer.MAX_VALUE - 1_000_000L) {
+			throw new VkOutOfMemory("surface grid of " + fine + " voxels is too large");
+		}
 		this.fx = nx * subdivision;
 		this.fy = ny * subdivision;
 		this.fz = nz * subdivision;

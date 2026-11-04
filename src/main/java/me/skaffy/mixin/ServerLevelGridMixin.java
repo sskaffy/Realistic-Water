@@ -34,6 +34,21 @@ public abstract class ServerLevelGridMixin {
 		}
 	}
 
+	@Inject(method = "addFreshEntity", at = @At("HEAD"), cancellable = true)
+	private void realisticWater$realisticPrimedTnt(final Entity entity, final CallbackInfoReturnable<Boolean> info) {
+		if (entity instanceof net.minecraft.world.entity.item.PrimedTnt tnt && GridSpace.isGridPos(tnt.blockPosition())
+			&& RealisticBlockEntity.primeFromGrid((ServerLevel) (Object) this, tnt)) {
+			info.setReturnValue(true);
+		}
+	}
+
+	@Inject(method = "tickPrecipitation", at = @At("HEAD"), cancellable = true)
+	private void realisticWater$noWeatherInGrid(final BlockPos pos, final CallbackInfo info) {
+		if (GridSpace.isGridPos(pos)) {
+			info.cancel();
+		}
+	}
+
 	@Inject(
 		method = "playSeededSound(Lnet/minecraft/world/entity/Entity;DDDLnet/minecraft/core/Holder;Lnet/minecraft/sounds/SoundSource;FFJ)V",
 		at = @At("HEAD"), cancellable = true)

@@ -117,7 +117,7 @@ public class RealisticBlockItem extends Item {
 		Level level = context.getLevel();
 		BlockPos pos = place.getClickedPos();
 		Vector3d center = new Vector3d(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
-		List<RealisticBlockEntity> near = level.getEntitiesOfClass(RealisticBlockEntity.class, new AABB(pos).inflate(1.0));
+		List<RealisticBlockEntity> near = RealisticBlockEntity.near(level, new AABB(pos).inflate(1.0));
 		for (RealisticBlockEntity e : near) {
 			if (e.body.containsWorld(center.x, center.y, center.z)) {
 				return InteractionResult.FAIL;
@@ -126,6 +126,10 @@ public class RealisticBlockItem extends Item {
 		BlockState state = block.getStateForPlacement(place);
 		if (state == null) {
 			state = block.defaultBlockState();
+		}
+		if (block == Blocks.BAMBOO_SAPLING || block == Blocks.BAMBOO) {
+			state = Blocks.BAMBOO.defaultBlockState().setValue(net.minecraft.world.level.block.BambooStalkBlock.STAGE,
+				net.minecraft.world.level.block.BambooStalkBlock.STAGE_DONE_GROWING);
 		}
 		if (level instanceof ServerLevel server) {
 			RealisticBlockEntity spawned = RealisticBlockEntity.spawn(server, List.of(BlockMaterials.cell(0, 0, 0, state)), center, null);

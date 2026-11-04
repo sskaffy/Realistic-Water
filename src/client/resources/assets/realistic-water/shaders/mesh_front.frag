@@ -16,7 +16,7 @@ void main() {
     if (dist < G.surf.z) {
         discard;
     }
-    if (viewState.x > 0.5 && vWall > 0.5) {
+    if ((viewState.x > 0.5 || G.oceanA.x > 0.5) && vWall > 0.5) {
         discard;
     }
     vec3 n = normalize(vNormal);
@@ -24,5 +24,5 @@ void main() {
     vec3 rel = (G.invView * vec4(vView, 1.0)).xyz;
     vec3 nWorld = mat3(G.invView) * n;
     float shadowed = abs(G.matA.x - 3.0) < 0.5 ? 1.0 - sunShadowFactor(relToSim(rel + nWorld * 0.1)) : 0.0;
-    outMat = vec4(G.matA.x, regionLightAt(relToSim(rel + nWorld * 0.5)), shadowed);
+    outMat = vec4(G.matA.x, regionLightAt(relToSim(rel + nWorld * 0.5)), G.oceanA.x > 0.1 ? 2.0 : shadowed);
 }

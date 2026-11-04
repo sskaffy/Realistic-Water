@@ -21,7 +21,11 @@
 		"MouseHandlerMixin",
 		"WeatherEffectRendererMixin",
 		"compat.VitrailPackChainMixin",
-		"compat.VitrailShadowGeometryMixin"
+		"compat.VitrailProgramTranslatorMixin",
+		"compat.VitrailShadowGeometryMixin",
+		"compat.VitrailSodiumVertexMixin",
+		"compat.VitrailTranslationCacheMixin",
+		"compat.VitrailWorldValuesMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

@@ -35,6 +35,7 @@ import me.skaffy.fluid.RealisticWaterFluid;
 import me.skaffy.fluid.FluidMixing;
 import me.skaffy.net.FlowPayload;
 import me.skaffy.net.FluidMixPayload;
+import me.skaffy.net.VanillaFeedPayload;
 import me.skaffy.physics.RigidBody;
 import me.skaffy.realistic.RealisticBlockEntity;
 import me.skaffy.realistic.RealisticPhysics;
@@ -48,6 +49,9 @@ import me.skaffy.net.RemoveAllWaterPayload;
 import me.skaffy.net.SandSyncPayload;
 import me.skaffy.net.SlimeSyncPayload;
 import me.skaffy.net.WaterSyncPayload;
+import me.skaffy.ocean.OceanOrigin;
+import me.skaffy.ocean.OceanWaves;
+import net.minecraft.world.level.block.Blocks;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -56,6 +60,7 @@ import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.client.renderer.state.level.LevelRenderState;
 import net.minecraft.client.renderer.state.level.SkyRenderState;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Holder;
 import net.minecraft.core.Direction;
 import net.minecraft.core.SectionPos;
 import net.minecraft.core.particles.ParticleTypes;
@@ -65,6 +70,8 @@ import net.minecraft.tags.FluidTags;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.Mth;
+import net.minecraft.world.level.biome.Biome;
+import net.minecraft.world.level.biome.Biomes;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.ChunkPos;
@@ -78,6 +85,7 @@ import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.material.FluidState;
+import net.minecraft.world.level.material.Fluids;
 import net.minecraft.world.level.material.FogType;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -94,7 +102,7 @@ import org.lwjgl.vulkan.VkCommandBuffer;
 public final class WaterWorld {
 	private static final WaterWorld INSTANCE = new WaterWorld();
 	static final int UBO_SLOT = 8192;
-	static final int UBO_SIZE = 4144;
+	static final int UBO_SIZE = 4400;
 	static final float PARTICLES_PER_CELL = 8.0F;
 	static final float SAND_POISSON = 0.3F;
 
@@ -106,6 +114,7 @@ public final class WaterWorld {
 	static final int MAX_ENTITIES = 32;
 	static final int MAX_SOURCES = 64;
 	static final int MAX_REGIONS = 16;
+	static final int SLOTS_PER_FRAME = MAX_REGIONS + 1;
 	private static final int JOIN_DISTANCE = 16;
 	private static final int SYNC_INTERVAL = 30;
 	private static final int MIX_INTERVAL = 2;
@@ -171,7 +180,13 @@ public final class WaterWorld {
 	private final Map<Integer, double[]> bodyFlows = new HashMap<>();
 	private final LongOpenHashSet waveMakers = new LongOpenHashSet();
 	private final LongOpenHashSet portalBlocks = new LongOpenHashSet();
+	private final LongOpenHashSet vanillaFeeds = new LongOpenHashSet();
 	private final Map<Integer, SolidCache> solidCaches = new HashMap<>();
+	private final OceanSurfaces oceanSurfaces = new OceanSurfaces();
+	private final OceanSim oceanSim = new OceanSim(this, this.oceanSurfaces);
+	private @Nullable OceanRenderer oceanRenderer;
+	private boolean cameraUnderSea;
+	private boolean seaDrawsFog;
 	private @Nullable WaterRenderer renderer;
 	private @Nullable SandRenderer sandRenderer;
 	private @Nullable LeafRenderer leafRenderer;
@@ -210,6 +225,10 @@ public final class WaterWorld {
 		if (this.simLevel != null && PackMaterials.active()) {
 			PackMaterials.submit(collector, camera, this.simLevel, this.regions);
 		}
+		ClientLevel lvl = Minecraft.getInstance().level;
+		if (lvl != null) {
+			PackFoam.submit(collector, camera, lvl, this.regions, this.oceanSurfaces);
+		}
 	}
 
 	public boolean hasShadowCasters() {
@@ -239,7 +258,7 @@ public final class WaterWorld {
 
 	private static int waterAmount(BlockState state) {
 		FluidState fluid = state.getFluidState();
-		return RealisticWaterFluid.isRealistic(fluid) ? fluid.getAmount() : 0;
+		return RealisticWaterFluid.isRealistic(fluid) && !RealisticWaterBlock.isOcean(state) ? fluid.getAmount() : 0;
 	}
 
 	private static int lavaAmount(BlockState state) {
@@ -331,10 +350,51 @@ public final class WaterWorld {
 		return Minecraft.getInstance().getSingleplayerServer() != null;
 	}
 
+	static boolean isHostPublic() {
+		return isHost();
+	}
+
+	float oceanAmplitude(int x, int y, int z) {
+		return this.oceanSurfaces.restTop(x, z) == y ? this.oceanSurfaces.amplitude(x, z) : 0.0F;
+	}
+
+	WaterRegion addOceanRegion(OceanZone zone) {
+		WaterRegion r = new WaterRegion(this.nextRegionId++, Math.max(1, WaterSettings.oceanResolution), Material.WATER);
+		r.ocean = zone;
+		this.regions.add(r);
+		return r;
+	}
+
+	void removeOceanRegion(WaterRegion r) {
+		this.regions.remove(r);
+		this.latestFills.remove(r);
+		r.close();
+	}
+
+	public void oceanToggled(boolean on) {
+		for (WaterRegion r : List.copyOf(this.oceanSim.zones)) {
+			this.removeOceanRegion(r);
+		}
+		this.oceanSim.clear();
+		this.oceanSurfaces.clear();
+		Minecraft mc = Minecraft.getInstance();
+		if (on && mc.level != null) {
+			this.oceanSurfaces.scanAll(mc.level, mc.gameRenderer.gameRenderState().levelRenderState.cameraRenderState.pos,
+				mc.options.renderDistance().get() + 1);
+		}
+	}
+
+	private static boolean sameRestView(BlockState a, BlockState b) {
+		if (OceanWaves.isRestWater(a) && OceanWaves.isRestWater(b)) {
+			return a.getFluidState().getOwnHeight() == b.getFluidState().getOwnHeight() || RealisticWaterBlock.isOcean(a) || RealisticWaterBlock.isOcean(b);
+		}
+		return OceanWaves.isRestAir(a) && OceanWaves.isRestAir(b) || a == b;
+	}
+
 
 	private @Nullable WaterRegion regionNear(BlockPos pos, int margin, Material material) {
 		for (WaterRegion r : this.regions) {
-			if (r.material == material && r.res == resolutionFor(material) && r.claims(pos, margin)) {
+			if (r.ocean == null && r.material == material && r.res == resolutionFor(material) && r.claims(pos, margin)) {
 				return r;
 			}
 		}
@@ -545,12 +605,47 @@ public final class WaterWorld {
 		this.regionFor(p, material).claimBlock(p);
 	}
 
+	private void feedFromVanilla(ClientLevel level, BlockPos pos, BlockState state) {
+		if (!WaterSettings.vanillaWaterExchange || !isHost() || state.getBlock() != Blocks.WATER
+			|| state.getFluidState().getType() != Fluids.FLOWING_WATER || this.vanillaFeeds.contains(pos.asLong())) {
+			return;
+		}
+		BlockPos.MutableBlockPos n = new BlockPos.MutableBlockPos();
+		boolean touches = false;
+		for (Direction d : Direction.values()) {
+			if (d != Direction.UP && waterAmount(level.getBlockState(n.setWithOffset(pos, d))) > 0) {
+				touches = true;
+				break;
+			}
+		}
+		if (!touches) {
+			return;
+		}
+		int amount = state.getFluidState().getAmount();
+		this.vanillaFeeds.add(pos.asLong());
+		this.addWater(pos.immutable(), 0.0, amount >= 8 ? 1.0 : amount / 8.0);
+	}
+
+	private void sendVanillaFeeds() {
+		if (this.vanillaFeeds.isEmpty()) {
+			return;
+		}
+		if (ClientPlayNetworking.canSend(VanillaFeedPayload.TYPE)) {
+			LongArrayList all = new LongArrayList(this.vanillaFeeds);
+			for (int start = 0; start < all.size(); start += VanillaFeedPayload.MAX_ENTRIES) {
+				int n = Math.min(VanillaFeedPayload.MAX_ENTRIES, all.size() - start);
+				ClientPlayNetworking.send(new VanillaFeedPayload(all.subList(start, start + n).toLongArray()));
+			}
+		}
+		this.vanillaFeeds.clear();
+	}
+
 	public void removeAll(int radiusChunks, Material material) {
 		if (ClientPlayNetworking.canSend(RemoveAllWaterPayload.TYPE)) {
 			ClientPlayNetworking.send(new RemoveAllWaterPayload(radiusChunks, material.syncId()));
 		}
 		for (WaterRegion r : List.copyOf(this.regions)) {
-			if (r.material == material) {
+			if (r.material == material && r.ocean == null) {
 				this.regions.remove(r);
 				r.close();
 			}
@@ -592,6 +687,9 @@ public final class WaterWorld {
 		if (oldState == newState || !this.ownsEvent(level)) {
 			return;
 		}
+		if (OceanMode.active() && !sameRestView(oldState, newState)) {
+			this.oceanSurfaces.blockChanged(pos);
+		}
 		Material oldSpring = springMaterial(oldState);
 		Material newSpring = springMaterial(newState);
 		long key = pos.asLong();
@@ -628,6 +726,18 @@ public final class WaterWorld {
 				this.addSlime(pos.immutable(), slimeBefore / 8.0, slimeAfter >= 8 ? 1.0 : slimeAfter / 8.0);
 			} else {
 				this.removeMaterial(pos.immutable(), slimeAfter / 8.0, 1.0, Material.SLIME);
+			}
+		}
+
+		if (waterBefore == 0 && waterAfter == 0) {
+			this.feedFromVanilla(level, pos, newState);
+		} else if (waterBefore == 0 && WaterSettings.vanillaWaterExchange && isHost()) {
+			BlockPos.MutableBlockPos n = new BlockPos.MutableBlockPos();
+			for (Direction d : Direction.values()) {
+				if (d != Direction.DOWN) {
+					n.setWithOffset(pos, d);
+					this.feedFromVanilla(level, n, level.getBlockState(n));
+				}
 			}
 		}
 
@@ -698,12 +808,16 @@ public final class WaterWorld {
 			}
 		}
 		this.chunkScanQueue.add(pos);
+		if (OceanMode.active()) {
+			this.oceanSurfaces.chunkLoaded(pos.x(), pos.z());
+		}
 	}
 
 	public void onChunkUnload(ClientLevel level, LevelChunk chunk) {
 		if (level != this.simLevel) {
 			return;
 		}
+		this.oceanSurfaces.chunkUnloaded(chunk.getPos().x(), chunk.getPos().z());
 		for (SolidCache cache : this.solidCaches.values()) {
 			cache.invalidateChunk(chunk.getPos().x(), chunk.getPos().z());
 		}
@@ -810,6 +924,10 @@ public final class WaterWorld {
 			this.scanChunk(level, this.chunkScanQueue.poll());
 		}
 		this.pumpCacheFrame = -1L;
+		if (OceanMode.active()) {
+			this.oceanSurfaces.tick(level, mc.gameRenderer.gameRenderState().levelRenderState.cameraRenderState.pos);
+			this.oceanSim.tick(mc, level);
+		}
 		this.waveMakerSounds.tick(mc, this.pumps(level));
 		this.boilSounds.tick(mc);
 		this.waterEchoes.expire(this.frameCounter);
@@ -830,11 +948,17 @@ public final class WaterWorld {
 			if (!this.regions.contains(r)) {
 				continue;
 			}
+			if (r.ocean != null) {
+				continue;
+			}
 			if (listener != null) {
 				this.sounds.onFill(r.material, fill, listener);
 			}
 			if (isHost()) {
 				this.syncBlocks(level, r, fill);
+				if (r.material == Material.WATER) {
+					this.collectScalding(fill);
+				}
 			}
 		}
 		boolean mixFill = false;
@@ -849,6 +973,7 @@ public final class WaterWorld {
 		if (mixFill && isHost() && WaterSettings.lavaWaterMixing) {
 			this.mixFluids(level);
 		}
+		this.sendVanillaFeeds();
 		this.sounds.tick(level);
 		this.sendBodyFlows();
 		if (level.getGameTime() % 10L == 0L) {
@@ -866,7 +991,7 @@ public final class WaterWorld {
 		RandomSource random = level.getRandom();
 		BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
 		for (WaterRegion r : this.regions) {
-			if (r.material != Material.WATER || r.boxWorld == null) {
+			if (r.material != Material.WATER || r.boxWorld == null || r.ocean != null) {
 				continue;
 			}
 			int[] b = r.boxWorld;
@@ -936,7 +1061,7 @@ public final class WaterWorld {
 			target = 0;
 		}
 		if (current > 0 && target == 0 && fill > 0.05F) {
-			return current;
+			return Math.min(current, 1);
 		}
 		if (current == 0 && target > 0 && fill < 0.2F) {
 			return 0;
@@ -974,6 +1099,9 @@ public final class WaterWorld {
 			for (int y = 0; y < f.dy(); y++) {
 				for (int x = 0; x < f.dx(); x++, i++) {
 					pos.set(f.x() + x, f.y() + y, f.z() + z);
+					if (level.isOutsideBuildHeight(pos)) {
+						continue;
+					}
 					long key = pos.asLong();
 					BlockState state = level.getBlockState(pos);
 					int current = amountOf(state, material);
@@ -1009,6 +1137,118 @@ public final class WaterWorld {
 			this.queueClear(level, key, material, positions, amounts);
 		}
 		this.send(material, positions, amounts);
+	}
+
+	public OceanWaves.Waves calmWaves(ClientLevel level, float partialTick) {
+		return OceanWaves.at(level.getGameTime(), partialTick, OceanSim.strength(level));
+	}
+
+	public void seaFarCells(int x0, int z0, int size, int cell, int seaTop, int[] out) {
+		float[] amp = new float[size * size];
+		for (int cz = 0; cz < size; cz++) {
+			for (int cx = 0; cx < size; cx++) {
+				amp[cx + cz * size] = this.oceanSurfaces.cellAmplitude(x0 + cx * cell, z0 + cz * cell, cell, seaTop);
+			}
+		}
+		java.util.Arrays.fill(out, 0);
+		for (int cz = 0; cz < size; cz++) {
+			for (int cx = 0; cx < size; cx++) {
+				float a = OceanWaves.AMP_MAX;
+				for (int dz = -1; dz <= 1 && a > 0.0F; dz++) {
+					for (int dx = -1; dx <= 1; dx++) {
+						int nx = cx + dx;
+						int nz = cz + dz;
+						a = Math.min(a, nx < 0 || nz < 0 || nx >= size || nz >= size ? 0.0F : amp[nx + nz * size]);
+					}
+				}
+				int q = Mth.clamp((int) Math.floor(a / OceanWaves.AMP_MAX * 15.0F), 0, 15);
+				int i = cx + cz * size;
+				out[i >> 3] |= q << ((i & 7) * 4);
+			}
+		}
+	}
+
+	public void seaColumns(int x0, int z0, int size, int camY, int[] out) {
+		for (int dz = 0; dz < size; dz++) {
+			for (int dx = 0; dx < size; dx++) {
+				int top = this.oceanSurfaces.restTop(x0 + dx, z0 + dz);
+				int word = 0;
+				if (OceanSurfaces.hasTop(top) && Math.abs(top - camY) < 255) {
+					int amp = Mth.clamp(Math.round(this.oceanSurfaces.amplitude(x0 + dx, z0 + dz) / OceanWaves.AMP_MAX * 31.0F), 0, 31);
+					word = (top - camY + 256) | amp << 9 | 512 << 14;
+				}
+				out[dx + dz * size] = word;
+			}
+		}
+		float band = Math.max(WaterSettings.oceanEdgeBand, 1.0e-3F);
+		for (WaterRegion r : this.oceanSim.zones) {
+			float[] dist = r.seaDisturbance;
+			OceanZone zone = r.ocean;
+			if (dist == null || zone == null) {
+				continue;
+			}
+			int res = r.res;
+			int blocksW = r.seaDistW / res;
+			int blocksD = r.seaDistD / res;
+			for (int bz = 0; bz < blocksD; bz++) {
+				for (int bx = 0; bx < blocksW; bx++) {
+					int gx = r.seaDistX0 + bx - x0;
+					int gz = r.seaDistZ0 + bz - z0;
+					if (gx < 0 || gz < 0 || gx >= size || gz >= size) {
+						continue;
+					}
+					int at = gx + gz * size;
+					int word = out[at];
+					if (word == 0 || Math.abs((word & 511) - 256 + camY - zone.seaY) > 2) {
+						continue;
+					}
+					float sum = 0.0F;
+					int n = 0;
+					for (int cz = 0; cz < res; cz++) {
+						for (int cx = 0; cx < res; cx++) {
+							float h = dist[bx * res + cx + r.seaDistW * (bz * res + cz)];
+							if (h > -1000.0F) {
+								sum += h;
+								n++;
+							}
+						}
+					}
+					if (n == 0) {
+						continue;
+					}
+					float edge = Math.min(Math.min(bx + 0.5F, blocksW - bx - 0.5F), Math.min(bz + 0.5F, blocksD - bz - 0.5F));
+					float t = Mth.clamp(edge / band, 0.0F, 1.0F);
+					float h = sum / n * (t * t * (3.0F - 2.0F * t));
+					int q = Mth.clamp(Math.round(h * 64.0F), -512, 511) + 512;
+					out[at] = (word & ~(1023 << 14)) | q << 14;
+				}
+			}
+		}
+	}
+
+	public boolean seaDrawsFog() {
+		return this.seaDrawsFog;
+	}
+
+	private boolean cameraUnderSea(ClientLevel level, Vec3 cam) {
+		if (this.oceanSim.cameraInZone(cam)) {
+			return false;
+		}
+		int x = Mth.floor(cam.x);
+		int y = Mth.floor(cam.y);
+		int z = Mth.floor(cam.z);
+		int top = this.oceanSurfaces.restTop(x, z);
+		if (!OceanSurfaces.hasTop(top) || y > top + 3) {
+			return false;
+		}
+		BlockState here = level.getBlockState(new BlockPos(x, y, z));
+		if (y < top) {
+			return OceanWaves.isRestWater(here);
+		}
+		float partial = Minecraft.getInstance().gameRenderer.gameRenderState().levelRenderState.worldPartialTicks;
+		OceanWaves.Waves waves = OceanWaves.at(level.getGameTime(), partial, OceanSim.strength(level));
+		double surface = top + OceanWaves.REST_HEIGHT + this.oceanSurfaces.amplitude(x, z) * waves.height(cam.x, cam.z);
+		return cam.y < surface && (OceanWaves.isRestWater(here) || OceanWaves.isRestAir(here));
 	}
 
 	private static boolean inFill(WaterRegion.Fill f, long key) {
@@ -1214,15 +1454,31 @@ public final class WaterWorld {
 
 
 	public void onExplosion(Vec3 center, float radius) {
+		double reach = radius * Math.max(WaterSettings.tntBlastReach, 0.0F);
+		if (OceanMode.active() && radius > 0.0F) {
+			this.oceanSim.explosion(center, radius);
+			if (WaterSettings.tntReactions) {
+				this.oceanBlasts.add(new double[]{center.x, center.y, center.z, radius, reach, System.nanoTime() + OCEAN_BLAST_WAIT_NANOS});
+			}
+		}
 		if (!WaterSettings.tntReactions || this.regions.isEmpty() || radius <= 0.0F) {
 			return;
 		}
-		double reach = radius * Math.max(WaterSettings.tntBlastReach, 0.0F);
 		this.blasts.add(new double[]{center.x, center.y, center.z, radius, reach});
 		this.recentBlasts.add(new double[]{center.x, center.y, center.z, reach + 1.0, System.nanoTime() + BLAST_MEMORY_NANOS});
 	}
 
 	private static final long BLAST_MEMORY_NANOS = 2_000_000_000L;
+	private static final long OCEAN_BLAST_WAIT_NANOS = 1_000_000_000L;
+	private final List<double[]> oceanBlasts = new ArrayList<>();
+	private final List<double[]> oceanBlastsTaken = new ArrayList<>();
+
+	private void settleOceanBlasts() {
+		this.oceanBlasts.removeAll(this.oceanBlastsTaken);
+		this.oceanBlastsTaken.clear();
+		long now = System.nanoTime();
+		this.oceanBlasts.removeIf(b -> b[5] < now);
+	}
 
 	private boolean blastedRecently(BlockPos pos) {
 		long now = System.nanoTime();
@@ -1238,17 +1494,24 @@ public final class WaterWorld {
 	private List<float[]> blastsFor(WaterRegion r) {
 		List<float[]> out = new ArrayList<>();
 		int[] box = r.boxWorld;
-		if (box == null || this.blasts.isEmpty()) {
+		List<double[]> blasts = r.ocean != null ? this.oceanBlasts : this.blasts;
+		if (box == null || blasts.isEmpty()) {
 			return out;
 		}
 		double h = 1.0 / r.res;
-		for (double[] b : this.blasts) {
+		for (double[] b : blasts) {
 			double reach = b[4];
 			double dx = Math.max(Math.max(box[0] * h - b[0], b[0] - box[3] * h), 0.0);
 			double dy = Math.max(Math.max(box[1] * h - b[1], b[1] - box[4] * h), 0.0);
 			double dz = Math.max(Math.max(box[2] * h - b[2], b[2] - box[5] * h), 0.0);
 			if (reach <= 0.0 || dx * dx + dy * dy + dz * dz >= reach * reach) {
 				continue;
+			}
+			if (r.ocean != null) {
+				if (!r.ocean.contains((int) Math.floor(b[0]), (int) Math.floor(b[2])) || r.lastFluidCount <= 0) {
+					continue;
+				}
+				this.oceanBlastsTaken.add(b);
 			}
 			float speed = WaterSettings.tntBlastSpeed * (float) (b[3] / 4.0) * r.res;
 			out.add(new float[]{
@@ -1262,9 +1525,11 @@ public final class WaterWorld {
 	public void renderFrame(@Nullable FrameTarget target) {
 		Minecraft mc = Minecraft.getInstance();
 		this.followLevel(mc.level);
-		if (this.regions.isEmpty() && this.background.isEmpty() || this.failed || mc.level == null || Vk.tryDevice() == null) {
+		if (this.regions.isEmpty() && this.background.isEmpty() && !OceanMode.active() || this.failed || mc.level == null || Vk.tryDevice() == null) {
 			this.lastFrameNanos = 0L;
 			this.blasts.clear();
+			this.oceanBlasts.clear();
+			this.oceanBlastsTaken.clear();
 			return;
 		}
 		try {
@@ -1278,13 +1543,17 @@ public final class WaterWorld {
 			}
 		} finally {
 			this.blasts.clear();
+			this.settleOceanBlasts();
 		}
 	}
 
 	private final Long2FloatOpenHashMap pendingSteam = new Long2FloatOpenHashMap();
 	private final Long2IntOpenHashMap boilingBlocks = new Long2IntOpenHashMap();
+	private final Long2IntOpenHashMap scaldingDegrees = new Long2IntOpenHashMap();
+	private static final int SCALD_FROM = 60;
+	private static final float SCALD_FULLNESS = 0.05F;
 	private static final int STEAM_FLUSH_FRAMES = 5;
-	private static final int BOILING_MEMORY_FRAMES = 60;
+	private static final int BOILING_MEMORY_FRAMES = 90;
 	private static final float WISP_EIGHTHS = 0.01F;
 
 	private void collectHeat(ClientLevel level, WaterRegion r) {
@@ -1302,28 +1571,41 @@ public final class WaterWorld {
 		float perParticle = WaterSettings.boilSteam / (r.res * r.res * r.res);
 		BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
 		for (Long2IntMap.Entry e : r.boiled.long2IntEntrySet()) {
-			long top = this.waterTop(level, e.getLongKey(), pos, true);
+			long top = this.waterTop(level, e.getLongKey(), pos);
 			this.pendingSteam.addTo(top, e.getIntValue() * perParticle);
 		}
 		for (Long2IntMap.Entry e : r.wisps.long2IntEntrySet()) {
-			long top = this.waterTop(level, e.getLongKey(), pos, false);
+			long top = this.waterTop(level, e.getLongKey(), pos);
 			this.pendingSteam.addTo(top, e.getIntValue() * WISP_EIGHTHS * WaterSettings.boilSteam);
 		}
 		r.boiled.clear();
 		r.wisps.clear();
 	}
 
-	private long waterTop(ClientLevel level, long key, BlockPos.MutableBlockPos pos, boolean boiling) {
+	private long waterTop(ClientLevel level, long key, BlockPos.MutableBlockPos pos) {
 		pos.set(BlockPos.getX(key), BlockPos.getY(key), BlockPos.getZ(key));
 		long top = key;
 		for (int k = 0; k < 64 && RealisticWaterFluid.isRealistic(level.getFluidState(pos)); k++) {
 			top = pos.asLong();
-			if (boiling) {
-				this.boilingBlocks.put(top, this.frameCounter);
-			}
 			pos.move(Direction.UP);
 		}
 		return top;
+	}
+
+	private void collectScalding(WaterRegion.Fill f) {
+		int i = 0;
+		for (int z = 0; z < f.dz(); z++) {
+			for (int y = 0; y < f.dy(); y++) {
+				for (int x = 0; x < f.dx(); x++, i++) {
+					int degrees = f.degrees(i);
+					if (degrees >= SCALD_FROM && f.fullness(i) >= SCALD_FULLNESS) {
+						long key = BlockPos.asLong(f.x() + x, f.y() + y, f.z() + z);
+						this.boilingBlocks.put(key, this.frameCounter);
+						this.scaldingDegrees.put(key, degrees);
+					}
+				}
+			}
+		}
 	}
 
 	private void flushSteam(ClientLevel level) {
@@ -1349,13 +1631,19 @@ public final class WaterWorld {
 			return;
 		}
 		this.boilingBlocks.long2IntEntrySet().removeIf(e -> this.frameCounter - e.getIntValue() > BOILING_MEMORY_FRAMES);
+		this.scaldingDegrees.keySet().removeIf(key -> !this.boilingBlocks.containsKey(key));
 		if (this.boilingBlocks.isEmpty() || WaterSettings.boilingDamage <= 0.0F || !isHost() || !ClientPlayNetworking.canSend(BoilingWaterPayload.TYPE)) {
 			return;
 		}
 		long[] all = this.boilingBlocks.keySet().toLongArray();
 		for (int start = 0; start < all.length; start += BoilingWaterPayload.MAX_ENTRIES) {
 			int n = Math.min(BoilingWaterPayload.MAX_ENTRIES, all.length - start);
-			ClientPlayNetworking.send(new BoilingWaterPayload(java.util.Arrays.copyOfRange(all, start, start + n), WaterSettings.boilingDamage));
+			long[] positions = java.util.Arrays.copyOfRange(all, start, start + n);
+			byte[] degrees = new byte[n];
+			for (int k = 0; k < n; k++) {
+				degrees[k] = (byte) Math.min(this.scaldingDegrees.get(positions[k]), 255);
+			}
+			ClientPlayNetworking.send(new BoilingWaterPayload(positions, degrees, WaterSettings.boilingDamage));
 		}
 	}
 	
@@ -1373,7 +1661,7 @@ public final class WaterWorld {
 		int[] owners = new int[WaterRegion.MAX_FLOW_POINTS];
 		int n = 0;
 		Vector3d c = new Vector3d();
-		for (RealisticBlockEntity e : level.getEntitiesOfClass(RealisticBlockEntity.class, window)) {
+		for (RealisticBlockEntity e : RealisticBlockEntity.near(level, window)) {
 			for (RigidBody.Cell cell : e.body.cells) {
 				e.body.toWorld(cell.x + 0.5, cell.y + 0.5, cell.z + 0.5, c);
 				for (double[] d : FLOW_SAMPLES) {
@@ -1391,6 +1679,23 @@ public final class WaterWorld {
 		return n > 0 ? new FlowProbe(points, owners, n) : null;
 	}
 
+	private FlowPayload withCalmSea(ClientLevel level, Entity body, FlowPayload flow) {
+		if (!OceanMode.active() || !this.oceanSim.cameraInZone(body.position())) {
+			return flow;
+		}
+		int x = Mth.floor(body.getX());
+		int z = Mth.floor(body.getZ());
+		float amp = this.oceanSurfaces.amplitude(x, z);
+		if (amp <= 0.0F) {
+			return flow;
+		}
+		OceanWaves.Waves waves = OceanWaves.at(level.getGameTime(), 0.0F, OceanSim.strength(level));
+		double[] v = waves.velocity(body.getX(), body.getZ(), 0.0);
+		float surface = Float.isNaN(flow.surfaceY()) ? Float.NaN : flow.surfaceY() + (float) (amp * waves.height(body.getX(), body.getZ()));
+		return new FlowPayload(flow.entityId(), flow.vx() + (float) (amp * v[0]), flow.vy() + (float) (amp * v[1]), flow.vz() + (float) (amp * v[2]),
+			surface);
+	}
+
 	private void sendBodyFlows() {
 		if (this.bodyFlows.isEmpty()) {
 			return;
@@ -1401,8 +1706,12 @@ public final class WaterWorld {
 			double[] a = e.getValue();
 			if (a[3] > 0.0 || a[5] > 0.0) {
 				double n = Math.max(a[3], 1.0);
+				boolean surfaced = a[5] > 0.0 && a[5] >= 0.5 * a[6];
 				FlowPayload flow = new FlowPayload(e.getKey(), (float) (a[0] / n), (float) (a[1] / n), (float) (a[2] / n),
-					a[5] > 0.0 ? (float) (a[4] / a[5]) : Float.NaN);
+					surfaced ? (float) (a[4] / a[5]) : Float.NaN);
+				if (level != null && level.getEntity(flow.entityId()) instanceof RealisticBlockEntity floating) {
+					flow = this.withCalmSea(level, floating, flow);
+				}
 				if (level != null && level.getEntity(flow.entityId()) instanceof RealisticBlockEntity body && body.isSimulated()) {
 					RealisticPhysics.reportFlow(body, flow.vx(), flow.vy(), flow.vz(), flow.surfaceY());
 				}
@@ -1434,7 +1743,7 @@ public final class WaterWorld {
 
 	private List<BlockPos> sourcesFor(WaterRegion r) {
 		List<BlockPos> out = new ArrayList<>();
-		if (!r.material.isFluidSim()) {
+		if (!r.material.isFluidSim() || r.ocean != null) {
 			return out;
 		}
 		for (Map.Entry<BlockPos, Material> e : (r.background != null ? r.background.sources : this.sources).entrySet()) {
@@ -1460,6 +1769,10 @@ public final class WaterWorld {
 		Vec3 cam = levelState.cameraRenderState.pos;
 		double reach = (mc.options.renderDistance().get() + 2) * 16.0;
 
+		boolean ocean = OceanMode.active();
+		if (ocean) {
+			this.oceanSim.update(level, frameDt, cam);
+		}
 		List<WaterRegion> active = new ArrayList<>();
 		List<WaterRegion> merged = new ArrayList<>();
 		List<WaterRegion> drained = new ArrayList<>();
@@ -1486,7 +1799,7 @@ public final class WaterWorld {
 			if (fill != null) {
 				this.pendingFills.add(new Object[]{r, fill});
 			}
-			int[] box = r.computeBoxWorld(this.sourcesFor(r), this.frameCounter);
+			int[] box = r.ocean != null ? r.ocean.cellBox(r.res) : r.computeBoxWorld(this.sourcesFor(r), this.frameCounter);
 			r.boxWorld = box;
 			if (box == null) {
 				if (++r.idleFrames > 90) {
@@ -1517,7 +1830,8 @@ public final class WaterWorld {
 			WaterRegion a = active.get(i);
 			for (int j = active.size() - 1; j > i; j--) {
 				WaterRegion b = active.get(j);
-				if (a.res == b.res && a.material == b.material && a.background == b.background && overlaps(a.boxWorld, b.boxWorld)) {
+				if (a.res == b.res && a.material == b.material && a.background == b.background && a.ocean == null && b.ocean == null
+					&& overlaps(a.boxWorld, b.boxWorld)) {
 					a.boxWorld = WaterRegion.unionBox(a.boxWorld, b.boxWorld);
 					a.queueAbsorb(b);
 					active.remove(j);
@@ -1567,7 +1881,16 @@ public final class WaterWorld {
 		this.lastSandDt = sandDt;
 		this.simTime += steps * stepDt;
 
-		if (active.isEmpty() || target == null) {
+		boolean ownSea = ocean && OceanMode.drawsSea();
+		this.cameraUnderSea = ownSea && this.cameraUnderSea(level, cam);
+		this.seaDrawsFog = ownSea && (this.cameraUnderSea || this.oceanSim.cameraInZone(cam)
+			|| OceanSurfaces.hasTop(this.oceanSurfaces.restTop(Mth.floor(cam.x), Mth.floor(cam.z)))
+				&& this.oceanSurfaces.restTop(Mth.floor(cam.x), Mth.floor(cam.z)) <= Mth.floor(cam.y));
+		boolean seaLook = WaterSettings.waterSeaLook && active.stream().anyMatch(r -> r.material == Material.WATER && r.ocean == null);
+		boolean surfaces = ownSea && this.oceanSurfaces.upload();
+		boolean drawOcean = target != null && (ocean && (ownSea ? surfaces || this.cameraUnderSea || !this.oceanSim.zones.isEmpty()
+			: surfaces || !this.oceanSim.zones.isEmpty()) || seaLook);
+		if (active.isEmpty() && !drawOcean || target == null) {
 			this.retire(level, merged, drained);
 			Vk.endFrame();
 			this.frameCounter++;
@@ -1586,7 +1909,7 @@ public final class WaterWorld {
 			this.steamRenderer = new SteamRenderer();
 		}
 		if (this.uboRing == null) {
-			this.uboRing = VkBuf.upload((long) UBO_SLOT * MAX_REGIONS * Vk.FRAME_RING, VkBuf.UNIFORM);
+			this.uboRing = VkBuf.upload((long) UBO_SLOT * SLOTS_PER_FRAME * Vk.FRAME_RING, VkBuf.UNIFORM);
 			this.frameView = VkBuf.device(16, 0);
 		}
 		int width = target.width();
@@ -1618,6 +1941,9 @@ public final class WaterWorld {
 			Vk.barrier(cb);
 		}
 		this.frameView.fill(cb, 0);
+		if (this.cameraUnderSea) {
+			this.frameView.fill(cb, 0, 4, Float.floatToRawIntBits(1.0F));
+		}
 		Vk.barrier(cb);
 		boolean readFill = !this.paused;
 		List<WaterRenderer.Body> waterBodies = new ArrayList<>();
@@ -1634,7 +1960,14 @@ public final class WaterWorld {
 			WaterRegion r = active.get(i);
 			BackgroundWorld bg = r.background;
 			ClientLevel lvl = bg != null ? bg.level : level;
-			r.planWindow(lvl, this.solidsFor(r), r.boxWorld);
+			boolean hasGrid = r.planWindow(lvl, this.solidsFor(r), r.boxWorld);
+			String memoryWarning = r.takeMemoryWarning();
+			if (memoryWarning != null && mc.player != null) {
+				mc.player.sendSystemMessage(Component.literal(memoryWarning));
+			}
+			if (!hasGrid) {
+				continue;
+			}
 			r.updateLight(lvl);
 			boolean sand = r.material.isGranular();
 			List<float[]> regionBlasts = bg != null ? List.of() : this.blastsFor(r);
@@ -1650,9 +1983,10 @@ public final class WaterWorld {
 			int regionSteps = r.dormant(!this.sourcesFor(r).isEmpty()) ? 0 : sand ? sandSteps : leaves ? leafSteps : gas ? steamSteps : steps;
 			r.trackCalm(frameDt, regionSteps);
 			int interval = nearMixPartner(r, active) ? MIX_INTERVAL : SYNC_INTERVAL;
-			if (readFill && r.material.syncs() && r.initialized() && (this.frameCounter + r.id) % interval == 0) {
+			if (readFill && r.material.syncs() && r.ocean == null && r.initialized() && (this.frameCounter + r.id) % interval == 0) {
 				r.fillRequested = true;
 			}
+			r.foamRequested = r.ocean != null && bg == null && PackFoam.active() && WaterSettings.oceanWhitewater;
 			boolean packLeaves = packDraw && leaves && bg == null;
 			r.leafCopyForced = packLeaves;
 			if (packLeaves && r.initialized()) {
@@ -1667,7 +2001,7 @@ public final class WaterWorld {
 			if (!packDraw) {
 				r.packMesh = null;
 			}
-			int slot = Vk.ringSlot() * MAX_REGIONS + i;
+			int slot = Vk.ringSlot() * SLOTS_PER_FRAME + i;
 			List<float[]> removals = r.takeRemovals();
 			r.portalSinks = gas ? List.of() : this.portalSinks(lvl, r, bg != null ? bg.portals : this.portalBlocks);
 			int numSources = this.writeGlobals(mc, lvl, r, slot, sand ? sandDt : leaves ? leafDt : gas ? steamDt : stepDt, width, height, removals);
@@ -1716,9 +2050,20 @@ public final class WaterWorld {
 				Vk.barrier(cb);
 			}
 		}
-		if (!waterBodies.isEmpty()) {
-			this.renderer.record(cb, waterBodies, Desc.ssbo(this.frameView), target.colorImage(), target.colorView(), depthImage,
-				depthView, lightmap, target.layer(), fluidArea(mc, waterBodies, width, height));
+		OceanRenderer.Draw oceanDraw = null;
+		if (drawOcean) {
+			if (this.oceanRenderer == null) {
+				this.oceanRenderer = new OceanRenderer(this.renderer.thicknessFormat);
+			}
+			int slot = Vk.ringSlot() * SLOTS_PER_FRAME + MAX_REGIONS;
+			this.writeOceanGlobals(mc, level, slot, width, height);
+			oceanDraw = new OceanRenderer.Draw(this.oceanRenderer, Desc.ubo(this.uboRing, (long) slot * UBO_SLOT, UBO_SIZE), this.oceanSurfaces.buffer(),
+				ownSea ? this.oceanSurfaces.count() : 0, ownSea && (this.cameraUnderSea || this.oceanSim.cameraInZone(cam)) || seaLook,
+				ownSea ? List.copyOf(this.oceanSim.zones) : List.of(), Mth.floor(cam.x), Mth.floor(cam.y), Mth.floor(cam.z), this.oceanSurfaces.colors());
+		}
+		if (!waterBodies.isEmpty() || oceanDraw != null) {
+			this.renderer.record(cb, waterBodies, oceanDraw, Desc.ssbo(this.frameView), target.colorImage(), target.colorView(), depthImage,
+				depthView, lightmap, target.layer(), oceanDraw != null ? null : fluidArea(mc, waterBodies, width, height));
 		}
 		Vk.barrier(cb);
 		if (!target.layer() && !steamBodies.isEmpty()) {
@@ -1855,7 +2200,8 @@ public final class WaterWorld {
 		}
 		double h = 1.0 / r.res;
 		AABB box = new AABB(b[0] * h, b[1] * h, b[2] * h, b[3] * h, b[4] * h, b[5] * h).inflate(0.5);
-		return !level.getEntities((Entity) null, box, e -> !e.isSpectator()).isEmpty() || !movingPistons(level, box.inflate(1.0)).isEmpty();
+		return !level.getEntities((Entity) null, box, e -> !e.isSpectator()).isEmpty() || !RealisticBlockEntity.near(level, box).isEmpty()
+			|| !movingPistons(level, box.inflate(1.0)).isEmpty();
 	}
 
 	private static boolean rainedOn(ClientLevel level, WaterRegion r) {
@@ -1891,10 +2237,12 @@ public final class WaterWorld {
 		int entityCount = this.writeEntities(mc, r, b, o + 576, levelState.worldPartialTicks);
 		putInts(b, o + 32, r.fluidCapacity, r.wwCapacity, entityCount, this.frameCounter);
 		int sourceCount = sand ? 0 : this.writeSources(r, b, o + 2112);
-		putInts(b, o + 48, r.material.usesWhitewater() && WaterSettings.whitewater ? 1 : 0, sourceCount, !sand && this.localPlayerFirst ? 1 : 0,
+		boolean whitewater = r.ocean != null ? WaterSettings.oceanWhitewater : WaterSettings.whitewater;
+		putInts(b, o + 48, r.material.usesWhitewater() && whitewater ? 1 : 0, sourceCount, !sand && this.localPlayerFirst ? 1 : 0,
 			WaterSettings.wwCellLimit);
 		putFloats(b, o + 64, 0.0F, -WaterSettings.gravity * res, 0.0F, dt);
-		float flipRatio = lava ? WaterSettings.lavaFlipRatio : slime ? WaterSettings.slimeFlipRatio : WaterSettings.flipRatio;
+		float flipRatio = r.ocean != null ? WaterSettings.oceanFlipRatio : lava ? WaterSettings.lavaFlipRatio : slime ? WaterSettings.slimeFlipRatio
+			: WaterSettings.flipRatio;
 		float flip = (float) Math.pow(flipRatio, dt * 60.0F);
 		putFloats(b, o + 80, flip, PARTICLES_PER_CELL, slime ? WaterSettings.slimeVolumeCorrection : WaterSettings.volumeCorrection, 0.0F);
 		float maxSpeed = (lava ? WaterSettings.lavaMaxSpeed : slime ? WaterSettings.slimeMaxSpeed : leaves ? WaterSettings.leafMaxSpeed : WaterSettings.maxSpeed) * res;
@@ -1904,57 +2252,12 @@ public final class WaterWorld {
 		putFloats(b, o + 144, WaterSettings.wwFoamLifeMin, WaterSettings.wwFoamLifeMax, WaterSettings.wwBubbleBuoyancy, WaterSettings.wwBubbleDrag);
 		putFloats(b, o + 160, WaterSettings.wwSprayDrag, WaterSettings.wwSprayThreshold, WaterSettings.wwBubbleThreshold, WaterSettings.wwMaxPerParticle);
 
-		Matrix4f proj = new Matrix4f(camera.projectionMatrix);
-		Matrix4f bob = new Matrix4f(proj).invert().mul(LEVEL_PROJECTION);
-		Matrix4f view = bob.mul(camera.viewRotationMatrix);
-		proj.get(o + 176, b);
-		view.get(o + 240, b);
-		new Matrix4f(proj).invert().get(o + 304, b);
-		new Matrix4f(view).invert().get(o + 368, b);
-
+		boolean sea = r.ocean != null;
+		float glint = this.writeLook(b, o, camera, sky, width, height, lava, slime, sand, leaves, h, sea);
 		Vec3 cam = camera.pos;
 		putFloats(b, o + 432, (float) (r.ox - cam.x), (float) (r.oy - cam.y), (float) (r.oz - cam.z), h);
-		putFloats(b, o + 448, width, height, 1.0F / width, 1.0F / height);
-
-		Vector3f sunDir = new Matrix3f().rotateY((float) Math.toRadians(-90.0)).rotateX(sky.sunAngle).transform(new Vector3f(0.0F, 1.0F, 0.0F)).normalize();
-		Vector4f sunWorld = new Vector4f(sunDir, 0.0F);
-		Vector4f sunView = view.transform(new Vector4f(sunWorld));
-		float sunIntensity = Mth.clamp(sunWorld.y * 4.0F, 0.0F, 1.0F) * (1.0F - sky.rainBrightness * 0.8F);
-		putFloats(b, o + 464, sunView.x, sunView.y, sunView.z, sunIntensity);
-
-		Vector3f skyColor = sky.skyColor != null ? new Vector3f(sky.skyColor) : new Vector3f(0.5F, 0.7F, 1.0F);
-		Vector4f fog = camera.fogData.color;
-		float ambient = Mth.clamp(0.15F + 1.2F * (0.3F * skyColor.x + 0.59F * skyColor.y + 0.11F * skyColor.z), 0.12F, 1.0F);
-		putFloats(b, o + 480, skyColor.x, skyColor.y, skyColor.z, ambient);
-		putFloats(b, o + 496, fog.x, fog.y, fog.z, 1.0F);
-		float refraction = lava ? WaterSettings.lavaRefraction : slime ? 0.0F : WaterSettings.refraction;
-		float surfaceSmooth = sand ? WaterSettings.sandSurfaceSmoothing : lava ? WaterSettings.lavaSurfaceSmoothing
-			: slime ? WaterSettings.slimeSurfaceSmoothing : WaterSettings.surfaceSmoothing;
-		putFloats(b, o + 512, WaterSettings.particleRadius * h, WaterSettings.thicknessScale, refraction, surfaceSmooth);
-		boolean packWater = !lava && !slime && !sand && !leaves && ShaderCompat.packRunning();
-		float tint = packWater ? 1.0F + Math.max(WaterSettings.packWaterTint, 0.0F) : 1.0F;
-		float glow = packWater ? 1.0F + Math.max(WaterSettings.packWaterVisibility, 0.0F) : 1.0F;
-		float absorbR = lava ? WaterSettings.lavaAbsorbR : WaterSettings.absorbR;
-		float absorbG = lava ? WaterSettings.lavaAbsorbG : WaterSettings.absorbG;
-		float absorbB = lava ? WaterSettings.lavaAbsorbB : WaterSettings.absorbB;
-		float absorbLuma = 0.2126F * absorbR + 0.7152F * absorbG + 0.0722F * absorbB;
-		absorbR = Math.max(absorbLuma + (absorbR - absorbLuma) * tint, 0.0F);
-		absorbG = Math.max(absorbLuma + (absorbG - absorbLuma) * tint, 0.0F);
-		absorbB = Math.max(absorbLuma + (absorbB - absorbLuma) * tint, 0.0F);
-		putFloats(b, o + 528, absorbR, absorbG, absorbB, 0.0F);
-		float scatterR = lava ? WaterSettings.lavaScatterR : WaterSettings.scatterR;
-		float scatterG = lava ? WaterSettings.lavaScatterG : WaterSettings.scatterG;
-		float scatterB = lava ? WaterSettings.lavaScatterB : WaterSettings.scatterB;
-		float scatterLuma = 0.2126F * scatterR + 0.7152F * scatterG + 0.0722F * scatterB;
-		scatterR = Math.max(scatterLuma + (scatterR - scatterLuma) * tint, 0.0F) * glow;
-		scatterG = Math.max(scatterLuma + (scatterG - scatterLuma) * tint, 0.0F) * glow;
-		scatterB = Math.max(scatterLuma + (scatterB - scatterLuma) * tint, 0.0F) * glow;
-		float scatterDensity = (lava ? WaterSettings.lavaScatterDensity : WaterSettings.scatterDensity) * glow;
-		float glint = packWater ? 1.05F : 1.0F;
-		putFloats(b, o + 544, scatterR, scatterG, scatterB, scatterDensity);
-		putFloats(b, o + 560, WaterSettings.wwRadius, WaterSettings.foamCoverage, WaterSettings.bubbleAlpha, WaterSettings.sprayAlpha);
 		putFloats(b, o + 3136, (float) (cam.x - r.ox) * res, (float) (cam.y - r.oy) * res, (float) (cam.z - r.oz) * res, res);
-		float underwaterFog = lava ? WaterSettings.lavaUnderwaterFog : WaterSettings.underwaterFog;
+		float underwaterFog = sea ? WaterSettings.oceanUnderwaterFog : lava ? WaterSettings.lavaUnderwaterFog : WaterSettings.underwaterFog;
 		putFloats(b, o + 3152, underwaterFog, wrap(cam.x), wrap(cam.y), wrap(cam.z));
 
 		SurfaceMesher mesher = r.mesher;
@@ -1976,9 +2279,9 @@ public final class WaterWorld {
 		boolean lavaFog = camera.fogType == FogType.LAVA;
 		putFloats(b, o + 3792, (float) (level.getMinY() - r.oy) * res - 8.0F, WaterRegion.KILL_MARGIN,
 			lavaFog ? camera.fogData.environmentalStart : 0.0F, lavaFog ? Math.max(camera.fogData.environmentalEnd, 0.01F) : 0.0F);
-		float detailStrength = lava ? WaterSettings.lavaDetailStrength : slime ? 0.0F : WaterSettings.detailStrength;
-		float roughness = lava ? WaterSettings.lavaRoughness : WaterSettings.roughness;
-		float specular = lava ? WaterSettings.lavaSpecular : slime ? 0.0F : WaterSettings.specular * glint;
+		float detailStrength = sea ? WaterSettings.oceanDetailStrength : lava ? WaterSettings.lavaDetailStrength : slime ? 0.0F : WaterSettings.detailStrength;
+		float roughness = sea ? WaterSettings.oceanRoughness : lava ? WaterSettings.lavaRoughness : WaterSettings.roughness;
+		float specular = sea ? WaterSettings.oceanSpecular * glint : lava ? WaterSettings.lavaSpecular : slime ? 0.0F : WaterSettings.specular * glint;
 		putFloats(b, o + 3808, detailStrength, WaterSettings.detailScale, WaterSettings.detailSpeed, roughness);
 		putFloats(b, o + 3824, specular, WaterSettings.wetDarkening, WaterSettings.filmShading, WaterSettings.foamBubbleSize);
 
@@ -2027,7 +2330,8 @@ public final class WaterWorld {
 				WaterSettings.steamDarkShade, WaterSettings.steamLightShade);
 		}
 		float shadowStrength = WaterSettings.packShadows && ShaderCompat.packRunning() ? Mth.clamp(WaterSettings.packShadowStrength, 0.0F, 1.0F) : 0.0F;
-		putFloats(b, o + 3920, this.layerOutput ? 1.0F : 0.0F, WaterSettings.underwaterMirror ? 1.0F : 0.0F, shadowStrength, 0.0F);
+		float opacity = lava || slime || sand || leaves ? 0.0F : ShaderCompat.packRunning() ? Mth.clamp(WaterSettings.packWaterOpacity, 0.0F, 1.0F) : 0.0F;
+		putFloats(b, o + 3920, this.layerOutput ? 1.0F : 0.0F, WaterSettings.underwaterMirror ? 1.0F : 0.0F, shadowStrength, opacity);
 		ShaderCompat.PackShadow map = shadowStrength > 0.0F ? this.packShadow : null;
 		if (map != null) {
 			map.modelView().get(o + 3936, b);
@@ -2038,21 +2342,169 @@ public final class WaterWorld {
 		} else {
 			putFloats(b, o + 4064, 0.0F, 0.0F, 0.0F, 0.0F);
 		}
+		float timeScale = Math.max(WaterSettings.waterHeatTimeScale, 0.0F);
 		putFloats(b, o + 4080, WaterSettings.waterTemperature ? 1.0F : 0.0F, biomeTemperature(level, r),
-			Math.max(WaterSettings.waterHeatSpread, 0.0F), 1.0F / Math.max(WaterSettings.waterCoolTime, 1.0F));
-		putFloats(b, o + 4096, Math.max(WaterSettings.waterHeatRate, 0.0F), Math.max(WaterSettings.waterIceCooling, 0.0F),
+			Math.max(WaterSettings.waterMixing, 0.0F) * res * res * timeScale, timeScale * res / WATER_HEAT_CAPACITY);
+		putFloats(b, o + 4096, Math.max(WaterSettings.airHeatTransfer, 0.0F), Math.max(WaterSettings.iceHeatTransfer, 0.0F),
 			WaterSettings.boilChurn * res, WaterSettings.steamWispTemperature);
-		putFloats(b, o + 4112, WaterSettings.magmaHeat, WaterSettings.lavaHeat, WaterSettings.fireHeat, WaterSettings.furnaceHeat);
+		putFloats(b, o + 4112, WaterSettings.magmaWaterTemperature, Math.max(WaterSettings.magmaHeatReach, 0.0F),
+			WaterSettings.fireWaterTemperature, WaterSettings.furnaceWaterTemperature);
+		putFloats(b, o + 4368, 1.0F / Math.max(WaterSettings.magmaHeatTime, 0.01F), 1.0F / Math.max(WaterSettings.lavaBoilTime, 0.001F),
+			1.0F / Math.max(WaterSettings.fireHeatTime, 0.01F), 1.0F / Math.max(WaterSettings.furnaceHeatTime, 0.01F));
+		putFloats(b, o + 4384, 0.0F, 0.0F, 0.0F, 0.0F);
 		putFloats(b, o + 4128, Math.max(WaterSettings.boilBubbleSize, 0.0F), WaterSettings.boilBubbleRise, Math.max(WaterSettings.boilBubbleRate, 0.0F),
 			WaterSettings.boilClingTemperature);
+		writeSea(b, o, level, levelState.worldPartialTicks, r.ox, r.oz, r);
 		this.uboRing.flush(o, UBO_SIZE);
 		return sourceCount;
 	}
 
+	private float writeLook(ByteBuffer b, int o, CameraRenderState camera, SkyRenderState sky, int width, int height, boolean lava, boolean slime,
+		boolean sand, boolean leaves, float h, boolean sea) {
+		Matrix4f proj = new Matrix4f(camera.projectionMatrix);
+		Matrix4f bob = new Matrix4f(proj).invert().mul(LEVEL_PROJECTION);
+		Matrix4f view = bob.mul(camera.viewRotationMatrix);
+		proj.get(o + 176, b);
+		view.get(o + 240, b);
+		new Matrix4f(proj).invert().get(o + 304, b);
+		new Matrix4f(view).invert().get(o + 368, b);
+
+		putFloats(b, o + 448, width, height, 1.0F / width, 1.0F / height);
+
+		Vector3f sunDir = new Matrix3f().rotateY((float) Math.toRadians(-90.0)).rotateX(sky.sunAngle).transform(new Vector3f(0.0F, 1.0F, 0.0F)).normalize();
+		Vector4f sunWorld = new Vector4f(sunDir, 0.0F);
+		Vector4f sunView = view.transform(new Vector4f(sunWorld));
+		float sunIntensity = Mth.clamp(sunWorld.y * 4.0F, 0.0F, 1.0F) * Mth.clamp(sky.rainBrightness, 0.0F, 1.0F);
+		putFloats(b, o + 464, sunView.x, sunView.y, sunView.z, sunIntensity);
+
+		Vector3f skyColor = sky.skyColor != null ? new Vector3f(sky.skyColor) : new Vector3f(0.5F, 0.7F, 1.0F);
+		Vector4f fog = camera.fogData.color;
+		float ambient = Mth.clamp(0.15F + 1.2F * (0.3F * skyColor.x + 0.59F * skyColor.y + 0.11F * skyColor.z), 0.12F, 1.0F);
+		putFloats(b, o + 480, skyColor.x, skyColor.y, skyColor.z, ambient);
+		putFloats(b, o + 496, fog.x, fog.y, fog.z, 1.0F);
+		float refraction = sea ? WaterSettings.oceanRefraction : lava ? WaterSettings.lavaRefraction : slime ? 0.0F : WaterSettings.refraction;
+		float surfaceSmooth = sand ? WaterSettings.sandSurfaceSmoothing : lava ? WaterSettings.lavaSurfaceSmoothing
+			: slime ? WaterSettings.slimeSurfaceSmoothing : WaterSettings.surfaceSmoothing;
+		putFloats(b, o + 512, WaterSettings.particleRadius * h, sea ? WaterSettings.oceanThicknessScale : WaterSettings.thicknessScale, refraction,
+			surfaceSmooth);
+		boolean packWater = !lava && !slime && !sand && !leaves && ShaderCompat.packRunning();
+		float tint = packWater ? 1.0F + Math.max(WaterSettings.packWaterTint, 0.0F) : 1.0F;
+		float glow = packWater ? 1.0F + Math.max(WaterSettings.packWaterVisibility, 0.0F) : 1.0F;
+		float absorbR = sea ? WaterSettings.oceanAbsorbR : lava ? WaterSettings.lavaAbsorbR : WaterSettings.absorbR;
+		float absorbG = sea ? WaterSettings.oceanAbsorbG : lava ? WaterSettings.lavaAbsorbG : WaterSettings.absorbG;
+		float absorbB = sea ? WaterSettings.oceanAbsorbB : lava ? WaterSettings.lavaAbsorbB : WaterSettings.absorbB;
+		float absorbLuma = 0.2126F * absorbR + 0.7152F * absorbG + 0.0722F * absorbB;
+		absorbR = Math.max(absorbLuma + (absorbR - absorbLuma) * tint, 0.0F);
+		absorbG = Math.max(absorbLuma + (absorbG - absorbLuma) * tint, 0.0F);
+		absorbB = Math.max(absorbLuma + (absorbB - absorbLuma) * tint, 0.0F);
+		putFloats(b, o + 528, absorbR, absorbG, absorbB, 0.0F);
+		float scatterR = sea ? WaterSettings.oceanScatterR : lava ? WaterSettings.lavaScatterR : WaterSettings.scatterR;
+		float scatterG = sea ? WaterSettings.oceanScatterG : lava ? WaterSettings.lavaScatterG : WaterSettings.scatterG;
+		float scatterB = sea ? WaterSettings.oceanScatterB : lava ? WaterSettings.lavaScatterB : WaterSettings.scatterB;
+		float scatterLuma = 0.2126F * scatterR + 0.7152F * scatterG + 0.0722F * scatterB;
+		scatterR = Math.max(scatterLuma + (scatterR - scatterLuma) * tint, 0.0F) * glow;
+		scatterG = Math.max(scatterLuma + (scatterG - scatterLuma) * tint, 0.0F) * glow;
+		scatterB = Math.max(scatterLuma + (scatterB - scatterLuma) * tint, 0.0F) * glow;
+		float scatterDensity = (sea ? WaterSettings.oceanScatterDensity : lava ? WaterSettings.lavaScatterDensity : WaterSettings.scatterDensity) * glow;
+		putFloats(b, o + 544, scatterR, scatterG, scatterB, scatterDensity);
+		putFloats(b, o + 560, WaterSettings.wwRadius, WaterSettings.foamCoverage, WaterSettings.bubbleAlpha, WaterSettings.sprayAlpha);
+		putFloats(b, o + 4144, camera.fogData.environmentalStart, camera.fogData.environmentalEnd, camera.fogData.renderDistanceStart,
+			camera.fogData.renderDistanceEnd);
+		return packWater ? 1.05F : 1.0F;
+	}
+
+	private static void writeSea(ByteBuffer b, int o, ClientLevel level, float partialTick, double originX, double originZ, @Nullable WaterRegion r) {
+		OceanWaves.Waves waves = OceanWaves.at(level.getGameTime(), partialTick, r != null && r.ocean != null ? 0.0F : OceanSim.strength(level));
+		float[] phases = waves.phases(originX, originZ);
+		putFloats(b, o + 4208, phases[0], phases[1], phases[2], phases[3]);
+		putFloats(b, o + 4224, phases[4], phases[5], phases[6], phases[7]);
+		for (int i = 0; i < OceanWaves.WAVES; i++) {
+			putFloats(b, o + 4240 + i * 16, (float) waves.kx()[i], (float) waves.kz()[i], (float) waves.amp()[i], (float) waves.omega()[i]);
+		}
+		OceanZone zone = r != null ? r.ocean : null;
+		if (zone == null) {
+			boolean seaLook = r != null && r.material == Material.WATER && WaterSettings.waterSeaLook;
+			putFloats(b, o + 4160, seaLook ? 0.25F : 0.0F, 0.0F, 0.0F, 0.0F);
+			putFloats(b, o + 4176, 0.0F, 0.0F, 0.0F, 0.0F);
+			putFloats(b, o + 4192, 0.0F, 0.0F, 0.0F, 0.0F);
+			return;
+		}
+		int res = r.res;
+		putFloats(b, o + 4160, 1.0F, (zone.x0 - r.ox) * res, (zone.z0 - r.oz) * res, Math.max(WaterSettings.oceanEdgeBand, 0.0F) * res);
+		putFloats(b, o + 4176, (zone.floorY - r.oy) * res, (zone.x1 - r.ox) * res, (zone.z1 - r.oz) * res, Math.max(WaterSettings.oceanEdgePull, 0.0F));
+		putFloats(b, o + 4192, OceanSim.strength(level), Math.max(WaterSettings.oceanEdgeRefill, 0.0F), Math.max(WaterSettings.oceanEdgeDrain, 0.0F),
+			Math.max(WaterSettings.oceanCalming, 0.0F));
+	}
+
+	private void writeOceanGlobals(Minecraft mc, ClientLevel level, int slot, int width, int height) {
+		ByteBuffer b = this.uboRing.mapped();
+		int o = slot * UBO_SLOT;
+		LevelRenderState levelState = mc.gameRenderer.gameRenderState().levelRenderState;
+		CameraRenderState camera = levelState.cameraRenderState;
+		Vec3 cam = camera.pos;
+		int bx = Mth.floor(cam.x);
+		int by = Mth.floor(cam.y);
+		int bz = Mth.floor(cam.z);
+		putInts(b, o, bx, by, bz, 0);
+		putInts(b, o + 16, 0, 0, 0, 0);
+		int zones = 0;
+		for (WaterRegion r : this.oceanSim.zones) {
+			if (zones * 2 + 1 >= MAX_ENTITIES * 3) {
+				break;
+			}
+			OceanZone z = r.ocean;
+			putFloats(b, o + 576 + zones * 32, z.x0 - bx, z.floorY - by, z.z0 - bz, 0.0F);
+			putFloats(b, o + 592 + zones * 32, z.x1 - bx, z.topY + 1 - by, z.z1 - bz, 0.0F);
+			zones++;
+		}
+		putInts(b, o + 32, 0, 0, zones, this.frameCounter);
+		putInts(b, o + 48, 0, 0, 0, 0);
+		putFloats(b, o + 64, 0.0F, 0.0F, 0.0F, 0.0F);
+		putFloats(b, o + 80, 0.0F, PARTICLES_PER_CELL, 0.0F, 0.0F);
+		putFloats(b, o + 96, 0.0F, 1.0F, this.simTime, 0.0F);
+		float glint = this.writeLook(b, o, camera, levelState.skyRenderState, width, height, false, false, false, false, 1.0F, true);
+		putFloats(b, o + 432, (float) (bx - cam.x), (float) (by - cam.y), (float) (bz - cam.z), 1.0F);
+		putFloats(b, o + 3136, (float) (cam.x - bx), (float) (cam.y - by), (float) (cam.z - bz), 1.0F);
+		putFloats(b, o + 3152, WaterSettings.oceanUnderwaterFog, wrap(cam.x), wrap(cam.y), wrap(cam.z));
+		putFloats(b, o + 3184, WaterSettings.surfaceIso, 1.0F, WaterSettings.nearCull, WaterSettings.dropletThreshold);
+		putFloats(b, o + 3792, -1.0e9F, WaterRegion.KILL_MARGIN, 0.0F, 0.0F);
+		putFloats(b, o + 3808, WaterSettings.oceanDetailStrength, WaterSettings.detailScale, WaterSettings.detailSpeed, WaterSettings.oceanRoughness);
+		putFloats(b, o + 3824, WaterSettings.oceanSpecular * glint, 0.0F, 0.0F, WaterSettings.foamBubbleSize);
+		putFloats(b, o + 3840, Material.WATER.shaderId(), 0.0F, 0.0F, 1.0F);
+		putFloats(b, o + 3888, 0.0F, 0.0F, 0.0F, 0.0F);
+		float shadowStrength = WaterSettings.packShadows && ShaderCompat.packRunning() ? Mth.clamp(WaterSettings.packShadowStrength, 0.0F, 1.0F) : 0.0F;
+		putFloats(b, o + 3920, this.layerOutput ? 1.0F : 0.0F, WaterSettings.underwaterMirror ? 1.0F : 0.0F, shadowStrength,
+			Mth.clamp(WaterSettings.oceanSurfaceOpacity, 0.0F, 1.0F));
+		putFloats(b, o + 4064, 0.0F, 0.0F, 0.0F, 0.0F);
+		putFloats(b, o + 4080, 0.0F, 0.0F, 0.0F, 0.0F);
+		putFloats(b, o + 4384, Math.max(WaterSettings.oceanWhitecaps, 0.0F), 0.0F,
+			Math.max(WaterSettings.oceanWhitecapStart, 0.05F), (float) (this.simTime % 1000.0));
+		writeSea(b, o, level, levelState.worldPartialTicks, bx, bz, null);
+		this.uboRing.flush(o, UBO_SIZE);
+	}
+
+	private static final float WATER_HEAT_CAPACITY = 4.186e6F;
+
 	private static float biomeTemperature(ClientLevel level, WaterRegion r) {
 		BlockPos centre = new BlockPos(r.ox + r.sx / 2, r.oy + r.sy / 2, r.oz + r.sz / 2);
-		float base = level.getBiome(centre).value().getBaseTemperature();
-		return Mth.clamp(25.0F * base - 2.0F, 1.0F, 40.0F);
+		Holder<Biome> biome = level.getBiome(centre);
+		if (biome.is(Biomes.WARM_OCEAN)) {
+			return 27.0F;
+		}
+		if (biome.is(Biomes.LUKEWARM_OCEAN) || biome.is(Biomes.DEEP_LUKEWARM_OCEAN)) {
+			return 22.0F;
+		}
+		if (biome.is(Biomes.OCEAN) || biome.is(Biomes.DEEP_OCEAN)) {
+			return 17.0F;
+		}
+		if (biome.is(Biomes.COLD_OCEAN) || biome.is(Biomes.DEEP_COLD_OCEAN)) {
+			return 9.0F;
+		}
+		if (biome.is(Biomes.FROZEN_OCEAN) || biome.is(Biomes.DEEP_FROZEN_OCEAN) || biome.is(Biomes.FROZEN_RIVER)) {
+			return 1.0F;
+		}
+		float base = biome.value().getBaseTemperature();
+		return Mth.clamp(4.0F + 20.0F * base, 1.0F, 32.0F);
 	}
 
 	private void writeLeafGlobals(ClientLevel level, ByteBuffer b, int o, int res) {
@@ -2094,6 +2546,11 @@ public final class WaterWorld {
 		}
 		AABB window = new AABB(r.ox, r.oy, r.oz, r.ox + r.sx, r.oy + r.sy, r.oz + r.sz).inflate(1.0);
 		List<Entity> entities = new ArrayList<>(mc.level.getEntities((Entity) null, window));
+		for (RealisticBlockEntity body : RealisticBlockEntity.near(mc.level, window)) {
+			if (!entities.contains(body)) {
+				entities.add(body);
+			}
+		}
 		this.localPlayerFirst = mc.player != null && !mc.player.isSpectator() && entities.remove(mc.player);
 		if (this.localPlayerFirst) {
 			entities.addFirst(mc.player);
@@ -2164,6 +2621,10 @@ public final class WaterWorld {
 	record Pump(Object key, Vec3 center, Vec3 dir, int power, int speed, Vec3 intake, Vec3 outlet) {
 	}
 
+	static float pumpSpeed(Pump pump) {
+		return PUMP_SPEEDS[pump.speed()] * WaterSettings.waveMakerSpeed;
+	}
+
 	private final List<Pump> pumpCache = new ArrayList<>();
 	private long pumpCacheFrame = -1L;
 
@@ -2196,7 +2657,7 @@ public final class WaterWorld {
 		if (mc.player != null) {
 			Vector3d c = new Vector3d();
 			Vector3d d = new Vector3d();
-			for (RealisticBlockEntity e : level.getEntitiesOfClass(RealisticBlockEntity.class, mc.player.getBoundingBox().inflate(BODY_PUMP_RANGE))) {
+			for (RealisticBlockEntity e : RealisticBlockEntity.near(level, mc.player.getBoundingBox().inflate(BODY_PUMP_RANGE))) {
 				for (RigidBody.Cell cell : e.body.cells) {
 					if (!(cell.payload instanceof BlockState state) || !(state.getBlock() instanceof WaveMakerBlock) || state.getValue(WaveMakerBlock.POWER) <= 0) {
 						continue;
@@ -2237,7 +2698,7 @@ public final class WaterWorld {
 			Vec3 intake = pump.intake();
 			Vec3 jump = pump.outlet().subtract(intake);
 			float rate = WaterSettings.waveMakerRate * pump.power() / 15.0F;
-			float speed = PUMP_SPEEDS[pump.speed()] * WaterSettings.waveMakerSpeed * res;
+			float speed = pumpSpeed(pump) * res;
 			int base = o + n * 48;
 			putFloats(b, base, (float) (intake.x - 0.5 - r.ox) * res, (float) (intake.y - 0.5 - r.oy) * res, (float) (intake.z - 0.5 - r.oz) * res, rate);
 			putFloats(b, base + 16, (float) (intake.x + 0.5 - r.ox) * res, (float) (intake.y + 0.5 - r.oy) * res, (float) (intake.z + 0.5 - r.oz) * res, speed);
@@ -2325,6 +2786,9 @@ public final class WaterWorld {
 
 
 	public String statsLine() {
+		if (this.regions.isEmpty() && OceanMode.active()) {
+			return String.format("Realistic ocean: %,d calm sea surfaces drawn, no zones simulated right now", this.oceanSurfaces.count());
+		}
 		if (this.regions.isEmpty()) {
 			return "Nothing simulated right now (place a Realistic Water Bucket or Realistic Sand, or use /fill)";
 		}
@@ -2364,7 +2828,8 @@ public final class WaterWorld {
 			}
 			windowCells += r.numCells;
 		}
-		return String.format("%d water bodies  fluid %,d  whitewater %,d  |  %d lava bodies  lava fluid %,d  |  %d slime bodies  slime fluid %,d  |  "
+		String sea = OceanMode.active() ? String.format("ocean zones %d (%,d surfaces)  |  ", this.oceanSim.zones.size(), this.oceanSurfaces.count()) : "";
+		return sea + String.format("%d water bodies  fluid %,d  whitewater %,d  |  %d lava bodies  lava fluid %,d  |  %d slime bodies  slime fluid %,d  |  "
 				+ "%d sand bodies  sand particles %,d  |  %d leaf piles  leaves %,d  |  "
 				+ "active %,d cells of %,d allocated  |  frame %.1f ms  water steps %d x %.1f ms  sand steps %d x %.2f ms  sources %d  %s",
 			bodies, fluid, ww, lavaBodies, lavaFluid, slimeBodies, slimeFluid, piles, sand, leafPiles, leafCount, cells, windowCells, this.smoothedFrameMs, this.lastSteps, this.lastDt * 1000.0F,
@@ -2380,6 +2845,8 @@ public final class WaterWorld {
 		}
 		this.background.clear();
 		this.blasts.clear();
+		this.oceanBlasts.clear();
+		this.oceanBlastsTaken.clear();
 		this.recentBlasts.clear();
 		this.sources.clear();
 		this.chunkScanQueue.clear();
@@ -2390,9 +2857,14 @@ public final class WaterWorld {
 		this.bodyFlows.clear();
 		this.pendingSteam.clear();
 		this.boilingBlocks.clear();
+		this.scaldingDegrees.clear();
 		this.lateSand.clear();
 		this.lateLeaves.clear();
 		this.lateSteam.clear();
+		this.oceanSim.clear();
+		this.oceanSurfaces.clear();
+		this.cameraUnderSea = false;
+		this.seaDrawsFog = false;
 		for (SolidCache cache : this.solidCaches.values()) {
 			cache.clear();
 		}
@@ -2553,7 +3025,7 @@ public final class WaterWorld {
 			this.rain.close();
 			this.rain = null;
 		}
-		if (this.renderer != null || this.sandRenderer != null || this.leafRenderer != null) {
+		if (this.renderer != null || this.sandRenderer != null || this.leafRenderer != null || this.oceanRenderer != null) {
 			Vk.waitIdle();
 		}
 		if (this.renderer != null) {
@@ -2563,6 +3035,10 @@ public final class WaterWorld {
 		if (this.steamRenderer != null) {
 			this.steamRenderer.close();
 			this.steamRenderer = null;
+		}
+		if (this.oceanRenderer != null) {
+			this.oceanRenderer.close();
+			this.oceanRenderer = null;
 		}
 		if (this.leafRenderer != null) {
 			this.leafRenderer.close();

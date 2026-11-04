@@ -82,6 +82,9 @@ public final class Vk {
 	}
 
 	public static void check(int result, String what) {
+		if (result == VK10.VK_ERROR_OUT_OF_DEVICE_MEMORY || result == VK10.VK_ERROR_OUT_OF_HOST_MEMORY) {
+			throw new VkOutOfMemory(what + " failed with VkResult " + result + " (out of memory)");
+		}
 		if (result != VK10.VK_SUCCESS) {
 			throw new IllegalStateException(what + " failed with VkResult " + result);
 		}

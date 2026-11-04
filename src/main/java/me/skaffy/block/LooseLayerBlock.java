@@ -38,7 +38,7 @@ public abstract class LooseLayerBlock extends Block {
 	@Override
 	protected VoxelShape getShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
 		if (context instanceof EntityCollisionContext entityContext && entityContext.getEntity() instanceof Player player
-			&& player.getMainHandItem().is(this.digTool())) {
+			&& (player.getMainHandItem().is(this.digTool()) || player.getMainHandItem().is(this.asItem()) || player.getOffhandItem().is(this.asItem()))) {
 			return SHAPES[state.getValue(LAYERS)];
 		}
 		return Shapes.empty();

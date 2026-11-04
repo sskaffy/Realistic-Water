@@ -26,7 +26,9 @@ void main() {
         sum += float(cellTotal(cellCount[i]));
         speed = max(speed, uintBitsToFloat(cellSpeed[i]));
     }
-    uint full = uint(clamp(sum / float(max(pc.a.w, 1)), 0.0, 1.0) * 255.0 + 0.5);
+    float blocks = sum / float(max(pc.a.w, 1));
+    uint full = uint(clamp(blocks, 0.0, 1.0) * 255.0 + 0.5);
     uint fast = uint(clamp(speed / float(res) * 16.0, 0.0, 255.0));
-    fill[t] = full | (fast << 8);
+    uint over = uint(clamp(blocks, 0.0, 31.99) * 2048.0 + 0.5);
+    fill[t] = full | (fast << 8) | (over << 16);
 }

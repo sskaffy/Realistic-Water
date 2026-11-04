@@ -104,7 +104,7 @@ public final class ClientBodies {
 		Minecraft mc = Minecraft.getInstance();
 		AABB area = mc.player != null ? mc.player.getBoundingBox().inflate(RANGE) : null;
 		if (area != null) {
-			for (RealisticBlockEntity e : level.getEntitiesOfClass(RealisticBlockEntity.class, area)) {
+			for (RealisticBlockEntity e : RealisticBlockEntity.near(level, area)) {
 				if (e.body.cells.isEmpty() || e.body.mass <= 0.0) {
 					continue;
 				}
@@ -122,6 +122,7 @@ public final class ClientBodies {
 			Input driver = me != null && me.getVehicle() == e && e.getControllingPassenger() == me ? me.input.keyPresses : null;
 			e.addLoads(world, driver);
 		}
+		RealisticGrab.addLoads(world, simulated);
 		for (BodyPushPayload p : incoming) {
 			if (level.getEntity(p.entityId()) instanceof RealisticBlockEntity e && e.isSimulated()) {
 				world.pushes.add(new PhysicsWorld.Push(e.body, p.px(), p.py(), p.pz(), p.dx(), p.dy(), p.dz(), p.target(), p.force(), p.kick()));
@@ -163,7 +164,7 @@ public final class ClientBodies {
 		int me = player.getId();
 		double claim = RealisticBlockEntity.CLAIM_RANGE;
 		simulated.clear();
-		for (RealisticBlockEntity e : level.getEntitiesOfClass(RealisticBlockEntity.class, player.getBoundingBox().inflate(RANGE))) {
+		for (RealisticBlockEntity e : RealisticBlockEntity.near(level, player.getBoundingBox().inflate(RANGE))) {
 			int owner = e.owner();
 			double d2 = e.distanceToSqr(player);
 			if (e.isSimulated()) {
@@ -207,7 +208,7 @@ public final class ClientBodies {
 
 
 	private static void syncGrid(ClientLevel level, LocalPlayer player) {
-		for (RealisticBlockEntity e : level.getEntitiesOfClass(RealisticBlockEntity.class,
+		for (RealisticBlockEntity e : RealisticBlockEntity.near(level,
 			player.getBoundingBox().inflate(RealisticBlockEntity.CLAIM_RANGE * 2.0))) {
 			if (!e.clientGridDirty) {
 				continue;
@@ -222,7 +223,10 @@ public final class ClientBodies {
 	private static void pushesFrom(LocalPlayer player, Vec3 movement) {
 		AABB box = player.getBoundingBox();
 		AABB sweep = box.expandTowards(movement).inflate(1.0E-3);
-		for (RealisticBlockEntity e : player.level().getEntitiesOfClass(RealisticBlockEntity.class, sweep.inflate(0.5))) {
+		for (RealisticBlockEntity e : RealisticBlockEntity.near(player.level(), sweep.inflate(0.5))) {
+			if (e == RealisticGrab.held()) {
+				continue;
+			}
 			if (!e.isSimulated()) {
 				asObstacle(e);
 			}

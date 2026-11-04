@@ -1,0 +1,54 @@
+#version 450
+#include "common.glsl"
+layout(local_size_x = 64) in;
+layout(std430, binding = 1) writeonly buffer Dst { Particle dst[]; };
+layout(std430, binding = 2) buffer Counters { uint counters[]; };
+layout(std430, binding = 3) readonly buffer Count { int cellCount[]; };
+layout(std430, binding = 4) readonly buffer Static { uint staticSolid[]; };
+layout(push_constant) uniform PC { ivec4 a; ivec4 b; } pc;
+#define REGION_LIGHT_BINDING 5
+#include "region_light.glsl"
+#include "ocean_zone.glsl"
+
+void main() {
+    int t = int(GID_U);
+    if (t >= G.boxMin.w) {
+        return;
+    }
+    ivec3 c = boxCell(t);
+    vec3 center = vec3(c) + 0.5;
+    float w = oceanBand(center);
+    if (w < 0.05) {
+        return;
+    }
+    int ci = cellIndex(c);
+    if (staticSolid[ci] != 0u || entityAt(center) >= 0) {
+        return;
+    }
+    float surface;
+    vec3 velocity;
+    if (!oceanTarget(center, surface, velocity)) {
+        return;
+    }
+    float frac = clamp(surface - float(c.y), 0.0, 1.0);
+    if (frac < 0.05) {
+        return;
+    }
+    int need = int(round(G.simA.y * frac)) - cellCount[ci];
+    if (need <= 0) {
+        return;
+    }
+    uint seed = hash(uint(t) * 2654435761u + uint(pc.a.y));
+    float chance = min(w * G.oceanC.y * DT, 1.0);
+    for (int k = 0; k < need; k++) {
+        if (rand(seed) >= chance) {
+            continue;
+        }
+        uint o = atomicAdd(counters[pc.a.x], 1u);
+        if (o >= uint(G.caps.x)) {
+            return;
+        }
+        vec3 p = vec3(float(c.x) + rand(seed), float(c.y) + rand(seed) * frac, float(c.z) + rand(seed));
+        dst[o] = Particle(vec4(p, 0.0), vec4(velocity, G.heatA.y));
+    }
+}

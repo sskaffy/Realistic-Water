@@ -15,6 +15,7 @@
 		"PistonStructureResolverMixin",
 		"PlayerEdgeMixin",
 		"PlayerGridReachMixin",
+		"SerializableChunkDataMixin",
 		"ServerGamePacketListenerImplMixin",
 		"ServerLevelBlockEventMixin",
 		"ServerLevelGridMixin"

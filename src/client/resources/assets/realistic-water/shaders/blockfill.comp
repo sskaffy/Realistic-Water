@@ -8,11 +8,25 @@ layout(std430, binding = 3) writeonly buffer Fill { uint fill[]; };
 layout(std430, binding = 4) readonly buffer Grid { vec4 grid[]; };
 #else
 layout(std430, binding = 4) readonly buffer Vel { float vel[]; };
+layout(std430, binding = 5) readonly buffer Heat { int cellHeat[]; };
 #endif
 layout(push_constant) uniform PC { ivec4 a; ivec4 b; } pc;
 
 bool fluidAt(ivec3 c) {
     return inBox(c) && (cellFlags[cellIndex(c)] & 0xFFu) == CELL_FLUID;
+}
+
+bool staticSolidAt(ivec3 c) {
+    if (!inBox(c)) {
+        return false;
+    }
+    uint f = cellFlags[cellIndex(c)];
+    return (f & 0xFFu) == CELL_SOLID && (f >> 8) == 0u;
+}
+
+bool waterBeside(ivec3 c, ivec3 d, int res) {
+    ivec3 far = c + d * (3 + res);
+    return fluidAt(c + d * 3) && (fluidAt(far) || staticSolidAt(far));
 }
 
 float cellSpeed(ivec3 c) {
@@ -37,6 +51,8 @@ void main() {
     ivec3 block = pc.a.xyz + ivec3(t % nb.x, (t / nb.x) % nb.y, t / (nb.x * nb.y));
     float sum = 0.0;
     float speed = 0.0;
+    float heat = 0.0;
+    float particles = 0.0;
     for (int k = 0; k < res * res * res; k++) {
         ivec3 c = block * res + ivec3(k % res, (k / res) % res, k / (res * res));
         if (!inBox(c)) {
@@ -45,7 +61,8 @@ void main() {
         int i = cellIndex(c);
         uint f = cellFlags[i];
         if ((f & 0xFFu) == CELL_SOLID && (f >> 8) != 0u) {
-            if (fluidAt(c + ivec3(3, 0, 0)) || fluidAt(c - ivec3(3, 0, 0)) || fluidAt(c + ivec3(0, 0, 3)) || fluidAt(c - ivec3(0, 0, 3))) {
+            if (waterBeside(c, ivec3(1, 0, 0), res) || waterBeside(c, ivec3(-1, 0, 0), res) || waterBeside(c, ivec3(0, 0, 1), res)
+                || waterBeside(c, ivec3(0, 0, -1), res)) {
                 sum += G.simA.y;
             }
         } else {
@@ -53,9 +70,14 @@ void main() {
             if ((f & 0xFFu) == CELL_FLUID) {
                 speed = max(speed, cellSpeed(c));
             }
+#ifndef MPM
+            heat += float(cellHeat[i]);
+            particles += float(cellCount[i]);
+#endif
         }
     }
     uint full = uint(clamp(sum / (G.simA.y * float(res * res * res)), 0.0, 1.0) * 255.0 + 0.5);
     uint fast = uint(clamp(speed / float(res) * 16.0, 0.0, 255.0));
-    fill[t] = full | (fast << 8);
+    uint temp = particles > 0.0 ? uint(clamp(heat / (particles * HEAT_FP), 0.0, 255.0) + 0.5) : 0u;
+    fill[t] = full | (fast << 8) | (temp << 16);
 }

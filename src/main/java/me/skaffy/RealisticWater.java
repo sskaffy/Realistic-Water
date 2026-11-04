@@ -4,6 +4,7 @@ import me.skaffy.net.BodyPushPayload;
 import me.skaffy.net.BodyStatePayload;
 import me.skaffy.net.BreakRealisticPayload;
 import me.skaffy.net.FluidMixPayload;
+import me.skaffy.net.VanillaFeedPayload;
 import me.skaffy.net.BoilingWaterPayload;
 import me.skaffy.fluid.BoilingWater;
 import me.skaffy.net.FlowPayload;
@@ -27,6 +28,12 @@ import me.skaffy.net.WaterSyncPayload;
 import me.skaffy.net.PortalTransitPayload;
 import me.skaffy.net.BackgroundSyncPayload;
 import me.skaffy.net.SteamPayload;
+import me.skaffy.net.OceanModePayload;
+import me.skaffy.net.OceanSyncPayload;
+import me.skaffy.net.OceanZonesPayload;
+import me.skaffy.ocean.OceanServer;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import me.skaffy.portal.PortalTransit;
 import net.minecraft.network.chat.Component;
 import net.fabricmc.api.ModInitializer;
@@ -54,6 +61,7 @@ public class RealisticWater implements ModInitializer {
 		PayloadTypeRegistry.serverboundPlay().register(LeavesSyncPayload.TYPE, LeavesSyncPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(RemoveAllWaterPayload.TYPE, RemoveAllWaterPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(FluidMixPayload.TYPE, FluidMixPayload.CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(VanillaFeedPayload.TYPE, VanillaFeedPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(BoilingWaterPayload.TYPE, BoilingWaterPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(PortalTransitPayload.TYPE, PortalTransitPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(BackgroundSyncPayload.TYPE, BackgroundSyncPayload.CODEC);
@@ -62,6 +70,9 @@ public class RealisticWater implements ModInitializer {
 		PayloadTypeRegistry.serverboundPlay().register(FlowPayload.TYPE, FlowPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(BodyStatePayload.TYPE, BodyStatePayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(BodyPushPayload.TYPE, BodyPushPayload.CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(OceanModePayload.TYPE, OceanModePayload.CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(OceanZonesPayload.TYPE, OceanZonesPayload.CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(OceanSyncPayload.TYPE, OceanSyncPayload.CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(BodyPushPayload.TYPE, BodyPushPayload.CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(GridBlockEntityPayload.TYPE, GridBlockEntityPayload.CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(GridBlockEventPayload.TYPE, GridBlockEventPayload.CODEC);
@@ -77,16 +88,32 @@ public class RealisticWater implements ModInitializer {
 		});
 		ServerTickEvents.END_LEVEL_TICK.register(RealisticPhysics::tick);
 		ServerTickEvents.END_LEVEL_TICK.register(BoilingWater::tick);
+		ServerTickEvents.END_LEVEL_TICK.register(OceanServer::tick);
+		ServerChunkEvents.CHUNK_UNLOAD.register(OceanServer::onChunkUnload);
+		ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> server.execute(() -> OceanServer.forget(handler.getPlayer())));
+		ServerPlayNetworking.registerGlobalReceiver(OceanModePayload.TYPE, (payload, context) -> context.server().execute(() -> payload.apply(context.player())));
+		ServerPlayNetworking.registerGlobalReceiver(OceanZonesPayload.TYPE, (payload, context) -> {
+			if (isAuthority(context.server(), context.player())) {
+				context.server().execute(() -> payload.apply(context.player()));
+			}
+		});
+		ServerPlayNetworking.registerGlobalReceiver(OceanSyncPayload.TYPE, (payload, context) -> {
+			if (isAuthority(context.server(), context.player())) {
+				context.server().execute(() -> payload.apply(context.player()));
+			}
+		});
 		ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
 			RealisticPhysics.clear();
 			GridSpace.clear();
 			PortalTransit.clear();
 			BoilingWater.clear();
+			OceanServer.clear();
 		});
 		ServerLevelEvents.UNLOAD.register((server, level) -> {
 			RealisticPhysics.forget(level);
 			GridSpace.forget(level);
 			BoilingWater.forget(level);
+			OceanServer.forget(level);
 		});
 		ServerPlayNetworking.registerGlobalReceiver(BreakRealisticPayload.TYPE, (payload, context) -> context.server().execute(() -> payload.apply(context.player())));
 		ServerPlayNetworking.registerGlobalReceiver(UseRealisticPayload.TYPE, (payload, context) -> context.server().execute(() -> payload.apply(context.player())));
@@ -131,6 +158,11 @@ public class RealisticWater implements ModInitializer {
 			}
 		});
 		ServerPlayNetworking.registerGlobalReceiver(FluidMixPayload.TYPE, (payload, context) -> {
+			if (isAuthority(context.server(), context.player())) {
+				context.server().execute(() -> payload.apply(context.player()));
+			}
+		});
+		ServerPlayNetworking.registerGlobalReceiver(VanillaFeedPayload.TYPE, (payload, context) -> {
 			if (isAuthority(context.server(), context.player())) {
 				context.server().execute(() -> payload.apply(context.player()));
 			}

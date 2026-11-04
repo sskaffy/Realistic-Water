@@ -1,0 +1,102 @@
+#version 450
+#include "common.glsl"
+layout(local_size_x = 64) in;
+layout(std430, binding = 1) readonly buffer Count { int cellCount[]; };
+layout(std430, binding = 2) readonly buffer Static { uint staticSolid[]; };
+layout(std430, binding = 3) readonly buffer Src { float src[]; };
+layout(std430, binding = 4) writeonly buffer Dst { float dst[]; };
+layout(std430, binding = 5) readonly buffer Flags { uint cellFlags[]; };
+layout(push_constant) uniform PC { ivec4 a; ivec4 b; } pc;
+
+#define INVALID -1.0e4
+#define COVERED -2.0e4
+#define OCEAN_REST 0.8888889
+#define NOISE 0.06
+#define MAX_DIP 0.4
+#define MAX_RISE 1.5
+
+int countAt(int x, int y, int z) {
+    return cellCount[cellIndex(ivec3(x, y, z))];
+}
+
+bool bodyAt(int x, int y, int z) {
+    uint f = cellFlags[cellIndex(ivec3(x, y, z))];
+    return (f & 0xFFu) == CELL_SOLID && (f >> 8) != 0u;
+}
+
+float surface(int x, int z) {
+    int y = G.boxMin.y;
+    while (y < G.boxMax.y && staticSolid[cellIndex(ivec3(x, y, z))] != 0u) {
+        y++;
+    }
+    if (y >= G.boxMax.y) {
+        return INVALID;
+    }
+    if (bodyAt(x, y, z)) {
+        return COVERED;
+    }
+    if (float(countAt(x, y, z)) < 0.3 * G.simA.y) {
+        return INVALID;
+    }
+    float rho = 0.0;
+    float n = 0.0;
+    for (int j = 0; j < 4 && y + j < G.boxMax.y; j++) {
+        float c = float(countAt(x, y + j, z));
+        if (c >= 0.5 * G.simA.y) {
+            rho += c;
+            n += 1.0;
+        }
+    }
+    rho = n > 0.0 ? rho / n : G.simA.y;
+    float volume = 0.0;
+    for (int yy = y; yy < G.boxMax.y && staticSolid[cellIndex(ivec3(x, yy, z))] == 0u; yy++) {
+        if (bodyAt(x, yy, z)) {
+            return COVERED;
+        }
+        float c = float(countAt(x, yy, z));
+        if (c < 0.15 * rho) {
+            break;
+        }
+        volume += min(c / rho, 1.0);
+    }
+    return (float(y) + volume - float(pc.b.y)) / G.camGrid.w - OCEAN_REST;
+}
+
+void main() {
+    int t = int(GID_U);
+    int w = pc.a.z;
+    if (t >= w * pc.a.w) {
+        return;
+    }
+    int i = t % w;
+    int k = t / w;
+    if (pc.b.x == 0) {
+        dst[t] = surface(pc.a.x + i, pc.a.y + k);
+        return;
+    }
+    float centre = src[t];
+    if (centre <= INVALID * 0.5 && centre > COVERED * 0.75) {
+        dst[t] = INVALID;
+        return;
+    }
+    float sum = 0.0;
+    float weight = 0.0;
+    for (int dz = -1; dz <= 1; dz++) {
+        for (int dx = -1; dx <= 1; dx++) {
+            int x = clamp(i + dx, 0, w - 1);
+            int z = clamp(k + dz, 0, pc.a.w - 1);
+            float v = src[x + w * z];
+            if (v > INVALID * 0.5) {
+                float wt = (dx == 0 ? 2.0 : 1.0) * (dz == 0 ? 2.0 : 1.0);
+                sum += v * wt;
+                weight += wt;
+            }
+        }
+    }
+    if (weight <= 0.0) {
+        dst[t] = INVALID;
+        return;
+    }
+    float v = sum / weight;
+    dst[t] = clamp(sign(v) * max(abs(v) - NOISE, 0.0), -MAX_DIP, MAX_RISE);
+}

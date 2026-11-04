@@ -95,6 +95,9 @@ public final class WaterSettingsInfo {
 
 	static {
 		category("Water simulation");
+		toggle("vanillaWaterExchange", "Mix with vanilla water", Cost.LOW, "Checks blocks where flowing vanilla water appears.",
+			"Realistic water that runs into still vanilla water (lakes, the sea) joins it, and flowing vanilla water that reaches "
+				+ "realistic water turns into realistic water, so a vanilla stream keeps filling a realistic pool.");
 		integer("resolution", "Resolution", Cost.EXTREME, "Cells per block in each direction: 6 to 12 is 8x the cells and particles, so roughly 8x the GPU time and memory.", 1, 16,
 			"How many simulation cells fit along one block for water. Higher gives finer splashes, thinner sheets and smaller drops. Changing it rebuilds every water body.");
 		integer("boxMargin", "Box margin", Cost.MEDIUM, "Every extra cell of margin adds a shell of cells that are solved each step.", 0, 24,
@@ -229,6 +232,8 @@ public final class WaterSettingsInfo {
 			"Size of one particle drawn as a droplet, in cells.");
 
 		category("Water look");
+		toggle("waterSeaLook", "Look like the sea", Cost.NONE, LOOK,
+			"Placed realistic water (buckets) uses the realistic ocean's look and its settings (colour, tint, glints) instead of the settings here.");
 		num("thicknessScale", "Thickness scale", Cost.NONE, LOOK, 0, 4, 0.05,
 			"Multiplies how deep the water looks for colour and light absorption.");
 		num("refraction", "Refraction", Cost.NONE, LOOK, 0, 1, 0.01,
@@ -458,6 +463,16 @@ public final class WaterSettingsInfo {
 			"Rustling sounds from leaves that are kicked up or blown around.");
 
 		category("Realistic blocks");
+		toggle("grabBodies", "Grab realistic blocks", Cost.NONE, "Nothing runs unless you hold something.",
+			"Hold right-click with an empty hand on a realistic block, boat or lit realistic TNT to pick it up and carry it; let go to "
+				+ "drop or throw it. Where right-click already does something (chests, doors, boarding a boat) use sneak + right-click.");
+		num("grabStrength", "Grab strength", Cost.NONE, "Doesn't change the cost.", 0, 200000, 500,
+			"How hard you can pull what you hold, in newtons. A plank block weighs about 300 kg, stone about 1250 kg: what's heavier "
+				+ "than this can carry only drags or stays put.");
+		toggle("opGrabbing", "OP Grabbing", Cost.NONE, "Doesn't change the cost.",
+			"Grab anything however heavy. Only your grip ignores the weight: the blocks still weigh, fall, push and collide as usual.");
+		toggle("grabCarrying", "Grab what carries you", Cost.NONE, "Doesn't change the cost.",
+			"Allow grabbing the block or boat you stand on or ride. Off by default, since carrying the thing under you lets you fly.");
 		text("blockGravityPerBlock", "Gravity per block", Cost.NONE, "Only read when a body's gravity is worked out.",
 			"Gravity for particular blocks, overriding the slider above. Write them as a list, like "
 				+ "minecraft:stone=32, minecraft:white_wool=3. A body of mixed blocks falls at the mass-weighted average, so one "
@@ -498,8 +513,15 @@ public final class WaterSettingsInfo {
 		toggle("vitrailInsidePack", "Inside Vitrail packs (experimental)", Cost.LOW,
 			"Shades fluids twice per pixel while on; falls back to drawing on top if Vitrail changes.",
 			"With a Vitrail shader pack running, draws fluids into the pack's image before its effects, so its fog, bloom, tone mapping "
-				+ "and colour grading reach them. Fluids then can't refract what's behind them, and glass behind water is drawn over it. "
-				+ "Off draws fluids over the finished pack image instead.");
+				+ "and colour grading reach them, and so do its shadows: water in a shadow, like next to a floating block, can lose its tint "
+				+ "and show the ground. Fluids then can't refract what's behind them, and glass behind water is drawn over it. "
+				+ "Off draws fluids over the finished pack image instead: no pack shadows or fog on them, but real refraction and reflections.");
+		toggle("debugWaterLayers", "Debug: show water layers", Cost.NONE, LOOK,
+			"Paints what the water passes drew in solid colours instead of shading it: green the sea's surface, blue placed realistic water, "
+				+ "yellow a surface hidden behind something in the depth buffer, magenta a fluid pixel without a material. For finding why water vanishes.");
+		num("packWaterOpacity", "Water surface tint with packs", Cost.NONE, LOOK, 0, 1, 0.01,
+			"Inside a shader pack realistic water can't bend or reflect the pack's picture, so thin water would vanish. This much of the "
+				+ "surface is always tinted while a pack runs.");
 		num("packWaterVisibility", "Water visibility with packs", Cost.NONE, LOOK, 0, 3, 0.05,
 			"While a shader pack runs, water glows with this much more of its own blue-green scattered colour, so it stands out "
 				+ "through the pack's fog and grading. It adds light, so it doesn't darken the water. 0 looks the same as without a pack.");
@@ -544,25 +566,123 @@ public final class WaterSettingsInfo {
 		num("rainFeed", "Rain feeds water", Cost.LOW, "Adds a few particles to realistic water now and then.", 0, 2, 0.005,
 			"How many blocks of depth a minute rain adds to realistic water it falls on. 0 turns it off.");
 
+		category("Realistic kelp");
+		toggle("realisticKelp", "Realistic kelp", Cost.MEDIUM, "Only kelp that moves is simulated; still kelp sleeps.",
+			"Kelp near you becomes soft ropes that float up, sway, part around you and can't pass through each other. Hold right-click "
+				+ "on it with an empty hand to grab and drag it. Client-side only: other players see normal kelp.");
+		integer("kelpRadius", "Kelp range", Cost.MEDIUM, "More kelp to scan, keep and draw; only moving kelp costs simulation time.", 16, 256,
+			"How far from you kelp becomes realistic. Further out it's vanilla kelp.");
+		num("kelpSway", "Kelp sway", Cost.LOW, "Swaying kelp near you never sleeps.", 0, 5, 0.05,
+			"How strongly a slow current sways kelp near you. 0 keeps it still until something touches it.");
+		num("kelpBuoyancy", "Kelp buoyancy", Cost.NONE, LOOK, 0, 30, 0.5, "How hard kelp floats up in water, in blocks per second squared.");
+		num("kelpWaterDrag", "Kelp water drag", Cost.NONE, LOOK, 0, 20, 0.1, "How quickly moving kelp slows down in water. Higher is lazier.");
+		num("kelpStiffness", "Kelp stiffness", Cost.NONE, LOOK, 0, 1, 0.01, "How much kelp resists bending. 0 is a limp rope.");
+		toggle("kelpSelfCollision", "Kelp collides with kelp", Cost.LOW, "A spatial hash over the moving kelp each substep.",
+			"Whether kelp strands bump into each other and themselves, so they can be wrapped and tangled.");
+
+		category("Realistic ocean (experimental)");
+		toggle("realisticOcean", "Realistic vanilla water (experimental)", Cost.HIGH,
+			"Draws all vanilla water with waves; only simulates the water right around whatever moves it.",
+			"Experimental: still being worked on, expect bugs. Vanilla water (oceans, rivers, lakes) is drawn as realistic water with rolling waves, and the server keeps the wave crests as real water around you. "
+				+ "Turning it off puts every block it changed in the loaded chunks around you back to vanilla water. Works from the title screen too: it applies when you join.");
+		toggle("oceanPackDrawsSea", "Shader pack draws the sea", Cost.NONE, "Draws less than the mod's own sea.",
+			"While a shader pack runs, the pack draws the sea's surface its own way (its colours, ripples, reflections, foam and underwater fog). "
+				+ "With Vitrail the pack's water still rolls with the mod's waves and shows the wakes of boats, swimmers and pumps; with other "
+				+ "shader mods the sea stays calm, so boats float on what you see, and wakes show only as splashes and foam. "
+				+ "Off draws the mod's own sea inside the pack instead.");
+		integer("oceanResolution", "Sea simulation resolution", Cost.EXTREME, "Cells per block in every simulated sea zone; cost grows with its cube.", 1, 12,
+			"Simulation cells per block where the sea is simulated around you, boats and other things moving the water.");
+		integer("oceanSimRadius", "Sea simulation reach", Cost.HIGH, "Each zone's area grows with its square.", 2, 64,
+			"How far around something moving the water, in blocks, the sea is simulated. Beyond it the water just follows the calm waves.");
+		integer("oceanSimDepth", "Sea simulation depth", Cost.HIGH, "Each zone's cost grows with its depth.", 1, 32,
+			"How many blocks below the calm surface are simulated. Anything deeper than this doesn't move the water at all.");
+		toggle("oceanSimUnderwater", "Simulate around divers", Cost.HIGH, "A deep zone follows every diving player.",
+			"Whether the sea is simulated around a player who swims under the surface. Off: only a player at the surface stirs it "
+				+ "(foam already made stays); TNT, explosions, pumps and boats are simulated however deep they are either way.");
+		integer("oceanSimHeadroom", "Sea simulation headroom", Cost.MEDIUM, "Taller zones cost more.", 1, 16,
+			"How many blocks above the calm surface a zone reaches, for waves and splashes.");
+		num("oceanSettleTime", "Sea settle time", Cost.MEDIUM, "Zones live this much longer after something stops moving.", 0, 30, 0.1,
+			"Seconds the sea keeps being simulated after whatever moved it has gone or stopped, so wakes and splashes can settle.");
+		num("oceanSnapDeviation", "Sea snap threshold", Cost.LOW, "Lower keeps zones alive longer.", 0, 4, 0.01,
+			"How close a settling zone's water has to move to the calm waves (average difference, blocks per second) before it snaps back to them.");
+		num("oceanWaveHeight", "Wave height", Cost.NONE, LOOK, 0, 4, 0.05,
+			"How big the sea's waves are; 1 is a gentle swell, rain makes them bigger and thunderstorms bigger still. Rivers and lakes only ripple.");
+		integer("oceanServerRadius", "Wave water reach", Cost.MEDIUM, "Block updates on the server and their packets grow with its square.", 0, 160,
+			"How far around you, in blocks, the server keeps wave crests and troughs as real water you can swim in. 0 keeps the sea's blocks vanilla.");
+		num("oceanEdgeBand", "Zone edge band", Cost.NONE, LOOK, 0.5, 16, 0.25,
+			"How wide the band along a zone's sides is, in blocks, where its water is pulled back to the calm sea so it meets the drawn waves.");
+		num("oceanEdgePull", "Zone edge pull", Cost.NONE, LOOK, 0, 40, 0.5,
+			"How hard water in the edge band is pulled toward the calm sea's motion, per second.");
+		num("oceanEdgeRefill", "Zone edge refill", Cost.LOW, "One pass over the zone per substep.", 0, 40, 0.5,
+			"How fast missing water in the edge band is topped up from the open sea, per second.");
+		num("oceanEdgeDrain", "Zone edge drain", Cost.NONE, LOOK, 0, 40, 0.5,
+			"How fast extra water piled above the calm surface in the edge band runs off, per second.");
+		num("oceanCalming", "Sea calming", Cost.NONE, LOOK, 0, 5, 0.05,
+			"How fast wakes and splashes in the simulated sea die down by themselves, per second, so the area can snap back to the calm waves.");
+		num("oceanSurfaceOpacity", "Sea surface tint", Cost.NONE, LOOK, 0, 1, 0.01,
+			"How much the sea's surface is tinted blue however shallow it is, like vanilla water's texture. Keeps shallow water visible, also "
+				+ "under shader packs, which can't refract it.");
+		num("oceanThicknessScale", "Sea depth tint", Cost.NONE, LOOK, 0, 5, 0.05,
+			"How much the sea's depth counts toward its colour. Only the sea: realistic water placed from buckets has its own.");
+		num("oceanRefraction", "Sea refraction", Cost.NONE, LOOK, 0, 1, 0.01, "How much the sea bends what's under it.");
+		num("oceanAbsorbR", "Sea absorption red", Cost.NONE, LOOK, 0, 2, 0.005, "How fast red light fades with depth in the sea, per block.");
+		num("oceanAbsorbG", "Sea absorption green", Cost.NONE, LOOK, 0, 2, 0.005, "How fast green light fades with depth in the sea, per block.");
+		num("oceanAbsorbB", "Sea absorption blue", Cost.NONE, LOOK, 0, 2, 0.005, "How fast blue light fades with depth in the sea, per block.");
+		num("oceanScatterR", "Sea colour red", Cost.NONE, LOOK, 0, 1, 0.005, "Red of the light the sea's water itself gives back.");
+		num("oceanScatterG", "Sea colour green", Cost.NONE, LOOK, 0, 1, 0.005, "Green of the light the sea's water itself gives back.");
+		num("oceanScatterB", "Sea colour blue", Cost.NONE, LOOK, 0, 1, 0.005, "Blue of the light the sea's water itself gives back.");
+		num("oceanScatterDensity", "Sea colour strength", Cost.NONE, LOOK, 0, 2, 0.005,
+			"How quickly deep sea turns into its own colour instead of showing the floor. Lower is clearer.");
+		num("oceanUnderwaterFog", "Sea underwater fog", Cost.NONE, LOOK, 0, 2, 0.005, "How thick the sea looks while you're under it.");
+		num("oceanDetailStrength", "Sea ripples", Cost.NONE, LOOK, 0, 2, 0.01, "Strength of the fine ripples drawn on the sea.");
+		num("oceanRoughness", "Sea roughness", Cost.NONE, LOOK, 0.01, 0.7, 0.005, "How blurry the sun's glints on the sea are.");
+		num("oceanSpecular", "Sea glint", Cost.NONE, LOOK, 0, 30, 0.1, "How bright the sun's glints on the sea are.");
+		num("oceanFlipRatio", "Sea splashiness", Cost.NONE, "Only changes a blend in the simulation.", 0.5, 1, 0.001,
+			"How lively the simulated sea around things moving it is. Lower is calmer and smoother.");
+		toggle("oceanWhitewater", "Sea foam and spray", Cost.MEDIUM, "Foam, bubble and spray particles in simulated sea zones.",
+			"Whether boats, swimming and splashes in the sea make foam, bubbles and spray.");
+		num("oceanWhitecaps", "Whitecaps", Cost.NONE, LOOK, 0, 3, 0.05,
+			"How much white foam big waves carry on their crests and leave in streaks behind them. Also drawn over a shader pack's "
+				+ "water. 0 turns it off.");
+		num("oceanWhitecapStart", "Whitecap wave height", Cost.NONE, LOOK, 0.05, 5, 0.05,
+			"How high (in blocks) a wave must reach before it starts to foam; at 2.5 times this the crests are covered. Rain and "
+				+ "thunder make waves higher.");
+		integer("oceanWhitecapRadius", "Whitecap range (shader packs)", Cost.LOW, "Whitecaps are built on the CPU each frame under a pack.", 8, 512,
+			"How far from you whitecaps are drawn on a shader pack's water. Without a pack they cover the whole sea.");
+		num("packFoamSize", "Foam fleck size (shader packs)", Cost.LOW, "One quad per foam particle under a pack.", 0.02, 1, 0.01,
+			"Size in blocks of each piece of foam, spray or bubble drawn through a shader pack.");
+
 		category("Water temperature");
 		toggle("waterTemperature", "Water temperature", Cost.LOW, "A few more reads per particle each substep; heated water stays awake instead of sleeping.",
 			"Water has a temperature: magma, lava, fire, campfires and lit furnaces heat it, ice and snow cool it, hot and cold water mix, and at 100 degrees it boils away into steam.");
-		num("waterHeatRate", "Heating speed", Cost.NONE, LOOK, 0, 2, 0.01,
-			"How fast water within half a block of a heat source takes on its heat, per second. Higher boils a pot sooner.");
-		num("waterHeatSpread", "Heat spread", Cost.NONE, LOOK, 0, 1, 0.005,
-			"How quickly heat spreads through water, in blocks squared per second: how fast hot and cold water even out.");
-		num("waterCoolTime", "Cooling time", Cost.LOW, "Hot water keeps simulating while it is above the steam wisp temperature.", 60, 36000, 60,
-			"Seconds for water to lose most of the difference to the biome's temperature on its own. 3600 is an hour.");
-		num("waterIceCooling", "Ice and snow cooling", Cost.NONE, LOOK, 0, 2, 0.01,
-			"How fast water next to ice or snow cools toward 0 degrees, per second.");
-		num("magmaHeat", "Magma heat", Cost.NONE, LOOK, 0, 1500, 10,
-			"Temperature water next to a magma block heats toward. Above 100 the extra boils it.");
-		num("lavaHeat", "Lava heat", Cost.NONE, LOOK, 0, 1500, 10,
-			"Temperature water next to lava heats toward.");
-		num("fireHeat", "Fire heat", Cost.NONE, LOOK, 0, 1500, 10,
-			"Temperature water next to fire or a lit campfire heats toward.");
-		num("furnaceHeat", "Furnace heat", Cost.NONE, LOOK, 0, 1500, 10,
-			"Temperature water next to a lit furnace, smoker or blast furnace heats toward.");
+		num("waterHeatTimeScale", "Heat time scale", Cost.LOW, "Hot water keeps simulating while it is above the steam wisp temperature.", 0, 1000, 1,
+			"Cooling to the air, ice and snow, and heat mixing through the water are real physics in real seconds (a block is a cubic "
+				+ "metre: hot water takes hours to cool). This speeds those up by that much; 1 is real time. Heaters have their own times below.");
+		num("waterMixing", "Heat mixing", Cost.NONE, LOOK, 0, 0.05, 0.0001,
+			"How fast heat spreads through water by stirring too small to simulate, in square metres per second. Warm water rising "
+				+ "and cold sinking is simulated on top of it. About 0.0005 for still water; 0.00000014 is pure conduction.");
+		num("airHeatTransfer", "Heat loss to the air", Cost.NONE, LOOK, 0, 200, 1,
+			"Heat transfer coefficient between the water's open surface and the air, in W/m²K (about 10-25 outdoors). Evaporation "
+				+ "is added on top and grows steeply when the water is hot. Water never cools below the biome's own temperature.");
+		num("iceHeatTransfer", "Ice and snow contact", Cost.NONE, LOOK, 0, 2000, 10,
+			"Heat transfer coefficient between water and ice or snow next to it (at 0 degrees), in W/m²K.");
+		num("magmaWaterTemperature", "Magma warms water to", Cost.NONE, LOOK, 0, 120, 1,
+			"Degrees a magma block quickly brings the water touching it or standing over it to. Below 100 it never boils it.");
+		num("magmaHeatReach", "Magma heat reach", Cost.NONE, LOOK, 0, 8, 0.5,
+			"How many blocks of water above a magma block it warms, less with every block up. Heat doesn't pass solid blocks.");
+		num("magmaHeatTime", "Magma heating time", Cost.NONE, LOOK, 0.1, 120, 0.1,
+			"Seconds for water over magma to get most of the way to its temperature.");
+		num("lavaBoilTime", "Lava boiling time", Cost.NONE, LOOK, 0.01, 10, 0.01,
+			"Water touching lava boils away into steam in about this many seconds (and the lava turns to cobblestone or obsidian).");
+		num("fireWaterTemperature", "Fire heats water to", Cost.NONE, LOOK, 0, 150, 1,
+			"Degrees fire and lit campfires heat the water touching them toward. It needs to be well above 100 for that water to boil, "
+				+ "as the water around keeps cooling it.");
+		num("fireHeatTime", "Fire heating time", Cost.NONE, LOOK, 1, 600, 1,
+			"Seconds for water touching fire to get most of the way to its temperature: with 120 degrees, 12 brings it to a boil in about half a minute, like a pot over a fire.");
+		num("furnaceWaterTemperature", "Furnace heats water to", Cost.NONE, LOOK, 0, 150, 1,
+			"Degrees a lit furnace, smoker or blast furnace heats the water touching it toward.");
+		num("furnaceHeatTime", "Furnace heating time", Cost.NONE, LOOK, 1, 1200, 1,
+			"Seconds for water touching a lit furnace to get most of the way to its temperature.");
 		num("boilChurn", "Boiling churn", Cost.NONE, LOOK, 0, 40, 0.5,
 			"How hard boiling stirs the water at the hot spot, in blocks per second squared.");
 		num("boilSteam", "Boiling steam", Cost.MEDIUM, "More steam means more steam points.", 0, 5, 0.05,
@@ -577,8 +697,10 @@ public final class WaterSettingsInfo {
 			"Bubbles a second rising from one nucleation spot at a full boil. Bubbles come from a few fixed spots on the hot surface, like in a real pot.");
 		num("boilClingTemperature", "Clinging bubbles from", Cost.NONE, LOOK, 30, 99, 1,
 			"Above this temperature, tiny bubbles start forming and clinging to the heated bottom and sides before the water boils.");
-		num("boilingDamage", "Boiling damage", Cost.NONE, "Only checked by the server for blocks that are boiling.", 0, 4, 0.5,
-			"Damage boiling water does to players and mobs standing in it, per hit (2 is one heart). Hits come as often as vanilla allows, like a magma block. 0 turns it off.");
+		num("boilingDamage", "Scalding damage", Cost.NONE, "Only checked by the server for blocks hot enough to scald.", 0, 4, 0.05,
+			"Hot water hurts players and mobs whose feet are in it: 1 health point at an average of 60 degrees, rising to 4 at 100 "
+				+ "(2 points are one heart), times this. Hits come as often as vanilla allows, like a magma block. Fire Resistance protects "
+				+ "completely. 0 turns it off.");
 
 		category("Steam");
 		num("steamParticleSize", "Steam particle size", Cost.HIGH, "Halving it makes eight times as many points for the same steam.", 0.005, 1, 0.005,

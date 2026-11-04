@@ -28,5 +28,7 @@
   "subtitles.realistic-water.block.wave_maker.run": "Water Pump hums",
   "death.attack.realistic-water.boilingWater": "%1$s was boiled alive",
   "death.attack.realistic-water.boilingWater.player": "%1$s was boiled alive while fighting %2$s",
+  "death.attack.realistic-water.cooked": "%1$s was cooked in %2$s°C water",
+  "death.attack.realistic-water.cooked.player": "%1$s was cooked in %2$s°C water while fighting %3$s",
   "subtitles.realistic-water.block.realistic_water.boil": "Water boils"
 }

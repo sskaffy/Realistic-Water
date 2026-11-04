@@ -64,6 +64,14 @@ layout(std140, set = 0, binding = 0) uniform Globals {
     vec4 heatB;
     vec4 heatC;
     vec4 heatD;
+    vec4 fogB;
+    vec4 oceanA;
+    vec4 oceanB;
+    vec4 oceanC;
+    vec4 wavePhase[2];
+    vec4 waveA[8];
+    vec4 heatE;
+    vec4 seaFoam;
 } G;
 
 bool isWater() {

@@ -24,6 +24,7 @@ dependencies {
 	implementation("net.fabricmc.fabric-api:fabric-api:${providers.gradleProperty("fabric_api_version").get()}")
 
 	"clientCompileOnly"(files("libs/sodium-fabric-0.9.2+mc26.3.jar"))
+	"clientCompileOnly"(files("libs/vitrail-0.13.0-beta+mc26.3.jar"))
 }
 
 tasks.processResources {

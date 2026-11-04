@@ -22,7 +22,7 @@ public final class WaterRenderer implements AutoCloseable {
 	private static final int RGBA32F = VK10.VK_FORMAT_R32G32B32A32_SFLOAT;
 	private static final Identifier SLIME_TEXTURE = Identifier.withDefaultNamespace("textures/block/slime_block.png");
 
-	private final int thicknessFormat;
+	final int thicknessFormat;
 	private final GraphicsProgram meshFront;
 	private final GraphicsProgram dropletFront;
 	private final GraphicsProgram meshThickness;
@@ -62,7 +62,7 @@ public final class WaterRenderer implements AutoCloseable {
 		this.dropletThickness = new GraphicsProgram("particle.vert", "droplet_thickness.frag", droplets, add, U, S, S, S, T);
 		this.whitewaterProgram = new GraphicsProgram("particle.vert", "whitewater.frag", Map.of("VIEW_BINDING", "4"),
 			new GraphicsProgram.State(VkTex.RGBA16F, VK10.VK_FORMAT_UNDEFINED, false, false, VK10.VK_COMPARE_OP_ALWAYS, GraphicsProgram.Blend.ADD,
-				this.thicknessFormat),
+				VkTex.RGBA16F),
 			U, S, T, T, S);
 		this.dropletCull = new ComputeProgram("droplet_cull.comp", U, S, S, S, S, S, S);
 	}
@@ -71,7 +71,7 @@ public final class WaterRenderer implements AutoCloseable {
 		return this.composites.computeIfAbsent(colorFormat * 2 + (layer ? 1 : 0), key -> new GraphicsProgram("fullscreen.vert", "composite.frag", Map.of(),
 			new GraphicsProgram.State(colorFormat, VkTex.D32, true, true, VK10.VK_COMPARE_OP_ALWAYS,
 				layer ? GraphicsProgram.Blend.PREMULTIPLIED : GraphicsProgram.Blend.NONE),
-			Desc.UBO, Desc.TEX, Desc.TEX, Desc.TEX, Desc.TEX, Desc.TEX, Desc.TEX, Desc.SSBO, Desc.SSBO, Desc.TEX, Desc.TEX));
+			Desc.UBO, Desc.TEX, Desc.TEX, Desc.TEX, Desc.TEX, Desc.TEX, Desc.TEX, Desc.SSBO, Desc.SSBO, Desc.TEX, Desc.TEX, Desc.SSBO));
 	}
 
 	private static boolean blendable(int format) {
@@ -97,7 +97,7 @@ public final class WaterRenderer implements AutoCloseable {
 		this.materialId = new VkTex(VkTex.RGBA16F, w, h, VkTex.COLOR | VkTex.SAMPLED);
 		this.thickness = new VkTex(this.thicknessFormat, w, h, VkTex.COLOR | VkTex.SAMPLED);
 		this.foam = new VkTex(VkTex.RGBA16F, w, h, VkTex.COLOR | VkTex.SAMPLED);
-		this.foamSurface = new VkTex(this.thicknessFormat, w, h, VkTex.COLOR | VkTex.SAMPLED);
+		this.foamSurface = new VkTex(VkTex.RGBA16F, w, h, VkTex.COLOR | VkTex.SAMPLED);
 	}
 
 	private void releaseTargets() {
@@ -118,8 +118,8 @@ public final class WaterRenderer implements AutoCloseable {
 	public record Body(WaterRegion region, Desc ubo) {
 	}
 
-	public void record(VkCommandBuffer cb, List<Body> bodies, Desc view, long mainColorImage, long mainColorView, long mainDepthImage,
-		long mainDepthView, long lightmap, boolean layer, int @Nullable [] area) {
+	public void record(VkCommandBuffer cb, List<Body> bodies, OceanRenderer.@Nullable Draw ocean, Desc view, long mainColorImage, long mainColorView,
+		long mainDepthImage, long mainDepthView, long lightmap, boolean layer, int @Nullable [] area) {
 		int w = this.width;
 		int h = this.height;
 		int[] a = area != null ? area : new int[]{0, 0, w, h};
@@ -161,12 +161,17 @@ public final class WaterRenderer implements AutoCloseable {
 		for (Body body : bodies) {
 			WaterRegion r = body.region();
 			float radius = WaterSettings.particleRadius / r.res;
-			this.meshFront.bind(cb, body.ubo(), Desc.ssbo(r.mesher.verts), Desc.ssbo(r.mesher.quads), view, Desc.ssbo(r.light()),
-				Desc.tex(WaterWorld.packShadowView != 0L ? WaterWorld.packShadowView : lightmap, this.nearest.handle));
-			this.meshFront.drawIndirect(cb, r.mesher.meshCounters, SurfaceMesher.DRAW_ARGS_OFFSET);
+			if (r.ocean == null) {
+				this.meshFront.bind(cb, body.ubo(), Desc.ssbo(r.mesher.verts), Desc.ssbo(r.mesher.quads), view, Desc.ssbo(r.light()),
+					Desc.tex(WaterWorld.packShadowView != 0L ? WaterWorld.packShadowView : lightmap, this.nearest.handle));
+				this.meshFront.drawIndirect(cb, r.mesher.meshCounters, SurfaceMesher.DRAW_ARGS_OFFSET);
+			}
 			this.dropletFront.bind(cb, body.ubo(), Desc.ssbo(r.currentParticles()), Desc.ssbo(r.dropletIds), view, Desc.ssbo(r.light()));
 			this.dropletFront.push(cb, Program.f(radius), Program.f(0.0F), Program.f(0.15F));
 			this.dropletFront.drawIndirect(cb, r.args, WaterRegion.ARGS_DROPLET_DRAW);
+		}
+		if (ocean != null) {
+			ocean.front(cb);
 		}
 		GraphicsProgram.end(cb);
 
@@ -174,27 +179,30 @@ public final class WaterRenderer implements AutoCloseable {
 		for (Body body : bodies) {
 			WaterRegion r = body.region();
 			float radius = WaterSettings.particleRadius / r.res;
-			this.meshThickness.bind(cb, body.ubo(), Desc.ssbo(r.mesher.verts), Desc.ssbo(r.mesher.quads), view, depthTex);
-			this.meshThickness.drawIndirect(cb, r.mesher.meshCounters, SurfaceMesher.DRAW_ARGS_OFFSET);
+			if (r.ocean == null) {
+				this.meshThickness.bind(cb, body.ubo(), Desc.ssbo(r.mesher.verts), Desc.ssbo(r.mesher.quads), view, depthTex);
+				this.meshThickness.drawIndirect(cb, r.mesher.meshCounters, SurfaceMesher.DRAW_ARGS_OFFSET);
+			}
 			this.dropletThickness.bind(cb, body.ubo(), Desc.ssbo(r.currentParticles()), Desc.ssbo(r.dropletIds), view, depthTex);
 			this.dropletThickness.push(cb, Program.f(radius), Program.f(0.0F), Program.f(0.15F));
 			this.dropletThickness.drawIndirect(cb, r.args, WaterRegion.ARGS_DROPLET_DRAW);
+		}
+		if (ocean != null) {
+			ocean.thickness(cb, depthTex);
 		}
 		GraphicsProgram.end(cb);
 		Vk.barrier(cb);
 
 		GraphicsProgram.begin(cb, w, h, this.foam.view, new float[]{0, 0, 0, 0}, this.foamSurface.view, new float[]{0, 0, 0, 0}, 0L);
-		if (WaterSettings.whitewater) {
-			for (Body body : bodies) {
-				WaterRegion r = body.region();
-				if (!r.material.usesWhitewater()) {
-					continue;
-				}
-				this.whitewaterProgram.bind(cb, body.ubo(), Desc.ssbo(r.currentWhitewater()), depthTex, Desc.tex(this.gbuffer, this.nearest.handle), view);
-				this.whitewaterProgram.push(cb, Program.f(WaterSettings.wwRadius), Program.f(0.5F), Program.f(0.3F), Program.f(WaterSettings.wwMaxPixels),
-					Program.f(WaterSettings.foamSize));
-				this.whitewaterProgram.drawIndirect(cb, r.args, WaterRegion.ARGS_WW_DRAW);
+		for (Body body : bodies) {
+			WaterRegion r = body.region();
+			if (!r.whitewaterOn() || r.ocean != null && PackFoam.active()) {
+				continue;
 			}
+			this.whitewaterProgram.bind(cb, body.ubo(), Desc.ssbo(r.currentWhitewater()), depthTex, Desc.tex(this.gbuffer, this.nearest.handle), view);
+			this.whitewaterProgram.push(cb, Program.f(WaterSettings.wwRadius), Program.f(0.5F), Program.f(0.3F), Program.f(WaterSettings.wwMaxPixels),
+				Program.f(WaterSettings.foamSize));
+			this.whitewaterProgram.drawIndirect(cb, r.args, WaterRegion.ARGS_WW_DRAW);
 		}
 		GraphicsProgram.end(cb);
 		Vk.barrier(cb);
@@ -205,31 +213,43 @@ public final class WaterRenderer implements AutoCloseable {
 		for (Material material : new Material[]{Material.WATER, Material.LAVA, Material.SLIME}) {
 			Desc ubo = null;
 			for (Body body : bodies) {
-				if (body.region().material == material) {
+				if (body.region().material == material && body.region().ocean == null) {
 					ubo = body.ubo();
 					break;
 				}
 			}
-			if (ubo == null) {
-				continue;
+			boolean seaBackground = material == Material.WATER && ocean != null && (ocean.background() || ubo == null);
+			if (ubo != null) {
+				this.composite(composite, cb, ubo, matTex, view, lightmap, readable, material, 0.0F, seaBackground ? 0.0F : 1.0F, null);
 			}
-			composite.bind(cb, ubo,
-				Desc.tex(this.gbuffer, this.nearest.handle),
-				Desc.tex(this.thickness, this.linear.handle),
-				Desc.tex(this.sceneColor, this.linear.handle),
-				depthTex,
-				Desc.tex(this.foam, this.linear.handle),
-				matTex,
-				view,
-				Desc.ssbo(this.slimeTexture),
-				Desc.tex(lightmap, this.linear.handle),
-				Desc.tex(this.foamSurface, this.linear.handle));
-			composite.push(cb, Program.f(readable[0]), Program.f(readable[1]), Program.f(readable[2]), Program.f(readable[3]),
-				Program.f(material.shaderId()));
-			composite.draw(cb, 3, 1);
+			if (material == Material.WATER && ocean != null) {
+				this.composite(composite, cb, ocean.ubo(), matTex, view, lightmap, readable, material, 1.0F, seaBackground ? 1.0F : 0.0F, ocean.colors());
+			} else if (material == Material.WATER && ubo != null && WaterSettings.debugWaterLayers) {
+				this.composite(composite, cb, ubo, matTex, view, lightmap, readable, material, 1.0F, 0.0F, null);
+			}
 		}
 		GraphicsProgram.end(cb);
 		GraphicsProgram.clearArea();
+	}
+
+	private void composite(GraphicsProgram composite, VkCommandBuffer cb, Desc ubo, Desc matTex, Desc view, long lightmap, float[] readable,
+		Material material, float sea, float background, @Nullable VkBuf seaColors) {
+		composite.bind(cb, ubo,
+			Desc.tex(this.gbuffer, this.nearest.handle),
+			Desc.tex(this.thickness, this.linear.handle),
+			Desc.tex(this.sceneColor, this.linear.handle),
+			Desc.tex(this.sceneDepth, this.nearest.handle),
+			Desc.tex(this.foam, this.linear.handle),
+			matTex,
+			view,
+			Desc.ssbo(this.slimeTexture),
+			Desc.tex(lightmap, this.linear.handle),
+			Desc.tex(this.foamSurface, this.linear.handle),
+			Desc.ssbo(seaColors != null ? seaColors : this.slimeTexture));
+		composite.push(cb, Program.f(readable[0]), Program.f(readable[1]), Program.f(readable[2]), Program.f(readable[3]),
+			Program.f(material.shaderId()), Program.f(sea), Program.f(background), Program.f(WaterSettings.debugWaterLayers ? 1.0F : 0.0F),
+			Program.f(seaColors != null ? 1.0F : 0.0F));
+		composite.draw(cb, 3, 1);
 	}
 
 	@Override

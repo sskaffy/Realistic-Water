@@ -20,6 +20,7 @@ layout(std430, binding = 14) buffer HeatEvents { uint eventCount; uint eventPad0
 layout(push_constant) uniform PC { ivec4 a; ivec4 b; } pc;
 #define REGION_LIGHT_BINDING 13
 #include "region_light.glsl"
+#include "ocean_zone.glsl"
 
 #include "gridsample.glsl"
 
@@ -224,23 +225,44 @@ vec3 pumpWater(vec3 x, inout vec3 v, inout uint seed) {
 }
 
 #define THERMAL_SHIFT 20u
-#define LATENT_HEAT 540.0
+#define VANILLA_SINK 0x40000000u
+#define LATENT_HEAT 539.2
 
-uint thermalAt(vec3 x) {
+uint lightWordAt(vec3 x) {
     int res = max(int(G.camGrid.w + 0.5), 1);
     ivec3 n = max(G.dims.xyz / res, ivec3(1));
     ivec3 b = ivec3(floor(x / float(res)));
     if (any(lessThan(b, ivec3(0))) || any(greaterThanEqual(b, n))) {
         return 0u;
     }
-    return (regionLight[b.x + n.x * (b.y + n.y * b.z)] >> THERMAL_SHIFT) & 7u;
+    return regionLight[b.x + n.x * (b.y + n.y * b.z)];
 }
+
+uint thermalAt(vec3 x) {
+    return (lightWordAt(x) >> THERMAL_SHIFT) & 7u;
+}
+
+#define MAX_MAGMA_REACH 8
 
 void heatEvent(vec3 x, float kind) {
     uint o = atomicAdd(eventCount, 1u);
     if (o < uint(pc.b.z)) {
         events[o] = vec4(x, kind);
     }
+}
+
+float expansion(float t) {
+    const float T[7] = float[](0.0, 4.0, 20.0, 40.0, 60.0, 80.0, 100.0);
+    const float B[7] = float[](-6.8e-5, 0.0, 2.07e-4, 3.85e-4, 5.23e-4, 6.43e-4, 7.52e-4);
+    if (t <= T[0]) {
+        return B[0];
+    }
+    for (int i = 1; i < 7; i++) {
+        if (t <= T[i]) {
+            return mix(B[i - 1], B[i], (t - T[i - 1]) / (T[i] - T[i - 1]));
+        }
+    }
+    return B[6];
 }
 
 bool stepHeat(vec3 x, inout vec3 v, inout float temp, inout uint seed, out bool heated) {
@@ -257,31 +279,72 @@ bool stepHeat(vec3 x, inout vec3 v, inout float temp, inout uint seed, out bool 
             sumCount += cellCount[i];
         }
     }
+    float around = temp;
     if (sumCount > 0) {
-        float around = float(sumHeat) / (float(sumCount) * HEAT_FP);
-        temp += (around - temp) * (1.0 - exp(-G.heatA.z * res * res * DT));
+        around = float(sumHeat) / (float(sumCount) * HEAT_FP);
+        temp += (around - temp) * (1.0 - exp(-G.heatA.z * DT));
     }
-    temp += (G.heatA.y - temp) * (1.0 - exp(-G.heatA.w * DT));
-    float reach = 0.5 * res;
-    for (int k = 0; k < 7; k++) {
+    float perFlux = G.heatA.w * DT;
+    float magmaTarget = -1.0;
+    bool lava = false;
+    for (int k = 1; k < 7; k++) {
         vec3 o = vec3(0.0);
-        if (k > 0) {
-            o[(k - 1) >> 1] = (k & 1) == 1 ? reach : -reach;
-        }
+        o[(k - 1) >> 1] = (k & 1) == 1 ? 1.0 : -1.0;
         uint code = thermalAt(x + o);
-        if (code >= 1u && code <= 4u) {
-            float target = code == 1u ? G.heatC.x : code == 2u ? G.heatC.y : code == 3u ? G.heatC.z : G.heatC.w;
-            temp += (target - temp) * (1.0 - exp(-G.heatB.x * DT));
+        if (code == 1u) {
+            magmaTarget = G.heatC.x;
+        } else if (code == 2u) {
+            lava = true;
+        } else if (code == 3u || code == 4u) {
+            float target = code == 3u ? G.heatC.z : G.heatC.w;
+            float rate = code == 3u ? G.heatE.z : G.heatE.w;
+            if (temp < target) {
+                temp += (target - temp) * (1.0 - exp(-rate * DT));
+            }
             heated = true;
         } else if (code >= 5u) {
-            temp += (0.0 - temp) * (1.0 - exp(-G.heatB.y * DT));
+            temp += G.heatB.y * (0.0 - temp) * perFlux;
         }
     }
+    if (magmaTarget < 0.0 && G.heatC.y > 0.0) {
+        int reach = min(int(ceil(G.heatC.y)), MAX_MAGMA_REACH);
+        for (int d = 1; d <= reach; d++) {
+            uint word = lightWordAt(x - vec3(0.0, float(d) * res, 0.0));
+            if (((word >> THERMAL_SHIFT) & 7u) == 1u) {
+                float fade = clamp(1.0 - float(d - 1) / G.heatC.y, 0.0, 1.0);
+                magmaTarget = mix(G.heatA.y, G.heatC.x, fade);
+                break;
+            }
+            if ((word & 0x100u) != 0u) {
+                break;
+            }
+        }
+    }
+    if (magmaTarget >= 0.0) {
+        if (temp < magmaTarget) {
+            temp += (magmaTarget - temp) * (1.0 - exp(-G.heatE.x * DT));
+        }
+        heated = true;
+    }
+    if (lava) {
+        heated = true;
+        temp = max(temp, 100.0);
+        if (rand(seed) < 1.0 - exp(-G.heatE.y * DT)) {
+            return false;
+        }
+    }
+    if (countAt(c + ivec3(0, 1, 0)) == 0) {
+        float ambient = G.heatA.y;
+        float t = temp * 0.01;
+        float ta = ambient * 0.01;
+        float q = G.heatB.x * (temp - ambient) + 6000.0 * max(t * t * t - ta * ta * ta, 0.0);
+        temp = max(temp - q * perFlux, min(temp, ambient));
+    }
+    v.y += -G.gravityDt.y * expansion(temp) * (temp - around) * DT;
     temp = max(temp, 0.0);
     if (temp > 100.0) {
         float excess = temp - 100.0;
         temp = 100.0;
-        // Vapour forming at the hot spot stirs the water around it.
         vec3 kick = vec3(rand(seed) - 0.5, rand(seed), rand(seed) - 0.5);
         v += kick * G.heatB.z * DT;
         if (rand(seed) < excess / LATENT_HEAT) {
@@ -356,6 +419,23 @@ void emitWhitewater(uint id, vec3 x, vec3 v) {
     }
 }
 
+bool oceanRelax(vec3 x, inout vec3 v, inout vec3 dx, inout uint seed, out float deviation) {
+    deviation = 0.0;
+    float surface;
+    vec3 target;
+    if (!oceanTarget(x, surface, target)) {
+        return true;
+    }
+    float res = G.camGrid.w;
+    vec3 off = (v - target) / res;
+    deviation = min(dot(off, off), 16.0);
+    float w = oceanBand(x);
+    float a = 1.0 - exp(-(G.oceanB.w * w + G.oceanC.w) * DT);
+    v = mix(v, target, a);
+    dx = mix(dx, target * DT, a);
+    return w <= 0.0 || !(x.y > surface + 0.5 && rand(seed) < w * G.oceanC.z * DT);
+}
+
 void main() {
     uint i = GID_U;
     if (i >= counters[pc.a.x]) {
@@ -399,6 +479,18 @@ void main() {
             }
             boilBubbles(x, v, temp, heated, heatSeed);
         }
+        if (oceanOn()) {
+            uint oceanSeed = hash(i * 3266489917u + uint(pc.a.w) * 668265263u);
+            float deviation;
+            bool keep = oceanRelax(x, v, dx, oceanSeed, deviation);
+            uint groupDeviation = subgroupAdd(uint(deviation * 64.0));
+            if (subgroupElect()) {
+                atomicAdd(counters[7], groupDeviation);
+            }
+            if (!keep) {
+                return;
+            }
+        }
         bool squeezed = isSlime() && float(countAt(ivec3(floor(x)))) > G.simA.y * 1.5;
         if (isSlime() && squeezed) {
             rest = 0.0;
@@ -437,6 +529,12 @@ void main() {
 
     float killMargin = G.killInfo.y;
     if (any(lessThan(xn, vec3(-killMargin))) || any(greaterThanEqual(xn, vec3(NX, NY, NZ) + killMargin)) || xn.y < G.killInfo.x) {
+        return;
+    }
+    if (oceanOn() && (xn.x < G.oceanA.y || xn.x >= G.oceanB.y || xn.z < G.oceanA.z || xn.z >= G.oceanB.z)) {
+        return;
+    }
+    if ((lightWordAt(xn) & VANILLA_SINK) != 0u) {
         return;
     }
     uint groupTotal = subgroupAdd(1u);
