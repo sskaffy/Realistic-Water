@@ -49,7 +49,7 @@ How to use:
 - Realistic Ocean, changes how the oceans render plus it reacts to entities/realistic items from this mod
 - Realistic kelp, its a toggle you can turn on/off in "/water" it lets you grab a kelp, move it, and it will react to things around it
 
-**Showcase:** https://www.youtube.com/watch?v=GG2-psEHUI4 (this is the old one, new is coming soon)
+**Showcase:** https://www.youtube.com/watch?v=lwkttY9Xcmk
 
 #
 
