@@ -29,5 +29,12 @@ void main() {
     vec3 nWorld = normalize(mat3(G.invView) * vNormal);
     vec3 albedo = sandAlbedo(vWorld, nWorld, 0.0) * (0.92 + 0.2 * rand(s));
     vec2 bs = regionLightAt(relToSim((G.invView * vec4(pos, 1.0)).xyz + vec3(0.0, 0.5, 0.0)));
-    outColor = vec4(sandLight(nWorld, albedo, vShade, bs) * vSun, 1.0);
+    vec3 color = sandLight(nWorld, albedo, vShade, bs);
+    if (G.matD.w > 0.0 && G.sunDir.w > 0.0 && rand(s) < 0.3) {
+        vec3 facet = normalize(normalize(vNormal) + randInSphere(s) * 0.7);
+        vec3 H = normalize(normalize(G.sunDir.xyz) + normalize(-pos));
+        float glint = pow(max(dot(facet, H), 0.0), 300.0) * 6.0;
+        color += vec3(1.0, 0.98, 0.94) * glint * G.matD.w * G.sunDir.w * smoothstep(0.5, 0.95, bs.y);
+    }
+    outColor = vec4(color * vSun, 1.0);
 }

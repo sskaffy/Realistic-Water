@@ -1184,7 +1184,7 @@ public final class WaterRegion implements AutoCloseable {
 	}
 
 	private static int shadowCover(BlockState state) {
-		if (state.getBlock() == ModContent.REALISTIC_SAND || state.getBlock() == ModContent.REALISTIC_LEAVES) {
+		if (state.getBlock() == ModContent.REALISTIC_SAND || state.getBlock() == ModContent.REALISTIC_SNOW || state.getBlock() == ModContent.REALISTIC_LEAVES) {
 			return state.getValue(LooseLayerBlock.LAYERS);
 		}
 		if (state.getBlock() == ModContent.REALISTIC_SLIME_BLOCK) {

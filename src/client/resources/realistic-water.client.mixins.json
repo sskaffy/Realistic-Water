@@ -19,6 +19,7 @@
 		"LocalPlayerMixin",
 		"MinecraftMixin",
 		"MouseHandlerMixin",
+		"SnowballMixin",
 		"WeatherEffectRendererMixin",
 		"compat.VitrailPackChainMixin",
 		"compat.VitrailProgramTranslatorMixin",

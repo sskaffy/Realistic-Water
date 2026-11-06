@@ -26,8 +26,9 @@ final class FlowSounds {
 		boolean lava = material == Material.LAVA;
 		boolean slime = material == Material.SLIME;
 		boolean leaves = material == Material.LEAVES;
+		boolean snow = material == Material.SNOW;
 		if (water ? !WaterSettings.flowSounds : lava ? !WaterSettings.lavaFlowSounds : slime ? !WaterSettings.slimeSounds
-			: leaves ? !WaterSettings.leafSounds : !WaterSettings.sandSounds) {
+			: leaves ? !WaterSettings.leafSounds : snow ? !WaterSettings.snowSounds : !WaterSettings.sandSounds) {
 			return;
 		}
 		float moving = water ? 0.4F : lava ? 0.35F : slime ? 0.25F : leaves ? 0.6F : 0.3F;
@@ -63,7 +64,7 @@ final class FlowSounds {
 			return;
 		}
 		float volumeScale = WaterSettings.flowSoundVolume;
-		SoundType pile = leaves ? SoundType.AZALEA_LEAVES : SoundType.SAND;
+		SoundType pile = leaves ? SoundType.AZALEA_LEAVES : snow ? SoundType.SNOW : SoundType.SAND;
 		float rate = water ? 0.012F : lava ? 0.011F : 0.01F;
 		float cap = water ? 3.0F : lava ? 2.5F : 2.0F;
 		int count = this.roll(Math.min(weight * rate, cap));

@@ -21,6 +21,7 @@ import me.skaffy.ModContent;
 import me.skaffy.RealisticWater;
 import me.skaffy.block.RealisticLeavesBlock;
 import me.skaffy.block.RealisticSandBlock;
+import me.skaffy.block.RealisticSnowBlock;
 import me.skaffy.client.compat.FrameTarget;
 import me.skaffy.client.compat.ShaderCompat;
 import me.skaffy.client.vk.Desc;
@@ -48,6 +49,7 @@ import net.minecraft.resources.Identifier;
 import me.skaffy.net.RemoveAllWaterPayload;
 import me.skaffy.net.SandSyncPayload;
 import me.skaffy.net.SlimeSyncPayload;
+import me.skaffy.net.SnowSyncPayload;
 import me.skaffy.net.WaterSyncPayload;
 import me.skaffy.ocean.OceanOrigin;
 import me.skaffy.ocean.OceanWaves;
@@ -87,7 +89,10 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraft.world.level.material.FogType;
+import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix3f;
 import org.joml.Matrix4f;
@@ -108,7 +113,8 @@ public final class WaterWorld {
 
 	static float sandWaveSpeed() {
 		float nu = SAND_POISSON;
-		return (float) Math.sqrt(WaterSettings.sandStiffness * (1.0F - nu) / ((1.0F + nu) * (1.0F - 2.0F * nu)));
+		float stiffness = Math.max(WaterSettings.sandStiffness, WaterSettings.snowStiffness);
+		return (float) Math.sqrt(stiffness * (1.0F - nu) / ((1.0F + nu) * (1.0F - 2.0F * nu)));
 	}
 	private static final double WORLD_WRAP = 4096.0;
 	static final int MAX_ENTITIES = 32;
@@ -169,6 +175,7 @@ public final class WaterWorld {
 	private final Echoes lavaEchoes = new Echoes();
 	private final Echoes slimeEchoes = new Echoes();
 	private final Echoes leafEchoes = new Echoes();
+	private final Echoes snowEchoes = new Echoes();
 	private final List<double[]> blasts = new ArrayList<>();
 	private final List<double[]> recentBlasts = new ArrayList<>();
 	private final List<Object[]> pendingFills = new ArrayList<>();
@@ -277,6 +284,7 @@ public final class WaterWorld {
 			case LAVA -> lavaAmount(state);
 			case SLIME -> slimeAmount(state);
 			case LEAVES -> RealisticLeavesBlock.layers(state);
+			case SNOW -> RealisticSnowBlock.layers(state);
 			default -> waterAmount(state);
 		};
 	}
@@ -300,6 +308,7 @@ public final class WaterWorld {
 			case LAVA -> this.lavaEchoes;
 			case SLIME -> this.slimeEchoes;
 			case LEAVES -> this.leafEchoes;
+			case SNOW -> this.snowEchoes;
 			default -> this.waterEchoes;
 		};
 	}
@@ -328,7 +337,7 @@ public final class WaterWorld {
 	}
 
 	static int resolutionFor(Material material) {
-		if (material == Material.SAND) {
+		if (material == Material.SAND || material == Material.SNOW) {
 			return Math.max(1, WaterSettings.sandResolution);
 		}
 		if (material == Material.LAVA) {
@@ -432,6 +441,35 @@ public final class WaterWorld {
 
 	public void addSand(BlockPos pos, double y0, double y1) {
 		this.addMaterial(pos, y0, y1, Material.SAND);
+	}
+
+	public void addSnow(BlockPos pos, double y0, double y1) {
+		this.addMaterial(pos, y0, y1, Material.SNOW);
+	}
+
+	public void onSnowballHit(ClientLevel level, Entity snowball) {
+		if (!WaterSettings.realisticSnowballs || Vk.tryDevice() == null || !this.ownsEvent(level)) {
+			return;
+		}
+		Vec3 at = snowball.position();
+		Vec3 velocity = snowball.getDeltaMovement();
+		double half = Math.max(WaterSettings.snowballSize, 0.05F) * 0.5;
+		BlockHitResult hit = level.clip(new ClipContext(at.subtract(velocity), at.add(velocity.scale(1.5)), ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE,
+			snowball));
+		Vec3 center = hit.getType() == HitResult.Type.BLOCK ? hit.getLocation().add(Vec3.atLowerCornerOf(hit.getDirection().getUnitVec3i()).scale(half)) : at;
+		if (level.isOutsideBuildHeight(BlockPos.containing(center))) {
+			return;
+		}
+		WaterRegion r = this.regionFor(BlockPos.containing(center), Material.SNOW);
+		Vec3 v = velocity.scale(20.0 * Math.max(WaterSettings.snowballSpeed, 0.0F));
+		double third = half / 3.0;
+		for (int k = -1; k <= 1; k++) {
+			double w = k == 0 ? half : half * 0.7;
+			double y0 = k == 0 ? center.y - third : k < 0 ? center.y - half : center.y + third;
+			double y1 = k == 0 ? center.y + third : k < 0 ? center.y - third : center.y + half;
+			r.addEmitter(new WaterRegion.Emitter(center.x - w, y0, center.z - w, center.x + w, y1, center.z + w, (float) v.x, (float) v.y, (float) v.z));
+		}
+		r.wake(this.frameCounter);
 	}
 
 	public void addLava(BlockPos pos, double y0, double y1) {
@@ -676,6 +714,7 @@ public final class WaterWorld {
 		this.lavaEchoes.clear();
 		this.slimeEchoes.clear();
 		this.leafEchoes.clear();
+		this.snowEchoes.clear();
 		this.pendingFills.clear();
 		this.latestFills.clear();
 		this.recentMixes.clear();
@@ -768,6 +807,15 @@ public final class WaterWorld {
 		} else if (oldState.getBlock() instanceof Portal) {
 			this.portalBlocks.remove(key);
 		}
+		int snowBefore = RealisticSnowBlock.layers(oldState);
+		int snowAfter = RealisticSnowBlock.layers(newState);
+		if (snowBefore != snowAfter && !this.snowEchoes.consume(key, snowAfter)) {
+			if (snowAfter > snowBefore) {
+				this.addSnow(pos.immutable(), snowBefore / 8.0, snowAfter / 8.0);
+			} else if (newState.isAir() && !this.blastedRecently(pos)) {
+				this.removeMaterial(pos.immutable(), 0.0, 1.0, Material.SNOW);
+			}
+		}
 		int leavesBefore = RealisticLeavesBlock.layers(oldState);
 		int leavesAfter = RealisticLeavesBlock.layers(newState);
 		if (leavesBefore != leavesAfter && !this.leafEchoes.consume(key, leavesAfter)) {
@@ -853,6 +901,7 @@ public final class WaterWorld {
 					|| state.getBlock() == ModContent.REALISTIC_SLIME_BLOCK
 					|| state.getBlock() == ModContent.REALISTIC_SAND
 					|| state.getBlock() == ModContent.REALISTIC_LEAVES
+					|| state.getBlock() == ModContent.REALISTIC_SNOW
 					|| state.getBlock() == ModContent.WAVE_MAKER
 					|| state.getBlock() instanceof Portal)) {
 				continue;
@@ -869,11 +918,12 @@ public final class WaterWorld {
 				int slime = slimeAmount(state);
 				int sand = RealisticSandBlock.layers(state);
 				int leaves = RealisticLeavesBlock.layers(state);
+				int snow = RealisticSnowBlock.layers(state);
 				if (state.getBlock() == ModContent.WAVE_MAKER) {
 					this.waveMakers.add(BlockPos.asLong((chunkPos.x() << 4) + (i & 15), baseY + ((i >> 4) & 15), (chunkPos.z() << 4) + (i >> 8)));
 					continue;
 				}
-				if (water == 0 && lava == 0 && slime == 0 && sand == 0 && leaves == 0) {
+				if (water == 0 && lava == 0 && slime == 0 && sand == 0 && leaves == 0 && snow == 0) {
 					continue;
 				}
 				pos.set((chunkPos.x() << 4) + (i & 15), baseY + ((i >> 4) & 15), (chunkPos.z() << 4) + (i >> 8));
@@ -897,6 +947,9 @@ public final class WaterWorld {
 				}
 				if (leaves > 0 && !this.owned(key, Material.LEAVES)) {
 					this.addLeaves(pos.immutable(), 0.0, leaves / 8.0);
+				}
+				if (snow > 0 && !this.owned(key, Material.SNOW)) {
+					this.addSnow(pos.immutable(), 0.0, snow / 8.0);
 				}
 			}
 		}
@@ -935,6 +988,7 @@ public final class WaterWorld {
 		this.lavaEchoes.expire(this.frameCounter);
 		this.slimeEchoes.expire(this.frameCounter);
 		this.leafEchoes.expire(this.frameCounter);
+		this.snowEchoes.expire(this.frameCounter);
 		Vec3 listener = mc.player != null ? mc.player.getEyePosition() : null;
 		for (Object[] f : this.pendingFills) {
 			WaterRegion r = (WaterRegion) f[0];
@@ -1421,6 +1475,7 @@ public final class WaterWorld {
 			case LAVA -> LavaSyncPayload.TYPE;
 			case SLIME -> SlimeSyncPayload.TYPE;
 			case LEAVES -> LeavesSyncPayload.TYPE;
+			case SNOW -> SnowSyncPayload.TYPE;
 			default -> WaterSyncPayload.TYPE;
 		};
 		if (!ClientPlayNetworking.canSend(type)) {
@@ -1431,6 +1486,7 @@ public final class WaterWorld {
 			case LAVA -> LavaSyncPayload.MAX_ENTRIES;
 			case SLIME -> SlimeSyncPayload.MAX_ENTRIES;
 			case LEAVES -> LeavesSyncPayload.MAX_ENTRIES;
+			case SNOW -> SnowSyncPayload.MAX_ENTRIES;
 			default -> WaterSyncPayload.MAX_ENTRIES;
 		};
 		for (int start = 0; start < positions.size(); start += max) {
@@ -1446,6 +1502,7 @@ public final class WaterWorld {
 				case LAVA -> new LavaSyncPayload(p, a);
 				case SLIME -> new SlimeSyncPayload(p, a);
 				case LEAVES -> new LeavesSyncPayload(p, a);
+				case SNOW -> new SnowSyncPayload(p, a);
 				default -> new WaterSyncPayload(p, a);
 			};
 			ClientPlayNetworking.send(payload);
@@ -2231,6 +2288,7 @@ public final class WaterWorld {
 		boolean lava = r.material == Material.LAVA;
 		boolean slime = r.material == Material.SLIME;
 		boolean leaves = r.material.isLeaves();
+		boolean snow = r.material == Material.SNOW;
 
 		putInts(b, o, r.nx, r.ny, r.nz, r.numCells);
 		putInts(b, o + 16, r.numU, r.numV, r.numW, r.numFaces);
@@ -2280,21 +2338,22 @@ public final class WaterWorld {
 		putFloats(b, o + 3792, (float) (level.getMinY() - r.oy) * res - 8.0F, WaterRegion.KILL_MARGIN,
 			lavaFog ? camera.fogData.environmentalStart : 0.0F, lavaFog ? Math.max(camera.fogData.environmentalEnd, 0.01F) : 0.0F);
 		float detailStrength = sea ? WaterSettings.oceanDetailStrength : lava ? WaterSettings.lavaDetailStrength : slime ? 0.0F : WaterSettings.detailStrength;
-		float roughness = sea ? WaterSettings.oceanRoughness : lava ? WaterSettings.lavaRoughness : WaterSettings.roughness;
-		float specular = sea ? WaterSettings.oceanSpecular * glint : lava ? WaterSettings.lavaSpecular : slime ? 0.0F : WaterSettings.specular * glint;
+		float roughness = sea ? WaterSettings.oceanRoughness : lava ? WaterSettings.lavaRoughness : slime ? WaterSettings.slimeRoughness : WaterSettings.roughness;
+		float specular = sea ? WaterSettings.oceanSpecular * glint : lava ? WaterSettings.lavaSpecular : slime ? WaterSettings.slimeGloss : WaterSettings.specular * glint;
 		putFloats(b, o + 3808, detailStrength, WaterSettings.detailScale, WaterSettings.detailSpeed, roughness);
-		putFloats(b, o + 3824, specular, WaterSettings.wetDarkening, WaterSettings.filmShading, WaterSettings.foamBubbleSize);
+		putFloats(b, o + 3824, specular, WaterSettings.wetDarkening, WaterSettings.filmShading, slime ? WaterSettings.slimeBubbles : WaterSettings.foamBubbleSize);
 
 		if (sand) {
-			double phi = Math.toRadians(WaterSettings.sandFrictionAngle);
+			double phi = Math.toRadians(snow ? WaterSettings.snowFrictionAngle : WaterSettings.sandFrictionAngle);
 			float alpha = (float) (Math.sqrt(2.0 / 3.0) * 2.0 * Math.sin(phi) / (3.0 - Math.sin(phi)));
-			float e = PARTICLES_PER_CELL * WaterSettings.sandStiffness * res * res;
+			float e = PARTICLES_PER_CELL * (snow ? WaterSettings.snowStiffness : WaterSettings.sandStiffness) * res * res;
 			float mu = e / (2.0F * (1.0F + SAND_POISSON));
 			float lambda = e * SAND_POISSON / ((1.0F + SAND_POISSON) * (1.0F - 2.0F * SAND_POISSON));
-			putFloats(b, o + 3840, r.material.shaderId(), alpha, WaterSettings.sandCohesion, 1.0F);
-			putFloats(b, o + 3856, mu, lambda, Math.max(1, WaterSettings.sandGrainsPerParticle), WaterSettings.sandGrainSize);
-			float impactViscosity = WaterSettings.sandImpactDamping * 0.25F / Math.max(dt, 1e-5F);
-			putFloats(b, o + 3872, WaterSettings.sandWallFriction, 1.0F / PARTICLES_PER_CELL, impactViscosity, WaterSettings.sandImpactRate);
+			putFloats(b, o + 3840, r.material.shaderId(), alpha, snow ? WaterSettings.snowCohesion : WaterSettings.sandCohesion, 1.0F);
+			putFloats(b, o + 3856, mu, lambda, Math.max(1, WaterSettings.sandGrainsPerParticle), snow ? WaterSettings.snowGrainSize : WaterSettings.sandGrainSize);
+			float impactViscosity = (snow ? WaterSettings.snowImpactDamping : WaterSettings.sandImpactDamping) * 0.25F / Math.max(dt, 1e-5F);
+			putFloats(b, o + 3872, snow ? WaterSettings.snowWallFriction : WaterSettings.sandWallFriction, 1.0F / PARTICLES_PER_CELL, impactViscosity,
+				WaterSettings.sandImpactRate);
 		} else {
 			float filmFriction = lava ? WaterSettings.lavaFilmFriction : slime ? WaterSettings.slimeFilmFriction : WaterSettings.filmFriction;
 			float strandedTime = lava ? WaterSettings.lavaStrandedTime : slime ? WaterSettings.slimeStrandedTime : WaterSettings.strandedTime;
@@ -2314,9 +2373,11 @@ public final class WaterWorld {
 			boolean inside = RealisticSlimeFluid.isRealistic(level.getFluidState(BlockPos.containing(cam)));
 			putFloats(b, o + 3888, inside ? 1.0F : 0.0F, WaterSettings.slimeBrightness, WaterSettings.slimeInsideOpacity, WaterSettings.slimeOpacity);
 		} else {
-			putFloats(b, o + 3888, WaterSettings.sandGrainMinPixels, WaterSettings.sandBrightness, WaterSettings.sandGrainSpread, 0.0F);
+			putFloats(b, o + 3888, WaterSettings.sandGrainMinPixels, snow ? WaterSettings.snowBrightness : WaterSettings.sandBrightness,
+				WaterSettings.sandGrainSpread, snow ? Math.max(WaterSettings.snowSparkle, 0.0F) : 0.0F);
 		}
-		float impactLogJ = (float) Math.log(Math.max(1.0F - WaterSettings.sandImpactCompression, 0.01F));
+		float impactCompression = snow ? WaterSettings.snowImpactCompression : WaterSettings.sandImpactCompression;
+		float impactLogJ = (float) Math.log(Math.max(1.0F - impactCompression, 0.01F));
 		putFloats(b, o + 3904, WaterSettings.sandRestSpeed * res, WaterSettings.sandRestTime, WaterSettings.sandWakeAccel * WaterSettings.gravity * res * dt,
 			impactLogJ);
 		if (leaves) {
@@ -2382,7 +2443,7 @@ public final class WaterWorld {
 		float ambient = Mth.clamp(0.15F + 1.2F * (0.3F * skyColor.x + 0.59F * skyColor.y + 0.11F * skyColor.z), 0.12F, 1.0F);
 		putFloats(b, o + 480, skyColor.x, skyColor.y, skyColor.z, ambient);
 		putFloats(b, o + 496, fog.x, fog.y, fog.z, 1.0F);
-		float refraction = sea ? WaterSettings.oceanRefraction : lava ? WaterSettings.lavaRefraction : slime ? 0.0F : WaterSettings.refraction;
+		float refraction = sea ? WaterSettings.oceanRefraction : lava ? WaterSettings.lavaRefraction : slime ? WaterSettings.slimeRefraction : WaterSettings.refraction;
 		float surfaceSmooth = sand ? WaterSettings.sandSurfaceSmoothing : lava ? WaterSettings.lavaSurfaceSmoothing
 			: slime ? WaterSettings.slimeSurfaceSmoothing : WaterSettings.surfaceSmoothing;
 		putFloats(b, o + 512, WaterSettings.particleRadius * h, sea ? WaterSettings.oceanThicknessScale : WaterSettings.thicknessScale, refraction,
@@ -2451,6 +2512,9 @@ public final class WaterWorld {
 		for (WaterRegion r : this.oceanSim.zones) {
 			if (zones * 2 + 1 >= MAX_ENTITIES * 3) {
 				break;
+			}
+			if (!OceanRenderer.drawable(r)) {
+				continue;
 			}
 			OceanZone z = r.ocean;
 			putFloats(b, o + 576 + zones * 32, z.x0 - bx, z.floorY - by, z.z0 - bz, 0.0F);

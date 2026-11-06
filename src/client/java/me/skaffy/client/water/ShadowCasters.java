@@ -33,6 +33,7 @@ final class ShadowCasters {
 	static final int LEAF_FLOATS = 7;
 	private static final float TAU = (float) (Math.PI * 2.0);
 	private static final Identifier SAND = Identifier.withDefaultNamespace("textures/block/sand.png");
+	private static final Identifier SNOW = Identifier.withDefaultNamespace("textures/block/snow.png");
 	private static final Identifier SLIME = Identifier.withDefaultNamespace("textures/block/slime_block.png");
 	private static final Identifier[] LEAF = {
 		RealisticWater.id("textures/leaf/leaf_1.png"), RealisticWater.id("textures/leaf/leaf_2.png"),
@@ -47,7 +48,7 @@ final class ShadowCasters {
 	}
 
 	static boolean casts(Material material) {
-		return material == Material.SAND || material == Material.SLIME || material == Material.LEAVES;
+		return material == Material.SAND || material == Material.SNOW || material == Material.SLIME || material == Material.LEAVES;
 	}
 
 	static Casters leaves(ByteBuffer m, int count, int ox, int oy, int oz, int res) {
@@ -201,7 +202,7 @@ final class ShadowCasters {
 			}
 			Casters casters = r.shadow;
 			if (casters instanceof Boxes boxes && boxes.count() > 0) {
-				RenderType type = RenderTypes.entitySolid(boxes.material() == Material.SLIME ? SLIME : SAND);
+				RenderType type = RenderTypes.entitySolid(boxes.material() == Material.SLIME ? SLIME : boxes.material() == Material.SNOW ? SNOW : SAND);
 				collector.submitCustomGeometry(pose, type, (p, buf) -> emitBoxes(p, buf, boxes, camera));
 			} else if (casters instanceof Leaves leaves) {
 				if (leaves.piles().count() > 0) {

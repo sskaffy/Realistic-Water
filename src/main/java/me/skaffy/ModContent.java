@@ -3,6 +3,7 @@ package me.skaffy;
 import me.skaffy.block.RealisticLavaBlock;
 import me.skaffy.block.RealisticLeavesBlock;
 import me.skaffy.block.RealisticSandBlock;
+import me.skaffy.block.RealisticSnowBlock;
 import me.skaffy.block.RealisticWaterBlock;
 import me.skaffy.block.WaveMakerBlock;
 import me.skaffy.fluid.RealisticLavaFluid;
@@ -168,6 +169,22 @@ public final class ModContent {
 	public static final ResourceKey<Item> REALISTIC_LEAVES_ITEM_KEY = ResourceKey.create(Registries.ITEM, RealisticWater.id("realistic_leaves"));
 	public static final Item REALISTIC_LEAVES_ITEM = registerBlockItem(REALISTIC_LEAVES_ITEM_KEY, REALISTIC_LEAVES);
 
+	public static final ResourceKey<Block> REALISTIC_SNOW_KEY = ResourceKey.create(Registries.BLOCK, RealisticWater.id("realistic_snow"));
+	public static final Block REALISTIC_SNOW = Registry.register(BuiltInRegistries.BLOCK, REALISTIC_SNOW_KEY, new RealisticSnowBlock(
+		BlockBehaviour.Properties.of()
+			.mapColor(MapColor.SNOW)
+			.strength(0.2F)
+			.sound(SoundType.SNOW)
+			.noOcclusion()
+			.pushReaction(PushReaction.POPPED)
+			.isSuffocating((state, level, pos) -> false)
+			.isViewBlocking((state, level, pos, box) -> false)
+			.setId(REALISTIC_SNOW_KEY)
+	));
+
+	public static final ResourceKey<Item> REALISTIC_SNOW_ITEM_KEY = ResourceKey.create(Registries.ITEM, RealisticWater.id("realistic_snow"));
+	public static final Item REALISTIC_SNOW_ITEM = registerBlockItem(REALISTIC_SNOW_ITEM_KEY, REALISTIC_SNOW);
+
 	public static final ResourceKey<Block> WAVE_MAKER_KEY = ResourceKey.create(Registries.BLOCK, RealisticWater.id("wave_maker"));
 	public static final Block WAVE_MAKER = Registry.register(BuiltInRegistries.BLOCK, WAVE_MAKER_KEY, new WaveMakerBlock(
 		BlockBehaviour.Properties.of()
@@ -255,6 +272,7 @@ public final class ModContent {
 			.register(output -> {
 				output.insertAfter(Items.SAND, REALISTIC_SAND_ITEM);
 				output.insertAfter(Items.OAK_LEAVES, REALISTIC_LEAVES_ITEM);
+				output.insertAfter(Items.SNOW_BLOCK, REALISTIC_SNOW_ITEM);
 			});
 	}
 }

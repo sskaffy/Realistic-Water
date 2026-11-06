@@ -358,9 +358,17 @@ public final class WaterSettingsInfo {
 		integer("slimeStrandedNeighbors", "Stranded neighbour count", Cost.LOW, "Fewer keeps more blobs alive.", 0, 64,
 			"Slime with fewer particles than this around it counts as stranded. Low so small blobs and strings survive.");
 		num("slimeOpacity", "Opacity", Cost.NONE, LOOK, 0, 1, 0.01,
-			"How solid slime looks where it is thin. 1 hides everything behind it; thick slime is always fully opaque.");
+			"How cloudy slime is. Higher lets less of what is behind it show through; thick slime is always close to opaque.");
 		num("slimeBrightness", "Brightness", Cost.NONE, LOOK, 0, 3, 0.01,
-			"Overall brightness of the slime texture.");
+			"Overall brightness of the slime.");
+		num("slimeGloss", "Shine", Cost.NONE, LOOK, 0, 20, 0.1,
+			"How bright the wet highlights on slime are.");
+		num("slimeRoughness", "Roughness", Cost.NONE, LOOK, 0.02, 0.7, 0.01,
+			"How blurry the highlights on slime are. Low is a sharp, freshly wet shine.");
+		num("slimeRefraction", "Refraction", Cost.NONE, LOOK, 0, 1, 0.01,
+			"How much slime bends what you see through it.");
+		num("slimeBubbles", "Bubbles", Cost.LOW, "Checks a few spots inside the slime per pixel.", 0, 1, 0.01,
+			"How visible the small air bubbles trapped inside slime are. 0 turns them off.");
 		num("slimeInsideOpacity", "Inside view", Cost.NONE, LOOK, 0, 1, 0.01,
 			"How much green covers the screen while your head is inside slime. 1 is completely blind.");
 		num("slimeFogDistance", "Inside fog distance", Cost.NONE, LOOK, 0.05, 8, 0.05,
@@ -413,6 +421,34 @@ public final class WaterSettingsInfo {
 			"Overall brightness of the sand.");
 		toggle("sandSounds", "Sand sounds", Cost.LOW, "Plays a few sounds per second near moving sand.",
 			"Sliding and impact sounds from moving sand.");
+
+		category("Snow");
+		num("snowFrictionAngle", "Friction angle", Cost.NONE, LOOK, 0, 70, 0.5,
+			"How steep snow can pile before it slides, in degrees. Snow holds much steeper slopes than sand.");
+		num("snowCohesion", "Stickiness", Cost.NONE, LOOK, 0, 0.5, 0.001,
+			"How much snow sticks to itself. Higher packs into firm clumps, 0 is loose powder.");
+		num("snowStiffness", "Stiffness", Cost.HIGH, "Snow shares sand's substeps, which follow whichever of the two is stiffer.", 1, 500, 0.5,
+			"How hard packed snow pushes back. Lower is softer and squishier.");
+		num("snowWallFriction", "Wall friction", Cost.NONE, LOOK, 0, 2, 0.01,
+			"How much snow grips the blocks it hits and slides along.");
+		num("snowImpactDamping", "Impact damping", Cost.NONE, LOOK, 0, 2, 0.01,
+			"Soaks up energy when snow hits something, so a snowball splats instead of bouncing.");
+		num("snowImpactCompression", "Impact packing", Cost.NONE, LOOK, 0, 0.9, 0.01,
+			"How much a hit packs snow down without springing back.");
+		num("snowGrainSize", "Grain size", Cost.LOW, "Bigger grains cover more pixels.", 0.002, 0.05, 0.001,
+			"Radius of one drawn snow grain, in blocks. Grain count, spread and resolution follow the sand settings.");
+		num("snowBrightness", "Brightness", Cost.NONE, LOOK, 0, 3, 0.01,
+			"Overall brightness of the snow.");
+		num("snowSparkle", "Sparkle", Cost.NONE, LOOK, 0, 3, 0.01,
+			"How much snow glints in sunlight.");
+		toggle("snowSounds", "Snow sounds", Cost.LOW, "Plays a few sounds per second near moving snow.",
+			"Crunching and impact sounds from moving snow.");
+		toggle("realisticSnowballs", "Realistic snowballs", Cost.LOW, "Each hit adds a small clump of snow to the simulation.",
+			"Thrown snowballs burst into realistic snow where they hit, which piles up and can be dug like Realistic Snow.");
+		num("snowballSize", "Snowball size", Cost.LOW, "Bigger snowballs add more snow particles.", 0.1, 2, 0.01,
+			"How wide the clump of snow from one snowball is, in blocks.");
+		num("snowballSpeed", "Snowball follow-through", Cost.NONE, LOOK, 0, 1.5, 0.01,
+			"How much of the snowball's speed the snow keeps when it bursts. Higher splats it further.");
 
 		category("Leaves");
 		integer("leafResolution", "Resolution", Cost.MEDIUM, "Cells per block for stacking; more cells means a finer pile shape but a bigger grid.", 2, 16,

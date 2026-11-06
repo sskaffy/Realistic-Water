@@ -1,0 +1,22 @@
+{
+  "type": "minecraft:block",
+  "pools": [
+    {
+      "condition": {
+        "type": "minecraft:match_block",
+        "blocks": "realistic-water:realistic_snow",
+        "state": {
+          "layers": "8"
+        }
+      },
+      "entries": [
+        {
+          "type": "minecraft:item",
+          "name": "realistic-water:realistic_snow"
+        }
+      ],
+      "rolls": 1
+    }
+  ],
+  "random_sequence": "realistic-water:blocks/realistic_snow"
+}

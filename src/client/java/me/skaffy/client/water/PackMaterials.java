@@ -21,6 +21,7 @@ final class PackMaterials {
 	}
 
 	private static final Identifier SAND = Identifier.withDefaultNamespace("textures/block/sand.png");
+	private static final Identifier SNOW = Identifier.withDefaultNamespace("textures/block/snow.png");
 	private static final Identifier SLIME = Identifier.withDefaultNamespace("textures/block/slime_block.png");
 	private static final Identifier[] LEAF = {
 		RealisticWater.id("textures/leaf/leaf_1.png"), RealisticWater.id("textures/leaf/leaf_2.png"),
@@ -140,7 +141,7 @@ final class PackMaterials {
 		if (mesh.quadCount() == 0) {
 			return;
 		}
-		Identifier texture = mesh.material() == Material.SLIME ? SLIME : SAND;
+		Identifier texture = mesh.material() == Material.SLIME ? SLIME : mesh.material() == Material.SNOW ? SNOW : SAND;
 		collector.submitCustomGeometry(pose, RenderTypes.entityCutout(texture), (p, buf) -> emitMesh(p, buf, mesh, camera, level, light));
 	}
 

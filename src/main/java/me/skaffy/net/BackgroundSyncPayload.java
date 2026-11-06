@@ -75,6 +75,7 @@ public record BackgroundSyncPayload(Identifier dimension, byte material, long[] 
 			case SyncMaterial.LAVA -> LavaSyncPayload.applyIn(level, null, this.positions, this.amounts);
 			case SyncMaterial.SLIME -> SlimeSyncPayload.applyIn(level, null, this.positions, this.amounts);
 			case SyncMaterial.LEAVES -> LeavesSyncPayload.applyIn(level, null, this.positions, this.amounts);
+			case SyncMaterial.SNOW -> SnowSyncPayload.applyIn(level, null, this.positions, this.amounts);
 			default -> WaterSyncPayload.applyIn(level, null, this.positions, this.amounts);
 		}
 	}
