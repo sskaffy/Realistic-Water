@@ -23,6 +23,7 @@ import me.skaffy.net.LeavesSyncPayload;
 import me.skaffy.net.RemoveAllWaterPayload;
 import me.skaffy.net.SandSyncPayload;
 import me.skaffy.net.SlimeSyncPayload;
+import me.skaffy.net.SnowSyncPayload;
 import me.skaffy.net.SyncMaterial;
 import me.skaffy.net.WaterSyncPayload;
 import me.skaffy.net.PortalTransitPayload;
@@ -59,6 +60,7 @@ public class RealisticWater implements ModInitializer {
 		PayloadTypeRegistry.serverboundPlay().register(LavaSyncPayload.TYPE, LavaSyncPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(SlimeSyncPayload.TYPE, SlimeSyncPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(LeavesSyncPayload.TYPE, LeavesSyncPayload.CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(SnowSyncPayload.TYPE, SnowSyncPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(RemoveAllWaterPayload.TYPE, RemoveAllWaterPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(FluidMixPayload.TYPE, FluidMixPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(VanillaFeedPayload.TYPE, VanillaFeedPayload.CODEC);
@@ -138,6 +140,11 @@ public class RealisticWater implements ModInitializer {
 			}
 		});
 		ServerPlayNetworking.registerGlobalReceiver(LeavesSyncPayload.TYPE, (payload, context) -> {
+			if (isAuthority(context.server(), context.player())) {
+				context.server().execute(() -> payload.apply(context.player()));
+			}
+		});
+		ServerPlayNetworking.registerGlobalReceiver(SnowSyncPayload.TYPE, (payload, context) -> {
 			if (isAuthority(context.server(), context.player())) {
 				context.server().execute(() -> payload.apply(context.player()));
 			}

@@ -271,38 +271,99 @@ vec3 slimeRgb(int argb) {
     return vec3((argb >> 16) & 0xFF, (argb >> 8) & 0xFF, argb & 0xFF) / 255.0;
 }
 
-vec3 slimeTexel(vec2 uv, float texelsPerBlock) {
-    ivec2 size = ivec2(slimeTex[0], slimeTex[1]);
-    ivec2 t = ivec2(floor(uv * texelsPerBlock));
-    t = ((t % size) + size) % size;
-    return slimeRgb(slimeTex[4 + t.x + t.y * size.x]);
-}
+const float SLIME_IOR = 1.35;
+const float BUBBLE_CELL = 0.25;
 
-vec3 slimeAlbedo(vec3 world, vec3 nWorld, float footprint) {
-    float tpb = float(slimeTex[0]);
-    vec3 w = pow(abs(nWorld), vec3(8.0));
-    w /= w.x + w.y + w.z;
-    vec3 c = w.y * slimeTexel(vec2(world.x, world.z), tpb)
-           + w.x * slimeTexel(vec2(world.z, -world.y), tpb)
-           + w.z * slimeTexel(vec2(world.x, -world.y), tpb);
-    float detail = 1.0 - smoothstep(0.5, 1.5, footprint * tpb);
-    return mix(slimeRgb(slimeTex[2]), c, detail);
+float slimeBubbles(vec3 origin, vec3 dir, float depth, float footprint) {
+    vec3 p = origin / BUBBLE_CELL;
+    ivec3 c = ivec3(floor(p));
+    vec3 stepDir = sign(dir);
+    vec3 inv = 1.0 / max(abs(dir), vec3(1e-5));
+    vec3 tMax = mix(vec3(1e9), (stepDir * (vec3(c) - p) + max(stepDir, vec3(0.0))) * inv, abs(stepDir));
+    float limit = depth / BUBBLE_CELL;
+    float px = footprint / BUBBLE_CELL;
+    float t = 0.0;
+    float sum = 0.0;
+    for (int k = 0; k < 16 && t < limit; k++) {
+        uint s = hash(uint(c.x) * 73856093u ^ uint(c.y) * 19349663u ^ uint(c.z) * 83492791u);
+        if (rand(s) < 0.2) {
+            vec3 center = vec3(c) + 0.2 + 0.6 * vec3(rand(s), rand(s), rand(s));
+            float r = mix(0.07, 0.2, rand(s) * rand(s));
+            vec3 oc = center - p;
+            float along = dot(oc, dir);
+            if (along > 0.0 && along < limit) {
+                float d = length(oc - dir * along) / r;
+                float edge = px / r;
+                float disk = 1.0 - smoothstep(1.0 - edge, 1.0 + edge, d);
+                float rim = disk * smoothstep(0.35, 0.95, d);
+                sum += (rim + disk * 0.12) * smoothstep(0.6, 2.0, 1.0 / max(edge, 1e-4)) * exp(-along * BUBBLE_CELL * 1.2);
+            }
+        }
+        if (tMax.x < tMax.y && tMax.x < tMax.z) {
+            t = tMax.x;
+            tMax.x += inv.x;
+            c.x += int(stepDir.x);
+        } else if (tMax.y < tMax.z) {
+            t = tMax.y;
+            tMax.y += inv.y;
+            c.y += int(stepDir.y);
+        } else {
+            t = tMax.z;
+            tMax.z += inv.z;
+            c.z += int(stepDir.z);
+        }
+    }
+    return min(sum, 1.0);
 }
 
 vec3 shadeSlime(vec2 uv, vec3 n, float fd, vec2 bs) {
     vec3 P = viewPosAt(uv, fd);
     vec3 V = normalize(-P);
     n = dot(n, V) < 0.0 ? -n : n;
+    float footprint = pixelFootprint(fd);
     vec3 nWorld = normalize(mat3(G.invView) * n);
-    vec3 world = G.misc.yzw + (G.invView * vec4(P, 1.0)).xyz - nWorld * 0.01;
-    vec3 albedo = slimeAlbedo(world, nWorld, pixelFootprint(fd));
+    vec3 world = G.misc.yzw + (G.invView * vec4(P, 1.0)).xyz;
+    vec3 tint = slimeRgb(slimeTex[2]);
+    vec3 lightColor = vanillaLight(bs) * G.matD.y;
+    float skyVisible = smoothstep(0.0, 0.7, bs.y);
+    float outdoors = smoothstep(0.5, 0.95, bs.y);
+
+    float thickness = max(thicknessAt(uv), 0.0);
+    vec2 offset = n.xy * G.waterA.z * clamp(thickness, 0.0, 2.0) / max(fd, 1.0);
+    vec2 ruv = clamp(uv + offset, vec2(0.0), vec2(1.0));
+    float depth = max(thicknessAt(ruv), 0.0);
+    if (linearDepth(texture(sceneDepth, ruv).r) < fd) {
+        ruv = uv;
+        depth = thickness;
+    }
+    float path = max(depth * G.waterA.y, 0.04 + 0.25 * G.matD.w);
+    vec3 sigma = -log(clamp(tint, vec3(0.02), vec3(0.98))) * mix(0.3, 6.0, G.matD.w);
+    vec3 T = exp(-sigma * path);
     vec3 n2 = nWorld * nWorld;
     float face = n2.x * 0.6 + n2.z * 0.8 + n2.y * (nWorld.y > 0.0 ? 1.0 : 0.5);
-    vec3 lit = min(albedo * face * vanillaLight(bs) * G.matD.y, vec3(1.0));
-    float path = max(thicknessAt(uv), 0.0) * G.waterA.y;
-    float opacity = mix(G.matD.w, 1.0, 1.0 - exp(-path * 3.0));
-    vec3 behind = behindAt(uv) * mix(vec3(1.0), albedo * 1.3, 0.75);
-    return mix(behind, lit, opacity);
+    vec3 body = pow(tint, vec3(1.0 + 0.8 * smoothstep(0.0, 2.0, path))) * mix(face, 1.0, 0.45) * lightColor;
+    vec3 color = behindAt(ruv) * T + body * (1.0 - dot(T, vec3(1.0 / 3.0)));
+
+    if (G.shadeB.w > 0.0) {
+        vec3 Vw = normalize(mat3(G.invView) * V);
+        vec3 into = refract(-Vw, nWorld, 1.0 / SLIME_IOR);
+        into = dot(into, into) > 0.5 ? normalize(into) : -Vw;
+        float bubbles = slimeBubbles(world, into, min(depth, 3.0), footprint);
+        color = mix(color, mix(tint, vec3(1.0), 0.6) * lightColor * 1.15, bubbles * clamp(G.shadeB.w, 0.0, 1.0));
+    }
+
+    vec3 L = normalize(G.sunDir.xyz);
+    float through = pow(clamp(dot(-V, L), 0.0, 1.0), 6.0) * (1.0 - exp(-path * 2.0)) * exp(-path * 0.6);
+    color += tint * through * G.sunDir.w * outdoors * 0.8;
+
+    vec3 Rv = reflect(-V, n);
+    vec3 Rw = (G.invView * vec4(Rv, 0.0)).xyz;
+    float hit;
+    vec3 ssr = traceReflection(P + n * 0.05, Rv, hit);
+    vec3 reflection = mix(skyColor(Rw) * mix(lightColor * 0.3, vec3(1.0), skyVisible), ssr, hit);
+    float F = 0.03 + 0.97 * pow(1.0 - clamp(dot(n, V), 0.0, 1.0), 5.0);
+    color = mix(color, reflection, F * 0.85);
+    return color + sunSpecular(n, V, footprint, 0.0) * outdoors;
 }
 
 float foamLace(vec2 p, float coverage, float footprint) {

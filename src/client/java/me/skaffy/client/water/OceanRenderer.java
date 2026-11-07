@@ -22,7 +22,7 @@ final class OceanRenderer implements AutoCloseable {
 				this.renderer.front.draw(cb, this.count * 6, 1);
 			}
 			for (WaterRegion r : this.zones) {
-				if (this.drawable(r)) {
+				if (drawable(r)) {
 					this.renderer.zoneFront.bind(cb, this.ubo, Desc.ssbo(r.seaHeights), Desc.ssbo(r.light()));
 					this.push(this.renderer.zoneFront, cb, r);
 					this.renderer.zoneFront.draw(cb, r.seaW * r.seaD * 6, 1);
@@ -36,16 +36,12 @@ final class OceanRenderer implements AutoCloseable {
 				this.renderer.thickness.draw(cb, this.count * 6, 1);
 			}
 			for (WaterRegion r : this.zones) {
-				if (this.drawable(r)) {
+				if (drawable(r)) {
 					this.renderer.zoneThickness.bind(cb, this.ubo, Desc.ssbo(r.seaHeights), Desc.ssbo(r.light()), sceneDepth);
 					this.push(this.renderer.zoneThickness, cb, r);
 					this.renderer.zoneThickness.draw(cb, r.seaW * r.seaD * 6, 1);
 				}
 			}
-		}
-
-		private boolean drawable(WaterRegion r) {
-			return r.ocean != null && r.seaHeights != null && r.seaW > 0 && r.light() != null && r.hasWindow;
 		}
 
 		private void push(GraphicsProgram program, VkCommandBuffer cb, WaterRegion r) {
@@ -56,6 +52,10 @@ final class OceanRenderer implements AutoCloseable {
 				r.ox - this.camX, r.oy - this.camY, r.oz - this.camZ, 0,
 				r.sx, r.sy, r.sz, 0);
 		}
+	}
+
+	static boolean drawable(WaterRegion r) {
+		return r.ocean != null && r.seaHeights != null && r.seaW > 0 && r.light() != null && r.hasWindow;
 	}
 
 	private final GraphicsProgram front;

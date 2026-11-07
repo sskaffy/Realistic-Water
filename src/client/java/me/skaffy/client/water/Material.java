@@ -8,11 +8,12 @@ public enum Material {
 	LAVA,
 	SLIME,
 	LEAVES,
-	STEAM;
+	STEAM,
+	SNOW;
 
 	float shaderId() {
 		return switch (this) {
-			case SAND -> 1.0F;
+			case SAND, SNOW -> 1.0F;
 			case LAVA -> 2.0F;
 			case SLIME -> 3.0F;
 			case LEAVES -> 4.0F;
@@ -22,7 +23,7 @@ public enum Material {
 	}
 
 	boolean isGranular() {
-		return this == SAND;
+		return this == SAND || this == SNOW;
 	}
 
 	boolean isFluidSim() {
@@ -46,7 +47,7 @@ public enum Material {
 	}
 
 	boolean usesLayers() {
-		return this == SAND || this == LEAVES;
+		return this == SAND || this == SNOW || this == LEAVES;
 	}
 
 	boolean usesWhitewater() {
@@ -59,6 +60,7 @@ public enum Material {
 			case LAVA -> SyncMaterial.LAVA;
 			case SLIME -> SyncMaterial.SLIME;
 			case LEAVES -> SyncMaterial.LEAVES;
+			case SNOW -> SyncMaterial.SNOW;
 			default -> SyncMaterial.WATER;
 		};
 	}
@@ -70,6 +72,7 @@ public enum Material {
 			case SLIME -> "slime";
 			case LEAVES -> "leaves";
 			case STEAM -> "steam";
+			case SNOW -> "snow";
 			default -> "water";
 		};
 	}

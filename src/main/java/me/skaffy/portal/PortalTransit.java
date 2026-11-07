@@ -9,6 +9,7 @@ import java.util.Map;
 import me.skaffy.ModContent;
 import me.skaffy.block.RealisticLeavesBlock;
 import me.skaffy.block.RealisticSandBlock;
+import me.skaffy.block.RealisticSnowBlock;
 import me.skaffy.block.RealisticWaterBlock;
 import me.skaffy.fluid.FluidMixing;
 import me.skaffy.fluid.RealisticLavaFluid;
@@ -17,6 +18,7 @@ import me.skaffy.fluid.RealisticWaterFluid;
 import me.skaffy.net.LavaSyncPayload;
 import me.skaffy.net.LeavesSyncPayload;
 import me.skaffy.net.SandSyncPayload;
+import me.skaffy.net.SnowSyncPayload;
 import me.skaffy.net.SlimeSyncPayload;
 import me.skaffy.net.SteamPayload;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
@@ -72,7 +74,7 @@ public final class PortalTransit {
 	}
 
 	public static void material(ServerLevel level, BlockPos portalPos, byte material, float eighths) {
-		if (material < SyncMaterial.WATER || material > SyncMaterial.LEAVES || !level.isLoaded(portalPos)
+		if (material < SyncMaterial.WATER || material > SyncMaterial.SNOW || !level.isLoaded(portalPos)
 			|| !(level.getBlockState(portalPos).getBlock() instanceof Portal portal)) {
 			return;
 		}
@@ -201,6 +203,7 @@ public final class PortalTransit {
 				&& !RealisticWaterBlock.isInfinite(state) ? state.getFluidState().getAmount() : -1;
 			case SyncMaterial.SAND -> block == ModContent.REALISTIC_SAND ? RealisticSandBlock.layers(state) : -1;
 			case SyncMaterial.LEAVES -> block == ModContent.REALISTIC_LEAVES ? RealisticLeavesBlock.layers(state) : -1;
+			case SyncMaterial.SNOW -> block == ModContent.REALISTIC_SNOW ? RealisticSnowBlock.layers(state) : -1;
 			default -> -1;
 		};
 	}
@@ -211,6 +214,7 @@ public final class PortalTransit {
 			case SyncMaterial.SLIME -> SlimeSyncPayload.stateFor(eighths);
 			case SyncMaterial.SAND -> SandSyncPayload.stateFor(eighths);
 			case SyncMaterial.LEAVES -> LeavesSyncPayload.stateFor(eighths);
+			case SyncMaterial.SNOW -> SnowSyncPayload.stateFor(eighths);
 			default -> WaterSyncPayload.stateFor(eighths);
 		};
 	}

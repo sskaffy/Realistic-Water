@@ -133,6 +133,20 @@ public final class WaterSettings {
 	public static float sandBrightness = 1.1F;
 	public static boolean sandSounds = true;
 
+	public static float snowFrictionAngle = 40.0F;
+	public static float snowCohesion = 0.05F;
+	public static float snowStiffness = 40.0F;
+	public static float snowWallFriction = 1.2F;
+	public static float snowImpactDamping = 1.2F;
+	public static float snowImpactCompression = 0.4F;
+	public static float snowGrainSize = 0.008F;
+	public static float snowBrightness = 1.0F;
+	public static float snowSparkle = 0.6F;
+	public static boolean snowSounds = true;
+	public static boolean realisticSnowballs = true;
+	public static float snowballSize = 0.35F;
+	public static float snowballSpeed = 0.4F;
+
 	public static int leafResolution = 8;
 	public static int leavesPerBlock = 200;
 	public static int leafCellCapacity = 1;
@@ -215,6 +229,10 @@ public final class WaterSettings {
 	public static int slimeStrandedNeighbors = 4;
 	public static float slimeOpacity = 0.85F;
 	public static float slimeBrightness = 1.0F;
+	public static float slimeGloss = 4.0F;
+	public static float slimeRoughness = 0.1F;
+	public static float slimeRefraction = 0.1F;
+	public static float slimeBubbles = 0.6F;
 	public static float slimeSurfaceSmoothing = 0.85F;
 	public static float slimeInsideOpacity = 0.92F;
 	public static float slimeFogDistance = 0.5F;

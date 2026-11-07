@@ -3,6 +3,7 @@ package me.skaffy.client.water;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import java.util.List;
 import me.skaffy.block.RealisticSandBlock;
+import me.skaffy.block.RealisticSnowBlock;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
@@ -110,7 +111,7 @@ final class SolidCache {
 
 	private void voxelizeBlock(ClientLevel level, BlockPos pos, BlockState state, Section s, int i) {
 		s.partial[i] = null;
-		boolean skip = state.isAir() || (this.ignoreSand && state.getBlock() instanceof RealisticSandBlock);
+		boolean skip = state.isAir() || (this.ignoreSand && (state.getBlock() instanceof RealisticSandBlock || state.getBlock() instanceof RealisticSnowBlock));
 		VoxelShape shape = skip ? null : state.getCollisionShape(level, pos);
 		if (shape == null || shape.isEmpty()) {
 			s.kind[i] = EMPTY;
