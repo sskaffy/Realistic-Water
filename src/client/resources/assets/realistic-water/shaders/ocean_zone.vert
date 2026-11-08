@@ -2,7 +2,7 @@
 #include "common.glsl"
 #include "ocean.glsl"
 layout(std430, binding = 1) readonly buffer Heights { float heights[]; };
-layout(std430, binding = 2) readonly buffer RegionLight { uint regionLight[]; };
+layout(std430, binding = 2) readonly buffer Columns { uint columns[]; };
 layout(push_constant) uniform PC { ivec4 a; ivec4 b; ivec4 c; ivec4 d; } pc;
 layout(location = 0) out vec3 vView;
 layout(location = 1) out vec3 vRel;
@@ -14,14 +14,17 @@ layout(location = 5) out vec2 vSlopeDev;
 const int CORNER[6] = int[](0, 1, 2, 0, 2, 3);
 const ivec2 CORNER_OFF[4] = ivec2[](ivec2(0, 0), ivec2(0, 1), ivec2(1, 1), ivec2(1, 0));
 
-uint lightWord(ivec3 block) {
-    ivec3 l = clamp(block - pc.c.xyz, ivec3(0), pc.d.xyz - 1);
-    return regionLight[l.x + pc.d.x * (l.y + pc.d.y * l.z)];
+uint columnWord(ivec2 column) {
+    ivec2 l = clamp(column - pc.a.xy + 1, ivec2(0), pc.c.xy - 1);
+    return columns[l.x + pc.c.x * l.y];
+}
+
+bool columnDrawn(ivec2 column) {
+    return (columnWord(column) & 32u) != 0u;
 }
 
 float columnAmp(ivec2 column) {
-    uint v = lightWord(ivec3(column.x, pc.b.y, column.y));
-    return (v & 0x20000000u) != 0u ? float((v >> 24) & 31u) / 31.0 * OCEAN_AMP_MAX : 0.0;
+    return float(columnWord(column) & 31u) / 31.0 * OCEAN_AMP_MAX;
 }
 
 float cornerAmp(ivec2 corner) {
@@ -57,7 +60,7 @@ float simAt(ivec2 g) {
     for (int k = 0; k < 4; k++) {
         ivec2 col = clamp(g - 1 + ivec2(k & 1, k >> 1), ivec2(0), pc.a.zw - 1);
         float h = heights[col.x + pc.a.z * col.y];
-        if (h > -1000.0) {
+        if (h > -1000.0 && columnDrawn(pc.a.xy + col / pc.b.x)) {
             sum += h;
             n += 1.0;
         }
@@ -78,8 +81,19 @@ float heightAt(ivec2 g, out float calm) {
 
 void main() {
     int quad = gl_VertexIndex / 6;
-    ivec2 g = ivec2(quad % pc.a.z, quad / pc.a.z) + CORNER_OFF[CORNER[gl_VertexIndex % 6]];
+    ivec2 cell = ivec2(quad % pc.a.z, quad / pc.a.z);
+    ivec2 g = cell + CORNER_OFF[CORNER[gl_VertexIndex % 6]];
     float res = float(pc.b.x);
+    vSideNormal = vec3(0.0);
+    vSlopeDev = vec2(0.0);
+    if (!columnDrawn(pc.a.xy + cell / pc.b.x)) {
+        vView = vec3(0.0);
+        vRel = vec3(0.0);
+        vAmp = 0.0;
+        vLight = vec2(0.0);
+        gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+        return;
+    }
     float calm;
     float h = heightAt(g, calm);
     vec2 p = vec2(pc.a.xy) + vec2(g) / res;
@@ -94,9 +108,8 @@ void main() {
     float cz = (c3 - c2) / (float(gz1.y - gz0.y) / res);
     vSlopeDev = vec2(hx - cx, hz - cz);
     vAmp = ampAt(p);
-    uint word = lightWord(ivec3(floor(p.x), pc.b.y + 1, floor(p.y)));
+    uint word = columnWord(pc.a.xy + cell / pc.b.x) >> 8;
     vLight = vec2(float(word & 15u), float((word >> 4) & 15u)) / 15.0;
-    vSideNormal = vec3(0.0);
     vec3 rel = vec3(p.x, float(pc.b.y) + h, p.y);
     vRel = rel;
     vec4 view = G.view * vec4(G.domainOrigin.xyz + rel, 1.0);

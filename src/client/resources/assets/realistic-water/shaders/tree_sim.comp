@@ -1,0 +1,150 @@
+#version 450
+#include "common.glsl"
+#define TREE_PARAMS_BINDING 1
+#define TREE_BLOCKS_BINDING 2
+#define TREE_MODS_BINDING 8
+#include "tree_common.glsl"
+layout(local_size_x = 64) in;
+layout(std430, binding = 3) buffer Table { uint table[]; };
+layout(std430, binding = 4) buffer State { vec4 state[]; };
+layout(std430, binding = 5) buffer Motion { TreeMotion motion[]; };
+layout(std430, binding = 6) buffer Impulse { ivec4 impulse[]; };
+layout(std430, binding = 7) readonly buffer Events { uvec4 eventCount; vec4 events[]; };
+layout(push_constant) uniform PC { int pass; } pc;
+
+#define EMPTY 0xFFFFFFFFu
+#define IMPULSE_SCALE 4096.0
+
+uint treeKey(ivec3 p) {
+    return uint(p.x & 2047) | (uint(p.z & 2047) << 11) | (uint(p.y & 1023) << 22);
+}
+
+int lookup(ivec3 p) {
+    uint key = treeKey(p);
+    uint mask = uint(T.sim.x);
+    uint h = hash(key) & mask;
+    for (int probe = 0; probe < 64; probe++) {
+        uint k = table[h * 2u];
+        if (k == key) {
+            return int(table[h * 2u + 1u]);
+        }
+        if (k == EMPTY) {
+            return -1;
+        }
+        h = (h + 1u) & mask;
+    }
+    return -1;
+}
+
+vec3 windAt(vec3 world, float t) {
+    float strength = T.wind.z;
+    if (strength <= 0.0) {
+        return vec3(0.0);
+    }
+    vec2 dir = T.wind.xy;
+    vec2 q = world.xz * 0.11 - dir * t * 0.7;
+    float gust = treeNoise(vec3(q, world.y * 0.05)) * 0.65 + treeNoise(vec3(q * 2.9 + 13.0, t * 0.2)) * 0.35;
+    float sway = sin(t * 1.3 + world.x * 0.21 + world.z * 0.17) * 0.25;
+    vec2 side = vec2(-dir.y, dir.x);
+    vec2 a = dir * (0.2 + 1.3 * gust * gust) + side * sway * 0.4;
+    return vec3(a.x, 0.0, a.y) * strength * 2.0;
+}
+
+void main() {
+    uint i = GID_U;
+    if (pc.pass == 1) {
+        if (i >= uint(T.cam.w) || !treeActive(tblocks[i])) {
+            return;
+        }
+        uint key = treeKey(tblocks[i].pos.xyz);
+        uint mask = uint(T.sim.x);
+        uint h = hash(key) & mask;
+        for (int probe = 0; probe < 64; probe++) {
+            uint prev = atomicCompSwap(table[h * 2u], EMPTY, key);
+            if (prev == EMPTY || prev == key) {
+                table[h * 2u + 1u] = i;
+                return;
+            }
+            h = (h + 1u) & mask;
+        }
+        return;
+    }
+    if (pc.pass == 2) {
+        if (i >= min(eventCount.x, uint(T.sim.y))) {
+            return;
+        }
+        vec4 e = events[i];
+        if (abs(e.w - 3.0) > 0.5) {
+            return;
+        }
+        vec3 rel = e.xyz + T.rain.xyz;
+        ivec3 block = T.cam.xyz + ivec3(floor(rel));
+        int slot = lookup(block);
+        if (slot < 0) {
+            return;
+        }
+        vec3 local = rel - vec3(block - T.cam.xyz);
+        uint k = uint(atomicAdd(motion[slot].link.y, 1)) & 3u;
+        motion[slot].hits[k] = vec4(local, T.timing.x);
+        atomicAdd(impulse[slot].y, -int(0.3 * T.rain.w * IMPULSE_SCALE));
+        return;
+    }
+    if (i >= uint(T.cam.w)) {
+        return;
+    }
+    TreeBlock b = tblocks[i];
+    if (!treeActive(b)) {
+        return;
+    }
+    if (pc.pass == 3) {
+        uint gen = treeGen(b) + 1u;
+        vec4 x = state[i * 2u];
+        vec4 v = state[i * 2u + 1u];
+        if (floatBitsToUint(x.w) != gen) {
+            x = vec4(0.0, 0.0, 0.0, uintBitsToFloat(gen));
+            v = vec4(0.0);
+            motion[i].link = ivec4(-1, 0, int(gen), 0);
+            for (int h = 0; h < 4; h++) {
+                motion[i].hits[h] = vec4(0.0, 0.0, 0.0, -1.0e4);
+            }
+        }
+        int parent = treeParent(b);
+        int pslot = -1;
+        if (parent != TREE_NO_PARENT && !treeParentLog(b)) {
+            pslot = lookup(b.pos.xyz + treeNeighbour(parent));
+            pslot = pslot == int(i) ? -1 : pslot;
+        }
+        motion[i].link.x = pslot;
+
+        float dt = T.timing.y;
+        float carried = float(max(b.info.y & 0xFFFFu, 1u));
+        int open = treeOpen(b);
+        float exposure = open == 0 ? 0.25 : 0.45 + 0.55 * min(float(bitCount(open)), 3.0) / 3.0;
+        vec3 world = vec3(b.pos.xyz) + treeNode(b.pos.xyz);
+        vec3 accel = windAt(world, T.timing.x) * exposure;
+        float k = 28.0 + 10.0 * carried;
+        motion[i].total.w = length(accel) / 2.0;
+        float damping = 2.0 * 0.3 * sqrt(k);
+        ivec4 kick = impulse[i];
+        impulse[i] = ivec4(0);
+        v.xyz += vec3(kick.xyz) / IMPULSE_SCALE / (1.0 + 0.2 * carried);
+        v.xyz = (v.xyz + dt * (accel - k * x.xyz)) / (1.0 + dt * damping + dt * dt * k);
+        x.xyz += dt * v.xyz;
+        float len = length(x.xyz);
+        if (len > 0.35) {
+            x.xyz *= 0.35 / len;
+        }
+        state[i * 2u] = x;
+        state[i * 2u + 1u] = v;
+        return;
+    }
+    if (pc.pass == 4) {
+        vec3 d = state[i * 2u].xyz;
+        int p = motion[i].link.x;
+        for (int depth = 0; depth < 12 && p >= 0; depth++) {
+            d += state[uint(p) * 2u].xyz;
+            p = motion[p].link.x;
+        }
+        motion[i].total.xyz = d;
+    }
+}

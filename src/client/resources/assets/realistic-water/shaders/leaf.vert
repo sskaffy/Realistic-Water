@@ -3,6 +3,7 @@
 #include "leaf.glsl"
 layout(std430, binding = 1) readonly buffer Parts { Particle parts[]; };
 layout(std430, binding = 5) readonly buffer Static { uint staticSolid[]; };
+layout(std430, binding = 8) readonly buffer LeafLooks { ivec4 leafLooks[12]; };
 #define REGION_LIGHT_BINDING 3
 #include "region_light.glsl"
 #define PACK_SHADOW_BINDING 6
@@ -14,6 +15,7 @@ layout(location = 2) flat out uint vVariant;
 layout(location = 3) flat out vec3 vNormal;
 layout(location = 4) flat out float vBurn;
 layout(location = 5) flat out float vSun;
+layout(location = 6) flat out uint vSeed;
 
 const vec2 CORNERS[6] = vec2[](vec2(-1, -1), vec2(1, -1), vec2(1, 1), vec2(-1, -1), vec2(1, 1), vec2(-1, 1));
 
@@ -61,7 +63,14 @@ void main() {
 
     vec2 c = CORNERS[gl_VertexIndex % 6];
     float size = G.matD.z * (0.85 + 0.3 * h4) * (1.0 - 0.6 * burn);
-    vec3 offset = R * vec3(c.x * 0.5 * size, 0.0, c.y * 0.5 * size);
+    uint kind = leafKind(bits);
+    if (kind >= 4u && leafLooks[min(kind - 4u, 11u)].w > 0) {
+        uint hh = hash(((bits >> 2) & 63u) * 2654435761u ^ kind);
+        uint hh2 = hash(hh ^ 0x68E31DA4u);
+        size = float(leafLooks[min(kind - 4u, 11u)].w) / 1000.0 * mix(0.8, 1.2, float((hh2 >> 16) & 255u) / 255.0) * (1.0 - 0.6 * burn);
+    }
+    float width = kind >= 4u && leafLooks[min(kind - 4u, 11u)].z < 0 ? float(-leafLooks[min(kind - 4u, 11u)].z) / 1000.0 : 1.0;
+    vec3 offset = R * vec3(c.x * 0.5 * size * width, 0.0, c.y * 0.5 * size);
     vec3 normal = R * vec3(0.0, 1.0, 0.0);
 
     vec3 sim = p.pos.xyz;
@@ -77,7 +86,8 @@ void main() {
     gl_Position = G.proj * vec4(view, 1.0);
     vUV = c * 0.5 + 0.5;
     vView = view;
-    vVariant = bits & 3u;
+    vVariant = leafKind(bits);
+    vSeed = (bits >> 2) & 63u;
     vNormal = normal;
     vBurn = burn;
     vSun = sunShadowFactor(sim);

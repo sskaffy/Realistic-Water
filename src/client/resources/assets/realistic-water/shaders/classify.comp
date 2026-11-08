@@ -4,6 +4,12 @@ layout(local_size_x = 256) in;
 layout(std430, binding = 1) readonly buffer Static { uint staticSolid[]; };
 layout(std430, binding = 2) readonly buffer Count { int cellCount[]; };
 layout(std430, binding = 3) writeonly buffer Flags { uint cellFlags[]; };
+layout(std430, binding = 4) readonly buffer Heat { int cellHeat[]; };
+
+bool iceCell(int i) {
+    int n = cellCount[i];
+    return n > 0 && heatOn() && G.freezeA.z > 0.0 && float(cellHeat[i]) <= -latentFreeze() * HEAT_FP * float(n);
+}
 
 void main() {
     int bt = int(GID_U);
@@ -19,6 +25,8 @@ void main() {
         int e = entityAt(vec3(c) + 0.5);
         if (e >= 0) {
             t = CELL_SOLID | (uint(e + 1) << 8);
+        } else if (iceCell(i)) {
+            t = CELL_SOLID;
         } else {
             t = cellCount[i] >= max(int(G.matA.w), 1) ? CELL_FLUID : CELL_AIR;
         }

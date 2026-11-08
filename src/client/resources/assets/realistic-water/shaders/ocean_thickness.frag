@@ -18,14 +18,9 @@ float linearDepth(float device) {
     return -v.z / v.w;
 }
 
-bool insideZone(vec3 p) {
-    for (int z = 0; z < G.caps.z; z++) {
-        if (all(greaterThanEqual(p, G.ent[z * 2].xyz)) && all(lessThan(p, G.ent[z * 2 + 1].xyz))) {
-            return true;
-        }
-    }
-    return false;
-}
+#ifndef ZONE
+layout(location = 6) in float vUnderZone;
+#endif
 
 void main() {
     float dist = -vView.z;
@@ -34,7 +29,7 @@ void main() {
         discard;
     }
 #else
-    if (dist < G.surf.z || insideZone(vRel)) {
+    if (dist < G.surf.z || vUnderZone > 0.5) {
         discard;
     }
 #endif

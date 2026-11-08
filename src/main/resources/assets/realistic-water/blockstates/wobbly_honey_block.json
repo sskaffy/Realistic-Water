@@ -1,0 +1,10 @@
+{
+  "variants": {
+    "hanging=false": {
+      "model": "realistic-water:block/wobbly_honey_block"
+    },
+    "hanging=true": {
+      "model": "realistic-water:block/wobbly_honey_block"
+    }
+  }
+}

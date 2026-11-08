@@ -149,6 +149,7 @@ void main() {
     uint groupTotal = subgroupAdd(1u);
     uint prefix = subgroupExclusiveAdd(1u);
     float groupMax = subgroupMax(length(v));
+    REPORT_DIR_SPEED(v)
     uint groupAwake = subgroupAdd(asleep ? 0u : 1u);
     uint base = 0u;
     if (subgroupElect()) {

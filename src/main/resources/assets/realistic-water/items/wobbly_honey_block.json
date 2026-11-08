@@ -1,0 +1,18 @@
+{
+  "model": {
+    "type": "minecraft:condition",
+    "property": "realistic-water:drawn_as_gel",
+    "on_true": {
+      "type": "minecraft:special",
+      "base": "realistic-water:block/wobbly_honey_block",
+      "model": {
+        "type": "realistic-water:wobbly_gel",
+        "kind": "honey"
+      }
+    },
+    "on_false": {
+      "type": "minecraft:model",
+      "model": "realistic-water:block/wobbly_honey_block"
+    }
+  }
+}

@@ -1,0 +1,31 @@
+#version 450
+#include "common.glsl"
+
+layout(local_size_x = 256) in;
+layout(std430, binding = 1) readonly buffer Parts { Particle parts[]; };
+layout(std430, binding = 2) readonly buffer Counters { uint counters[]; };
+layout(std430, binding = 3) buffer Flow { int flow[]; };
+layout(push_constant) uniform PC { ivec4 a; ivec4 origin; } pc;
+
+#define FLOW_MASK 262143u
+#define FLOW_CELL 4.0
+#define FLOW_FP 256.0
+
+void main() {
+    uint i = GID_U;
+    if (i >= counters[pc.a.x]) {
+        return;
+    }
+    Particle p = parts[i];
+    if (p.pos.w < 0.0) {
+        return;
+    }
+    float res = float(pc.a.y);
+    ivec3 c = ivec3(floor(p.pos.xyz / res * FLOW_CELL)) + pc.origin.xyz * int(FLOW_CELL);
+    uint h = (hash(uint(c.x) * 73856093u ^ uint(c.y) * 19349663u ^ uint(c.z) * 83492791u) & FLOW_MASK) * 4u;
+    vec3 v = clamp(p.vel.xyz / res, vec3(-30.0), vec3(30.0));
+    atomicAdd(flow[h], int(round(v.x * FLOW_FP)));
+    atomicAdd(flow[h + 1u], int(round(v.y * FLOW_FP)));
+    atomicAdd(flow[h + 2u], int(round(v.z * FLOW_FP)));
+    atomicAdd(flow[h + 3u], 1);
+}

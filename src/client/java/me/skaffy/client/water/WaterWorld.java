@@ -27,8 +27,11 @@ import me.skaffy.client.vk.Desc;
 import me.skaffy.client.vk.Vk;
 import me.skaffy.client.vk.VkBuf;
 import me.skaffy.client.vk.VkTex;
+import me.skaffy.client.grass.GrassRenderer;
+import me.skaffy.client.grass.RealisticGrass;
 import me.skaffy.block.RealisticWaterBlock;
 import me.skaffy.block.WaveMakerBlock;
+import me.skaffy.block.WaterDrainBlock;
 import me.skaffy.fluid.RealisticLavaFluid;
 import me.skaffy.fluid.RealisticSlimeFluid;
 import me.skaffy.fluid.RealisticWaterFluid;
@@ -37,7 +40,9 @@ import me.skaffy.net.FlowPayload;
 import me.skaffy.net.FluidMixPayload;
 import me.skaffy.net.VanillaFeedPayload;
 import me.skaffy.physics.RigidBody;
+import me.skaffy.realistic.BoatHull;
 import me.skaffy.realistic.RealisticBlockEntity;
+import me.skaffy.realistic.RealisticBoatEntity;
 import me.skaffy.realistic.RealisticPhysics;
 import me.skaffy.net.LavaSyncPayload;
 import me.skaffy.net.LeavesSyncPayload;
@@ -92,6 +97,12 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix3f;
 import org.joml.Matrix4f;
 import org.joml.Quaternionf;
+import net.minecraft.world.entity.vehicle.boat.Boat;
+import net.minecraft.world.entity.vehicle.boat.ChestBoat;
+import net.minecraft.world.entity.vehicle.minecart.Minecart;
+import net.minecraft.world.entity.vehicle.minecart.NewMinecartBehavior;
+import net.minecraft.world.level.EmptyBlockGetter;
+import net.minecraft.world.phys.shapes.VoxelShape;
 import org.joml.Vector3d;
 import org.joml.Vector3f;
 import org.joml.Vector4f;
@@ -102,7 +113,8 @@ import org.lwjgl.vulkan.VkCommandBuffer;
 public final class WaterWorld {
 	private static final WaterWorld INSTANCE = new WaterWorld();
 	static final int UBO_SLOT = 8192;
-	static final int UBO_SIZE = 4400;
+	static final int UBO_SIZE = 4448;
+	static final float LATENT_FREEZE = 79.8F;
 	static final float PARTICLES_PER_CELL = 8.0F;
 	static final float SAND_POISSON = 0.3F;
 
@@ -114,7 +126,10 @@ public final class WaterWorld {
 	static final int MAX_ENTITIES = 32;
 	static final int MAX_SOURCES = 64;
 	static final int MAX_REGIONS = 16;
-	static final int SLOTS_PER_FRAME = MAX_REGIONS + 1;
+	static final int SLOTS_PER_FRAME = MAX_REGIONS + 4;
+	static final int JELLY_SLOT = MAX_REGIONS + 2;
+	static final int HAND_SLOT = MAX_REGIONS + 3;
+	static final int GRASS_SLOT = MAX_REGIONS + 1;
 	private static final int JOIN_DISTANCE = 16;
 	private static final int SYNC_INTERVAL = 30;
 	private static final int MIX_INTERVAL = 2;
@@ -179,6 +194,9 @@ public final class WaterWorld {
 	private final Long2IntOpenHashMap recentMixes = new Long2IntOpenHashMap();
 	private final Map<Integer, double[]> bodyFlows = new HashMap<>();
 	private final LongOpenHashSet waveMakers = new LongOpenHashSet();
+	private final LongOpenHashSet waterDrains = new LongOpenHashSet();
+	private int freezeForceFrames;
+	private float freezeForceValue;
 	private final LongOpenHashSet portalBlocks = new LongOpenHashSet();
 	private final LongOpenHashSet vanillaFeeds = new LongOpenHashSet();
 	private final Map<Integer, SolidCache> solidCaches = new HashMap<>();
@@ -189,6 +207,16 @@ public final class WaterWorld {
 	private boolean seaDrawsFog;
 	private @Nullable WaterRenderer renderer;
 	private @Nullable SandRenderer sandRenderer;
+	private @Nullable IceCrystalRenderer crystalRenderer;
+	private @Nullable GrassRenderer grassRenderer;
+	private @Nullable GrassFlow grassFlow;
+	private final List<WaterRenderer.Body> lateGrassWater = new ArrayList<>();
+	private @Nullable Desc lateGrassUbo;
+	private float lateGrassDt;
+	private @Nullable Desc lateJellyUbo;
+	private @Nullable Desc lateIceUbo;
+	private me.skaffy.client.trees.@Nullable TreeRenderer treeRenderer;
+	private @Nullable Desc lateTreeUbo;
 	private @Nullable LeafRenderer leafRenderer;
 	private @Nullable VkBuf uboRing;
 	private @Nullable VkBuf frameView;
@@ -257,6 +285,9 @@ public final class WaterWorld {
 	}
 
 	private static int waterAmount(BlockState state) {
+		if (RealisticWaterBlock.isFrozen(state)) {
+			return RealisticWaterBlock.eighths(state);
+		}
 		FluidState fluid = state.getFluidState();
 		return RealisticWaterFluid.isRealistic(fluid) && !RealisticWaterBlock.isOcean(state) ? fluid.getAmount() : 0;
 	}
@@ -319,12 +350,14 @@ public final class WaterWorld {
 		}
 		boolean granular = r.material.isGranular();
 		int res = r.res;
-		return r.background.solids.computeIfAbsent(res * 2 + (granular ? 1 : 0), k -> new SolidCache(res, granular));
+		boolean water = r.material == Material.WATER;
+		return r.background.solids.computeIfAbsent(res * 4 + (granular ? 1 : 0) + (water ? 2 : 0), k -> new SolidCache(res, granular, water));
 	}
 
 	private SolidCache solids(Material material, int res) {
 		boolean granular = material.isGranular();
-		return this.solidCaches.computeIfAbsent(res * 2 + (granular ? 1 : 0), k -> new SolidCache(res, granular));
+		boolean water = material == Material.WATER;
+		return this.solidCaches.computeIfAbsent(res * 4 + (granular ? 1 : 0) + (water ? 2 : 0), k -> new SolidCache(res, granular, water));
 	}
 
 	static int resolutionFor(Material material) {
@@ -458,12 +491,68 @@ public final class WaterWorld {
 		this.addMaterial(pos, y0, y1, Material.LEAVES);
 	}
 
+	public static boolean isHostClient() {
+		return isHost();
+	}
+
+	public void spawnLeaf(double x, double y, double z, float vx, float vy, float vz, int kind) {
+		if (!this.vulkanReady()) {
+			return;
+		}
+		WaterRegion r = this.regionFor(BlockPos.containing(x, y, z), Material.LEAVES);
+		r.addEmitter(new WaterRegion.Emitter(x - 0.01, y - 0.01, z - 0.01, x + 0.01, y + 0.01, z + 0.01, vx, vy, vz, kind));
+		r.wake(this.frameCounter);
+	}
+
+	public boolean leavesSimulated(BlockPos pos) {
+		for (WaterRegion r : this.regions) {
+			if (r.material.isLeaves() && r.background == null && r.windowContains(pos, 0)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	public boolean expireLeaves(BlockPos pos, int kind, int count) {
+		for (WaterRegion r : this.regions) {
+			if (r.material.isLeaves() && r.background == null && r.windowContains(pos, 0)) {
+				r.expireRequests.add(new int[]{pos.getX(), pos.getY(), pos.getZ(), kind, count});
+				r.wake(this.frameCounter);
+				return true;
+			}
+		}
+		return false;
+	}
+
+	public record LeafTally(long frame, int[] window, List<int[]> leaves, boolean complete) {
+	}
+
+	public List<LeafTally> takeLeafTallies() {
+		List<LeafTally> out = new ArrayList<>();
+		for (WaterRegion r : this.regions) {
+			WaterRegion.Tally t = r.lastTally;
+			if (t != null) {
+				r.lastTally = null;
+				out.add(new LeafTally(t.frame(), t.window(), t.leaves(), t.complete()));
+			}
+		}
+		return out;
+	}
+
 	private void addMaterial(BlockPos pos, double y0, double y1, Material material) {
+		this.addMaterial(pos, y0, y1, material, 0.0F);
+	}
+
+	private void addIce(BlockPos pos, double y0, double y1) {
+		this.addMaterial(pos, y0, y1, Material.WATER, -LATENT_FREEZE - 6.0F);
+	}
+
+	private void addMaterial(BlockPos pos, double y0, double y1, Material material, float heat) {
 		if (y1 <= y0 || !this.vulkanReady()) {
 			return;
 		}
 		WaterRegion r = this.regionFor(pos, material);
-		r.addEmitter(new WaterRegion.Emitter(pos.getX(), pos.getY() + y0, pos.getZ(), pos.getX() + 1, pos.getY() + y1, pos.getZ() + 1, 0, 0, 0));
+		r.addEmitter(new WaterRegion.Emitter(pos.getX(), pos.getY() + y0, pos.getZ(), pos.getX() + 1, pos.getY() + y1, pos.getZ() + 1, 0, 0, 0, heat));
 		r.owned.add(pos.asLong());
 	}
 
@@ -684,6 +773,12 @@ public final class WaterWorld {
 
 
 	public void onBlockChanged(ClientLevel level, BlockPos pos, BlockState oldState, BlockState newState) {
+		if (oldState != newState) {
+			RealisticGrass.get().onBlockChanged(level, pos, oldState, newState);
+			me.skaffy.client.trees.RealisticTrees.get().onBlockChanged(level, pos, oldState, newState);
+			me.skaffy.client.jelly.JellyWorld.onBlockChanged(level, pos, newState);
+			me.skaffy.client.ice.IceWorld.onBlockChanged(level, pos, oldState, newState);
+		}
 		if (oldState == newState || !this.ownsEvent(level)) {
 			return;
 		}
@@ -702,6 +797,8 @@ public final class WaterWorld {
 		int waterAfter = waterAmount(newState);
 		if (waterBefore != waterAfter) {
 			if (this.waterEchoes.consume(key, waterAfter)) {
+			} else if (waterAfter > waterBefore && RealisticWaterBlock.isFrozen(newState)) {
+				this.addIce(pos.immutable(), waterBefore / 8.0, waterAfter >= 8 ? 1.0 : waterAfter / 8.0);
 			} else if (waterAfter > waterBefore) {
 				this.addWater(pos.immutable(), waterBefore / 8.0, waterAfter >= 8 ? 1.0 : waterAfter / 8.0);
 			} else {
@@ -754,6 +851,11 @@ public final class WaterWorld {
 			this.waveMakers.add(key);
 		} else if (oldState.getBlock() instanceof WaveMakerBlock) {
 			this.waveMakers.remove(key);
+		}
+		if (newState.is(ModContent.WATER_DRAIN)) {
+			this.waterDrains.add(key);
+		} else if (oldState.is(ModContent.WATER_DRAIN)) {
+			this.waterDrains.remove(key);
 		}
 		if (WaterRegion.thermalCode(oldState) != WaterRegion.thermalCode(newState)) {
 			for (WaterRegion r : this.regions) {
@@ -818,6 +920,10 @@ public final class WaterWorld {
 			return;
 		}
 		this.oceanSurfaces.chunkUnloaded(chunk.getPos().x(), chunk.getPos().z());
+		int drainChunkX = chunk.getPos().x();
+		int drainChunkZ = chunk.getPos().z();
+		this.waterDrains.removeIf((long key) -> SectionPos.blockToSectionCoord(BlockPos.getX(key)) == drainChunkX
+			&& SectionPos.blockToSectionCoord(BlockPos.getZ(key)) == drainChunkZ);
 		for (SolidCache cache : this.solidCaches.values()) {
 			cache.invalidateChunk(chunk.getPos().x(), chunk.getPos().z());
 		}
@@ -854,6 +960,7 @@ public final class WaterWorld {
 					|| state.getBlock() == ModContent.REALISTIC_SAND
 					|| state.getBlock() == ModContent.REALISTIC_LEAVES
 					|| state.getBlock() == ModContent.WAVE_MAKER
+					|| state.getBlock() == ModContent.WATER_DRAIN
 					|| state.getBlock() instanceof Portal)) {
 				continue;
 			}
@@ -873,6 +980,10 @@ public final class WaterWorld {
 					this.waveMakers.add(BlockPos.asLong((chunkPos.x() << 4) + (i & 15), baseY + ((i >> 4) & 15), (chunkPos.z() << 4) + (i >> 8)));
 					continue;
 				}
+				if (state.is(ModContent.WATER_DRAIN)) {
+					this.waterDrains.add(BlockPos.asLong((chunkPos.x() << 4) + (i & 15), baseY + ((i >> 4) & 15), (chunkPos.z() << 4) + (i >> 8)));
+					continue;
+				}
 				if (water == 0 && lava == 0 && slime == 0 && sand == 0 && leaves == 0) {
 					continue;
 				}
@@ -884,7 +995,11 @@ public final class WaterWorld {
 				}
 				long key = pos.asLong();
 				if (water > 0 && !this.owned(key, Material.WATER)) {
-					this.addWater(pos.immutable(), 0.0, water >= 8 ? 1.0 : water / 8.0);
+					if (RealisticWaterBlock.isFrozen(state)) {
+						this.addIce(pos.immutable(), 0.0, water >= 8 ? 1.0 : water / 8.0);
+					} else {
+						this.addWater(pos.immutable(), 0.0, water >= 8 ? 1.0 : water / 8.0);
+					}
 				}
 				if (lava > 0 && !this.owned(key, Material.LAVA)) {
 					this.addLava(pos.immutable(), 0.0, lava >= 8 ? 1.0 : lava / 8.0);
@@ -896,7 +1011,15 @@ public final class WaterWorld {
 					this.addSand(pos.immutable(), 0.0, sand / 8.0);
 				}
 				if (leaves > 0 && !this.owned(key, Material.LEAVES)) {
-					this.addLeaves(pos.immutable(), 0.0, leaves / 8.0);
+					int perBlock = Math.max(1, WaterSettings.leavesPerBlock);
+					int total = leaves * perBlock / 8;
+					BlockPos at = pos.immutable();
+					int tagged = me.skaffy.client.trees.FallenLeaves.get().restore(level, at, total);
+					if (tagged < total) {
+						this.addLeaves(at, 0.0, (total - tagged) / (double) perBlock);
+					} else if (tagged > 0) {
+						this.regionFor(at, Material.LEAVES).owned.add(key);
+					}
 				}
 			}
 		}
@@ -1087,6 +1210,9 @@ public final class WaterWorld {
 		return target;
 	}
 
+	private static final int FROZEN_SHARE = 124;
+	private static final int FROZEN_KEEP_SHARE = 110;
+
 	private void syncBlocks(ClientLevel level, WaterRegion r, WaterRegion.Fill f) {
 		Material material = r.material;
 		boolean sand = material.usesLayers();
@@ -1112,9 +1238,12 @@ public final class WaterWorld {
 						current = echoes.expected.get(key);
 					}
 					int target = sand ? targetLayers(f.fullness(i), f.blocksPerSecond(i), current) : targetAmount(f.fullness(i), current);
-					if (target != current) {
+					boolean wasFrozen = material == Material.WATER && RealisticWaterBlock.isFrozen(state);
+					boolean frozen = material == Material.WATER && target > 0 && WaterSettings.waterFreezing
+						&& f.iceShare(i) >= (wasFrozen ? FROZEN_KEEP_SHARE : FROZEN_SHARE);
+					if (target != current || frozen != wasFrozen && target > 0) {
 						positions.add(key);
-						amounts.add((byte) target);
+						amounts.add((byte) (target | (frozen ? WaterSyncPayload.FROZEN_BIT : 0)));
 						echoes.expect(key, target, this.frameCounter);
 					}
 					if (target > 0) {
@@ -1454,6 +1583,9 @@ public final class WaterWorld {
 
 
 	public void onExplosion(Vec3 center, float radius) {
+		if (Minecraft.getInstance().level != null) {
+			me.skaffy.client.jelly.JellyWorld.blast(Minecraft.getInstance().level, center, radius);
+		}
 		double reach = radius * Math.max(WaterSettings.tntBlastReach, 0.0F);
 		if (OceanMode.active() && radius > 0.0F) {
 			this.oceanSim.explosion(center, radius);
@@ -1525,7 +1657,10 @@ public final class WaterWorld {
 	public void renderFrame(@Nullable FrameTarget target) {
 		Minecraft mc = Minecraft.getInstance();
 		this.followLevel(mc.level);
-		if (this.regions.isEmpty() && this.background.isEmpty() && !OceanMode.active() || this.failed || mc.level == null || Vk.tryDevice() == null) {
+		if (this.regions.isEmpty() && this.background.isEmpty() && !OceanMode.active() && !RealisticGrass.get().wanted()
+			&& !me.skaffy.client.trees.RealisticTrees.get().wanted() && !me.skaffy.client.jelly.JellyWorld.wanted()
+			&& !me.skaffy.client.ice.IceWorld.wanted() || this.failed || mc.level == null
+			|| Vk.tryDevice() == null) {
 			this.lastFrameNanos = 0L;
 			this.blasts.clear();
 			this.oceanBlasts.clear();
@@ -1890,7 +2025,11 @@ public final class WaterWorld {
 		boolean surfaces = ownSea && this.oceanSurfaces.upload();
 		boolean drawOcean = target != null && (ocean && (ownSea ? surfaces || this.cameraUnderSea || !this.oceanSim.zones.isEmpty()
 			: surfaces || !this.oceanSim.zones.isEmpty()) || seaLook);
-		if (active.isEmpty() && !drawOcean || target == null) {
+		boolean grassNow = target != null && RealisticGrass.get().wanted();
+		boolean treesNow = target != null && me.skaffy.client.trees.RealisticTrees.get().wanted();
+		boolean jellyNow = target != null && me.skaffy.client.jelly.JellyWorld.wanted();
+		boolean iceNow = target != null && me.skaffy.client.ice.IceWorld.wanted();
+		if (active.isEmpty() && !drawOcean && !grassNow && !treesNow && !jellyNow && !iceNow || target == null) {
 			this.retire(level, merged, drained);
 			Vk.endFrame();
 			this.frameCounter++;
@@ -1901,6 +2040,9 @@ public final class WaterWorld {
 		}
 		if (this.sandRenderer == null) {
 			this.sandRenderer = new SandRenderer();
+		}
+		if (this.crystalRenderer == null) {
+			this.crystalRenderer = new IceCrystalRenderer();
 		}
 		if (this.leafRenderer == null) {
 			this.leafRenderer = new LeafRenderer();
@@ -1971,7 +2113,8 @@ public final class WaterWorld {
 			r.updateLight(lvl);
 			boolean sand = r.material.isGranular();
 			List<float[]> regionBlasts = bg != null ? List.of() : this.blastsFor(r);
-			if (bg == null && (entityNear(level, r) || !regionBlasts.isEmpty() || (windy && r.material.isLeaves()) || this.paddleNear(level, r))) {
+			if (bg == null && (entityNear(level, r) || !regionBlasts.isEmpty() || (windy && r.material.isLeaves()) || this.paddleNear(level, r)
+				|| (this.freezeForceFrames > 0 && r.material == Material.WATER))) {
 				r.wake(this.frameCounter);
 			}
 			boolean leaves = r.material.isLeaves();
@@ -1985,6 +2128,9 @@ public final class WaterWorld {
 			int interval = nearMixPartner(r, active) ? MIX_INTERVAL : SYNC_INTERVAL;
 			if (readFill && r.material.syncs() && r.ocean == null && r.initialized() && (this.frameCounter + r.id) % interval == 0) {
 				r.fillRequested = true;
+			}
+			if (leaves && bg == null && isHost() && r.initialized() && (this.frameCounter + r.id) % SYNC_INTERVAL == 0) {
+				r.tallyRequested = true;
 			}
 			r.foamRequested = r.ocean != null && bg == null && PackFoam.active() && WaterSettings.oceanWhitewater;
 			boolean packLeaves = packDraw && leaves && bg == null;
@@ -2035,18 +2181,80 @@ public final class WaterWorld {
 		this.lateSand.clear();
 		this.lateLeaves.clear();
 		this.lateSteam.clear();
+		this.lateGrassUbo = null;
+		this.lateTreeUbo = null;
+		Desc grassUbo = null;
+		Desc treeUbo = null;
+		if (grassNow || treesNow) {
+			int grassSlot = Vk.ringSlot() * SLOTS_PER_FRAME + GRASS_SLOT;
+			this.writeOceanGlobals(mc, level, grassSlot, width, height);
+			this.writePackShadow(grassSlot);
+			Desc cameraUbo = Desc.ubo(this.uboRing, (long) grassSlot * UBO_SLOT, UBO_SIZE);
+			if (grassNow) {
+				grassUbo = cameraUbo;
+				if (this.grassRenderer == null) {
+					this.grassRenderer = new GrassRenderer();
+					this.grassFlow = new GrassFlow();
+				}
+			}
+			if (treesNow) {
+				treeUbo = cameraUbo;
+				if (this.treeRenderer == null) {
+					this.treeRenderer = new me.skaffy.client.trees.TreeRenderer();
+				}
+			}
+		}
+		this.lateJellyUbo = null;
+		this.lateIceUbo = null;
+		Desc jellyUbo = null;
+		if (jellyNow || iceNow) {
+			int jellySlot = Vk.ringSlot() * SLOTS_PER_FRAME + JELLY_SLOT;
+			this.writeOceanGlobals(mc, level, jellySlot, width, height);
+			Desc cameraSlot = Desc.ubo(this.uboRing, (long) jellySlot * UBO_SLOT, UBO_SIZE);
+			jellyUbo = jellyNow ? cameraSlot : null;
+			if (iceNow) {
+				this.lateIceUbo = cameraSlot;
+				this.lateLightmap = lightmap;
+			}
+		}
 		if (target.layer()) {
+			this.lateJellyUbo = jellyUbo;
+			this.lateTreeUbo = treeUbo;
+			this.lateGrassUbo = grassUbo;
+			this.lateGrassDt = frameDt;
+			this.lateGrassWater.clear();
+			this.lateGrassWater.addAll(waterBodies);
 			this.lateSand.addAll(sandBodies);
 			this.lateLeaves.addAll(leafBodies);
 			this.lateSteam.addAll(steamBodies);
 			this.lateLightmap = lightmap;
 		} else {
+			if (treeUbo != null) {
+				this.treeRenderer.record(cb, treeUbo, width, height, colorFormat, target.colorView(), depthView, lightmap, packShadowView, frameDt,
+					this.rain != null && WaterSettings.realisticRain ? this.rain.leafHits(level) : null);
+				Vk.barrier(cb);
+			}
+			if (grassUbo != null) {
+				GrassFlow flow = this.grassFlow;
+				this.grassRenderer.record(cb, grassUbo, width, height, colorFormat, target.colorView(), depthImage, depthView, lightmap, packShadowView,
+					frameDt, buf -> flow.record(cb, buf, waterBodies));
+				Vk.barrier(cb);
+			}
 			if (!sandBodies.isEmpty()) {
 				this.sandRenderer.record(cb, sandBodies, width, height, colorFormat, target.colorView(), depthView, lightmap);
 				Vk.barrier(cb);
 			}
 			if (!leafBodies.isEmpty()) {
 				this.leafRenderer.record(cb, leafBodies, width, height, colorFormat, target.colorView(), depthView, lightmap);
+				Vk.barrier(cb);
+			}
+			if (!waterBodies.isEmpty() && IceCrystalRenderer.wanted()) {
+				this.crystalRenderer.record(cb, waterBodies, width, height, colorFormat, target.colorView(), depthView, lightmap);
+				Vk.barrier(cb);
+			}
+			if (jellyUbo != null) {
+				me.skaffy.client.jelly.JellyWorld.record(cb, jellyUbo, width, height, colorFormat, target.colorImage(), target.colorView(), depthImage,
+					depthView, lightmap);
 				Vk.barrier(cb);
 			}
 		}
@@ -2057,13 +2265,45 @@ public final class WaterWorld {
 			}
 			int slot = Vk.ringSlot() * SLOTS_PER_FRAME + MAX_REGIONS;
 			this.writeOceanGlobals(mc, level, slot, width, height);
+			List<WaterRegion> drawnZones = new ArrayList<>();
+			List<Desc> zoneColumns = new ArrayList<>();
+			if (ownSea) {
+				for (WaterRegion r : this.drawnZones()) {
+					drawnZones.add(r);
+					zoneColumns.add(r.writeSeaColumns(level, this.oceanSurfaces));
+				}
+			}
 			oceanDraw = new OceanRenderer.Draw(this.oceanRenderer, Desc.ubo(this.uboRing, (long) slot * UBO_SLOT, UBO_SIZE), this.oceanSurfaces.buffer(),
 				ownSea ? this.oceanSurfaces.count() : 0, ownSea && (this.cameraUnderSea || this.oceanSim.cameraInZone(cam)) || seaLook,
-				ownSea ? List.copyOf(this.oceanSim.zones) : List.of(), Mth.floor(cam.x), Mth.floor(cam.y), Mth.floor(cam.z), this.oceanSurfaces.colors());
+				drawnZones, zoneColumns, Mth.floor(cam.x), Mth.floor(cam.y), Mth.floor(cam.z), this.oceanSurfaces.colors());
 		}
 		if (!waterBodies.isEmpty() || oceanDraw != null) {
-			this.renderer.record(cb, waterBodies, oceanDraw, Desc.ssbo(this.frameView), target.colorImage(), target.colorView(), depthImage,
-				depthView, lightmap, target.layer(), oceanDraw != null ? null : fluidArea(mc, waterBodies, width, height));
+			List<List<WaterRenderer.Body>> layers = new ArrayList<>();
+			for (Material m : new Material[]{Material.LAVA, Material.SLIME, Material.WATER}) {
+				List<WaterRenderer.Body> group = waterBodies.stream().filter(bd -> bd.region().material == m).toList();
+				if (!group.isEmpty() || m == Material.WATER && oceanDraw != null) {
+					layers.add(group);
+				}
+			}
+			List<WaterRenderer.Body> other = waterBodies.stream()
+				.filter(bd -> bd.region().material != Material.LAVA && bd.region().material != Material.SLIME && bd.region().material != Material.WATER)
+				.toList();
+			if (!other.isEmpty()) {
+				layers.add(0, other);
+			}
+			for (int li = 0; li < layers.size(); li++) {
+				List<WaterRenderer.Body> group = layers.get(li);
+				boolean last = li == layers.size() - 1;
+				OceanRenderer.Draw sea = last ? oceanDraw : null;
+				if (group.isEmpty() && sea == null) {
+					continue;
+				}
+				this.renderer.record(cb, group, sea, Desc.ssbo(this.frameView), target.colorImage(), target.colorView(), depthImage,
+					depthView, lightmap, target.layer(), sea != null ? null : fluidArea(mc, group, width, height));
+				if (!last) {
+					Vk.barrier(cb);
+				}
+			}
 		}
 		Vk.barrier(cb);
 		if (!target.layer() && !steamBodies.isEmpty()) {
@@ -2076,6 +2316,25 @@ public final class WaterWorld {
 		this.retire(level, merged, drained);
 		Vk.endFrame();
 		this.frameCounter++;
+		if (this.freezeForceFrames > 0) {
+			this.freezeForceFrames--;
+		}
+	}
+
+	public String forcePhase(String phase) {
+		if (!WaterSettings.waterTemperature || !WaterSettings.waterFreezing) {
+			return "Turn on Water temperature and Freezing in the settings first";
+		}
+		switch (phase) {
+			case "water" -> this.freezeForceValue = 4.0F;
+			case "slush" -> this.freezeForceValue = -0.55F * LATENT_FREEZE;
+			case "ice" -> this.freezeForceValue = -LATENT_FREEZE - 6.0F;
+			default -> {
+				return "Use water, slush or ice";
+			}
+		}
+		this.freezeForceFrames = 3;
+		return "Turning the realistic water around you into " + phase;
 	}
 
 	private static int @Nullable [] fluidArea(Minecraft mc, List<WaterRenderer.Body> bodies, int width, int height) {
@@ -2126,10 +2385,19 @@ public final class WaterWorld {
 	public void beginLevel() {
 		this.lateSand.clear();
 		this.lateLeaves.clear();
+		this.lateGrassUbo = null;
+		this.lateTreeUbo = null;
+		this.lateJellyUbo = null;
+		this.lateIceUbo = null;
+	}
+
+	public boolean drawingFailed() {
+		return this.failed;
 	}
 
 	public boolean hasLate() {
-		return !this.lateSand.isEmpty() || !this.lateLeaves.isEmpty() || !this.lateSteam.isEmpty();
+		return !this.lateSand.isEmpty() || !this.lateLeaves.isEmpty() || !this.lateSteam.isEmpty() || this.lateGrassUbo != null || this.lateTreeUbo != null || this.lateJellyUbo != null
+			|| this.lateIceUbo != null;
 	}
 
 	public void renderLate(FrameTarget target) {
@@ -2141,6 +2409,24 @@ public final class WaterWorld {
 			VkCommandBuffer cb = Vk.encoder().allocateAndBeginTransientCommandBuffer();
 			Vk.beginRecording(cb);
 			Vk.barrier(cb);
+			if (this.lateJellyUbo != null) {
+				me.skaffy.client.jelly.JellyWorld.record(cb, this.lateJellyUbo, target.width(), target.height(), target.colorFormat(), target.colorImage(),
+					target.colorView(), target.depthImage(), target.depthView(), this.lateLightmap);
+				Vk.barrier(cb);
+			}
+			if (this.lateTreeUbo != null && this.treeRenderer != null) {
+				ClientLevel lvl = Minecraft.getInstance().level;
+				this.treeRenderer.record(cb, this.lateTreeUbo, target.width(), target.height(), target.colorFormat(), target.colorView(),
+					target.depthView(), this.lateLightmap, packShadowView, this.lateGrassDt,
+					this.rain != null && WaterSettings.realisticRain && lvl != null ? this.rain.leafHits(lvl) : null);
+				Vk.barrier(cb);
+			}
+			if (this.lateGrassUbo != null && this.grassRenderer != null) {
+				this.grassRenderer.record(cb, this.lateGrassUbo, target.width(), target.height(), target.colorFormat(), target.colorView(),
+					target.depthImage(), target.depthView(), this.lateLightmap, packShadowView, this.lateGrassDt,
+					buf -> this.grassFlow.record(cb, buf, this.lateGrassWater));
+				Vk.barrier(cb);
+			}
 			if (!this.lateSand.isEmpty()) {
 				this.sandRenderer.record(cb, this.lateSand, target.width(), target.height(), target.colorFormat(), target.colorView(),
 					target.depthView(), this.lateLightmap);
@@ -2154,6 +2440,11 @@ public final class WaterWorld {
 			if (!this.lateSteam.isEmpty()) {
 				this.steamRenderer.record(cb, this.lateSteam, target.width(), target.height(), target.colorFormat(), target.colorView(),
 					target.depthView(), this.lateLightmap);
+				Vk.barrier(cb);
+			}
+			if (this.lateIceUbo != null) {
+				me.skaffy.client.ice.IceWorld.record(cb, this.lateIceUbo, target.width(), target.height(), target.colorFormat(), target.colorImage(),
+					target.colorView(), target.depthImage(), target.depthView(), this.lateLightmap);
 				Vk.barrier(cb);
 			}
 			Vk.endRecording();
@@ -2319,6 +2610,16 @@ public final class WaterWorld {
 		float impactLogJ = (float) Math.log(Math.max(1.0F - WaterSettings.sandImpactCompression, 0.01F));
 		putFloats(b, o + 3904, WaterSettings.sandRestSpeed * res, WaterSettings.sandRestTime, WaterSettings.sandWakeAccel * WaterSettings.gravity * res * dt,
 			impactLogJ);
+		if (slime && !WaterSettings.slimeOldTexture) {
+			b.putFloat(o + 3884, 1.0F);
+			putFloats(b, o + 528, Math.max(WaterSettings.slimeGelAbsorbR, 0.0F), Math.max(WaterSettings.slimeGelAbsorbG, 0.0F),
+				Math.max(WaterSettings.slimeGelAbsorbB, 0.0F), 0.0F);
+			putFloats(b, o + 544, Math.max(WaterSettings.slimeGelScatterR, 0.0F), Math.max(WaterSettings.slimeGelScatterG, 0.0F),
+				Math.max(WaterSettings.slimeGelScatterB, 0.0F), Math.max(WaterSettings.slimeGelDensity, 0.0F));
+			b.putFloat(o + 520, Math.max(WaterSettings.slimeGelRefraction, 0.0F));
+			putFloats(b, o + 3904, Math.max(WaterSettings.slimeGelHaze, 0.0F), Math.max(WaterSettings.slimeGelGlow, 0.0F),
+				Math.max(WaterSettings.slimeGelBubbles, 0.0F), Math.max(WaterSettings.slimeGelGloss, 0.0F));
+		}
 		if (leaves) {
 			this.writeLeafGlobals(level, b, o, res);
 		}
@@ -2352,6 +2653,12 @@ public final class WaterWorld {
 		putFloats(b, o + 4368, 1.0F / Math.max(WaterSettings.magmaHeatTime, 0.01F), 1.0F / Math.max(WaterSettings.lavaBoilTime, 0.001F),
 			1.0F / Math.max(WaterSettings.fireHeatTime, 0.01F), 1.0F / Math.max(WaterSettings.furnaceHeatTime, 0.01F));
 		putFloats(b, o + 4384, 0.0F, 0.0F, 0.0F, 0.0F);
+		putFloats(b, o + 4400, this.freezeForceFrames > 0 ? 1.0F : 0.0F, this.freezeForceValue, WaterSettings.waterFreezing ? LATENT_FREEZE : 0.0F,
+			Math.max(WaterSettings.slushDrag, 0.0F));
+		putFloats(b, o + 4416, Mth.clamp(WaterSettings.iceCloudiness, 0.0F, 1.0F), Mth.clamp(WaterSettings.iceBubbles, 0.0F, 1.0F),
+			Mth.clamp(WaterSettings.iceCracks, 0.0F, 1.0F), Math.max(WaterSettings.slushGrainSize, 0.05F));
+		putFloats(b, o + 4432, Mth.clamp(WaterSettings.slushSurface, 0.0F, 1.0F), Math.max(WaterSettings.slushCrystalSize, 0.0F),
+			Mth.clamp(WaterSettings.slushCrystalOpacity, 0.0F, 1.0F), 0.0F);
 		putFloats(b, o + 4128, Math.max(WaterSettings.boilBubbleSize, 0.0F), WaterSettings.boilBubbleRise, Math.max(WaterSettings.boilBubbleRate, 0.0F),
 			WaterSettings.boilClingTemperature);
 		writeSea(b, o, level, levelState.worldPartialTicks, r.ox, r.oz, r);
@@ -2436,6 +2743,37 @@ public final class WaterWorld {
 			Math.max(WaterSettings.oceanCalming, 0.0F));
 	}
 
+	private void writePackShadow(int slot) {
+		ByteBuffer b = this.uboRing.mapped();
+		int o = slot * UBO_SLOT;
+		float shadowStrength = WaterSettings.packShadows && ShaderCompat.packRunning() ? Mth.clamp(WaterSettings.packShadowStrength, 0.0F, 1.0F) : 0.0F;
+		ShaderCompat.PackShadow map = shadowStrength > 0.0F ? this.packShadow : null;
+		b.putFloat(o + 3928, shadowStrength);
+		if (map != null) {
+			map.modelView().get(o + 3936, b);
+			map.projection().get(o + 4000, b);
+			float warp = 1.0F - 25.6F * map.projection().m00();
+			float lift = 0.05F + 1.5F / Math.max(1, WaterSettings.packShadowDetail);
+			putFloats(b, o + 4064, 1.0F, warp, lift, 1.0F / Math.max(1, map.resolution()));
+		} else {
+			putFloats(b, o + 4064, 0.0F, 0.0F, 0.0F, 0.0F);
+		}
+		this.uboRing.flush(o, UBO_SIZE);
+	}
+
+	private List<WaterRegion> drawnZones() {
+		if (!OceanMode.drawsSea()) {
+			return List.of();
+		}
+		List<WaterRegion> out = new ArrayList<>();
+		for (WaterRegion r : this.oceanSim.zones) {
+			if (r.seaDrawable()) {
+				out.add(r);
+			}
+		}
+		return out;
+	}
+
 	private void writeOceanGlobals(Minecraft mc, ClientLevel level, int slot, int width, int height) {
 		ByteBuffer b = this.uboRing.mapped();
 		int o = slot * UBO_SLOT;
@@ -2448,12 +2786,12 @@ public final class WaterWorld {
 		putInts(b, o, bx, by, bz, 0);
 		putInts(b, o + 16, 0, 0, 0, 0);
 		int zones = 0;
-		for (WaterRegion r : this.oceanSim.zones) {
+		for (WaterRegion r : this.drawnZones()) {
 			if (zones * 2 + 1 >= MAX_ENTITIES * 3) {
 				break;
 			}
 			OceanZone z = r.ocean;
-			putFloats(b, o + 576 + zones * 32, z.x0 - bx, z.floorY - by, z.z0 - bz, 0.0F);
+			putFloats(b, o + 576 + zones * 32, z.x0 - bx, z.floorY - by, z.z0 - bz, z.seaY - by);
 			putFloats(b, o + 592 + zones * 32, z.x1 - bx, z.topY + 1 - by, z.z1 - bz, 0.0F);
 			zones++;
 		}
@@ -2479,8 +2817,36 @@ public final class WaterWorld {
 		putFloats(b, o + 4080, 0.0F, 0.0F, 0.0F, 0.0F);
 		putFloats(b, o + 4384, Math.max(WaterSettings.oceanWhitecaps, 0.0F), 0.0F,
 			Math.max(WaterSettings.oceanWhitecapStart, 0.05F), (float) (this.simTime % 1000.0));
+		putFloats(b, o + 4400, 0.0F, 0.0F, 0.0F, 0.0F);
+		putFloats(b, o + 4416, 0.0F, 0.0F, 0.0F, 0.0F);
+		putFloats(b, o + 4432, 0.0F, 0.0F, 0.0F, 0.0F);
 		writeSea(b, o, level, levelState.worldPartialTicks, bx, bz, null);
 		this.uboRing.flush(o, UBO_SIZE);
+	}
+
+	public @Nullable Desc writeHandGlobals(Matrix4f handProjection, Matrix4f viewRotation, int width, int height) {
+		Minecraft mc = Minecraft.getInstance();
+		ClientLevel level = mc.level;
+		if (level == null || this.failed || Vk.tryDevice() == null) {
+			return null;
+		}
+		if (this.uboRing == null) {
+			this.uboRing = VkBuf.upload((long) UBO_SLOT * SLOTS_PER_FRAME * Vk.FRAME_RING, VkBuf.UNIFORM);
+			this.frameView = VkBuf.device(16, 0);
+		}
+		int slot = Vk.ringSlot() * SLOTS_PER_FRAME + HAND_SLOT;
+		this.writeOceanGlobals(mc, level, slot, width, height);
+		ByteBuffer b = this.uboRing.mapped();
+		int o = slot * UBO_SLOT;
+		handProjection.get(o + 176, b);
+		viewRotation.get(o + 240, b);
+		new Matrix4f(handProjection).invert().get(o + 304, b);
+		new Matrix4f(viewRotation).invert().get(o + 368, b);
+		putInts(b, o, 0, 0, 0, 0);
+		putFloats(b, o + 432, 0.0F, 0.0F, 0.0F, 1.0F);
+		putFloats(b, o + 4144, 1.0e9F, 2.0e9F, 1.0e9F, 2.0e9F);
+		this.uboRing.flush(o, UBO_SIZE);
+		return Desc.ubo(this.uboRing, (long) slot * UBO_SLOT, UBO_SIZE);
 	}
 
 	private static final float WATER_HEAT_CAPACITY = 4.186e6F;
@@ -2573,6 +2939,14 @@ public final class WaterWorld {
 				n = this.writeBodyCells(body, r, b, o, n, partialTick);
 				continue;
 			}
+			if (e instanceof Minecart cart) {
+				n = this.writeMinecart(cart, r, b, o, n, partialTick);
+				continue;
+			}
+			if (e instanceof Boat || e instanceof ChestBoat) {
+				n = this.writeVanillaBoat(e, r, b, o, n, partialTick);
+				continue;
+			}
 			double ix = Mth.lerp(partialTick, e.xo, e.getX());
 			double iy = Mth.lerp(partialTick, e.yo, e.getY());
 			double iz = Mth.lerp(partialTick, e.zo, e.getZ());
@@ -2607,8 +2981,137 @@ public final class WaterWorld {
 		if (!r.hasWindow || r.material != Material.WATER) {
 			return false;
 		}
+		for (long key : this.waterDrains) {
+			BlockPos pos = BlockPos.of(key);
+			if (level.hasChunkAt(pos) && WaterDrainBlock.isOpen(level.getBlockState(pos)) && r.windowContains(pos, 1)) {
+				return true;
+			}
+		}
 		for (Pump pump : this.pumps(level)) {
 			if (r.windowContains(BlockPos.containing(pump.center()), 1)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private static final float VESSEL_MIN_WALL_CELLS = 1.25F;
+
+	private int writeVessel(WaterRegion r, ByteBuffer b, int o, int n, double cx, double cy, double cz, Quaternionf rotation,
+		double hx, double hy, double hz, double wall, double floor, double vx, double vy, double vz, double sx, double sy, double sz) {
+		if (n + 2 > MAX_ENTITIES) {
+			return n;
+		}
+		float res = r.res;
+		Quaternionf q = new Quaternionf(rotation).normalize();
+		if (q.w < 0.0F) {
+			q.set(-q.x, -q.y, -q.z, -q.w);
+		}
+		double minWall = VESSEL_MIN_WALL_CELLS / res;
+		double w = Math.min(Math.max(wall, minWall), Math.min(hx, hz) * 0.45);
+		double f = Math.min(Math.max(floor, minWall), hy * 1.5);
+		int base = o + n * 48;
+		putFloats(b, base, (float) (cx - r.ox) * res, (float) (cy - r.oy) * res, (float) (cz - r.oz) * res, q.x);
+		putFloats(b, base + 16, (float) vx * res, (float) vy * res, (float) vz * res, q.y);
+		putFloats(b, base + 32, q.z, (float) hx * res, (float) hy * res, 4.0F);
+		putFloats(b, base + 48, (float) hz * res, (float) w * res, (float) f * res, 0.0F);
+		putFloats(b, base + 64, (float) sx, (float) sy, (float) sz, 0.0F);
+		putFloats(b, base + 80, 0.0F, 0.0F, 0.0F, 5.0F);
+		return n + 2;
+	}
+
+	private int writeMinecart(Minecart cart, WaterRegion r, ByteBuffer b, int o, int n, float partialTick) {
+		double x = Mth.lerp(partialTick, cart.xo, cart.getX());
+		double y = Mth.lerp(partialTick, cart.yo, cart.getY());
+		double z = Mth.lerp(partialTick, cart.zo, cart.getZ());
+		float yaw = Mth.rotLerp(partialTick, cart.yRotO, cart.getYRot());
+		float pitch = Mth.lerp(partialTick, cart.xRotO, cart.getXRot());
+		Quaternionf q = new Quaternionf();
+		Vector3d centre = new Vector3d(x, y, z);
+		if (cart.getBehavior() instanceof NewMinecartBehavior) {
+			q.rotationY((float) Math.toRadians(yaw)).rotateZ((float) Math.toRadians(-pitch));
+			org.joml.Vector3f up = q.transform(new org.joml.Vector3f(0.0F, 0.375F, 0.0F));
+			centre.add(up.x, up.y, up.z);
+		} else {
+			q.rotationY((float) Math.toRadians(180.0F - yaw)).rotateZ((float) Math.toRadians(-pitch));
+			centre.add(0.0, 0.375, 0.0);
+		}
+		return this.writeVessel(r, b, o, n, centre.x, centre.y, centre.z, q, 0.625, 0.3125, 0.5, 0.125, 0.125,
+			(cart.getX() - cart.xo) * 20.0, (cart.getY() - cart.yo) * 20.0, (cart.getZ() - cart.zo) * 20.0, 0.0, 0.0, 0.0);
+	}
+
+	private int writeVanillaBoat(Entity boat, WaterRegion r, ByteBuffer b, int o, int n, float partialTick) {
+		double x = Mth.lerp(partialTick, boat.xo, boat.getX());
+		double y = Mth.lerp(partialTick, boat.yo, boat.getY());
+		double z = Mth.lerp(partialTick, boat.zo, boat.getZ());
+		float yaw = Mth.rotLerp(partialTick, boat.yRotO, boat.getYRot());
+		double half = BoatHull.RIM * 0.5;
+		Quaternionf q = new Quaternionf().rotationY((float) Math.toRadians(-yaw));
+		double spin = -Math.toRadians(Mth.wrapDegrees(boat.getYRot() - boat.yRotO)) * 20.0;
+		return this.writeVessel(r, b, o, n, x, y + half, z, q, BoatHull.HALF_WIDTH, half, BoatHull.HALF_LENGTH, BoatHull.WALL,
+			BoatHull.floorTop(false), (boat.getX() - boat.xo) * 20.0, (boat.getY() - boat.yo) * 20.0, (boat.getZ() - boat.zo) * 20.0,
+			0.0, spin, 0.0);
+	}
+
+	private static final Map<BlockState, double[]> VESSEL_SHAPES = new IdentityHashMap<>();
+	private static final double[] NOT_A_VESSEL = new double[0];
+
+	static double @Nullable [] vesselShape(BlockState state) {
+		double[] cached = VESSEL_SHAPES.get(state);
+		if (cached == null) {
+			cached = findVesselShape(state);
+			VESSEL_SHAPES.put(state, cached);
+		}
+		return cached.length == 0 ? null : cached;
+	}
+
+	private static double[] findVesselShape(BlockState state) {
+		VoxelShape shape;
+		try {
+			shape = state.getCollisionShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO);
+		} catch (RuntimeException ex) {
+			return NOT_A_VESSEL;
+		}
+		if (shape.isEmpty()) {
+			return NOT_A_VESSEL;
+		}
+		AABB bounds = shape.bounds();
+		if (bounds.minX > 0.01 || bounds.minZ > 0.01 || bounds.maxX < 0.99 || bounds.maxZ < 0.99 || bounds.maxY < 0.99 || bounds.minY > 0.01) {
+			return NOT_A_VESSEL;
+		}
+		List<AABB> boxes = shape.toAabbs();
+		if (solidAt(boxes, 0.5, 0.97, 0.5)) {
+			return NOT_A_VESSEL;
+		}
+		double floor = -1.0;
+		for (double y = 0.97; y >= 0.0; y -= 1.0 / 64.0) {
+			if (solidAt(boxes, 0.5, y, 0.5)) {
+				floor = y + 1.0 / 64.0;
+				break;
+			}
+		}
+		if (floor <= 0.0 || floor > 0.8) {
+			return NOT_A_VESSEL;
+		}
+		double probeY = (floor + 1.0) * 0.5;
+		double wall = 0.0;
+		double[][] sides = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+		for (double[] side : sides) {
+			double t = 0.0;
+			while (t < 0.45 && solidAt(boxes, 0.5 - side[0] * (0.5 - t - 0.005), probeY, 0.5 - side[1] * (0.5 - t - 0.005))) {
+				t += 1.0 / 64.0;
+			}
+			if (t <= 0.0 || t >= 0.45 || !solidAt(boxes, 0.5 - side[0] * 0.49, 0.97, 0.5 - side[1] * 0.49)) {
+				return NOT_A_VESSEL;
+			}
+			wall = Math.max(wall, t);
+		}
+		return new double[]{wall, floor};
+	}
+
+	private static boolean solidAt(List<AABB> boxes, double x, double y, double z) {
+		for (AABB box : boxes) {
+			if (x >= box.minX && x < box.maxX && y >= box.minY && y < box.maxY && z >= box.minZ && z < box.maxZ) {
 				return true;
 			}
 		}
@@ -2688,6 +3191,20 @@ public final class WaterWorld {
 			return n;
 		}
 		float res = r.res;
+		for (long key : this.waterDrains) {
+			if (n >= MAX_ENTITIES) {
+				break;
+			}
+			BlockPos pos = BlockPos.of(key);
+			if (!level.hasChunkAt(pos) || !WaterDrainBlock.isOpen(level.getBlockState(pos)) || !r.windowContains(pos, 1)) {
+				continue;
+			}
+			int base = o + n * 48;
+			putFloats(b, base, (pos.getX() - r.ox) * res, (pos.getY() + 1.0F - r.oy) * res, (pos.getZ() - r.oz) * res, 0.0F);
+			putFloats(b, base + 16, (pos.getX() + 1.0F - r.ox) * res, (pos.getY() + 1.25F - r.oy) * res, (pos.getZ() + 1.0F - r.oz) * res, 0.0F);
+			putFloats(b, base + 32, 0.0F, 0.0F, 0.0F, 3.0F);
+			n++;
+		}
 		for (Pump pump : this.pumps(level)) {
 			if (n >= MAX_ENTITIES) {
 				break;
@@ -2724,6 +3241,19 @@ public final class WaterWorld {
 		double vz = vel.z;
 		Vector3d c = new Vector3d();
 		AABB window = new AABB(r.ox, r.oy, r.oz, r.ox + r.sx, r.oy + r.sy, r.oz + r.sz).inflate(1.0);
+		if (e instanceof RealisticBoatEntity boat && !boat.isRaft()) {
+			double half = BoatHull.RIM * 0.5;
+			body.toWorld(0.0, half, 0.0, c);
+			if (!window.inflate(2.0).contains(c.x, c.y, c.z)) {
+				return n;
+			}
+			double rx = c.x - now.x;
+			double ry = c.y - now.y;
+			double rz = c.z - now.z;
+			return this.writeVessel(r, b, o, n, c.x, c.y, c.z, q, BoatHull.HALF_WIDTH, half, BoatHull.HALF_LENGTH, BoatHull.WALL,
+				BoatHull.floorTop(false), vx + spin.y * rz - spin.z * ry, vy + spin.z * rx - spin.x * rz, vz + spin.x * ry - spin.y * rx,
+				spin.x, spin.y, spin.z);
+		}
 		for (RigidBody.Cell cell : body.cells) {
 			if (n >= MAX_ENTITIES) {
 				break;
@@ -2732,28 +3262,35 @@ public final class WaterWorld {
 			if (!window.contains(c.x, c.y, c.z)) {
 				continue;
 			}
-			double[] w = cell.waterBounds;
-			if (w != null) {
-				body.toWorld(cell.x + (w[0] + w[3]) * 0.5, cell.y + (w[1] + w[4]) * 0.5, cell.z + (w[2] + w[5]) * 0.5, c);
-			} else {
-				body.toWorld(cell.x + 0.5, cell.y + 0.5, cell.z + 0.5, c);
+			double[] vessel = cell.payload instanceof BlockState cellState ? vesselShape(cellState) : null;
+			if (vessel != null) {
+				double rx = c.x - now.x;
+				double ry = c.y - now.y;
+				double rz = c.z - now.z;
+				n = this.writeVessel(r, b, o, n, c.x, c.y, c.z, q, 0.5, 0.5, 0.5, vessel[0], vessel[1],
+					vx + spin.y * rz - spin.z * ry, vy + spin.z * rx - spin.x * rz, vz + spin.x * ry - spin.y * rx, spin.x, spin.y, spin.z);
+				continue;
 			}
-			double rx = c.x - now.x;
-			double ry = c.y - now.y;
-			double rz = c.z - now.z;
-			float cvx = (float) (vx + spin.y * rz - spin.z * ry) * res;
-			float cvy = (float) (vy + spin.z * rx - spin.x * rz) * res;
-			float cvz = (float) (vz + spin.x * ry - spin.y * rx) * res;
-			int base = o + n * 48;
-			putFloats(b, base, (float) (c.x - r.ox) * res, (float) (c.y - r.oy) * res, (float) (c.z - r.oz) * res, q.x);
-			putFloats(b, base + 16, cvx, cvy, cvz, q.y);
-			if (w != null) {
+			double[][] shape = cell.payload instanceof BlockState cellState ? me.skaffy.client.realistic.BodyShapes.boxes(cellState)
+				: new double[][]{{0.0, 0.0, 0.0, 1.0, 1.0, 1.0}};
+			for (double[] w : shape) {
+				if (n >= MAX_ENTITIES) {
+					break;
+				}
+				body.toWorld(cell.x + (w[0] + w[3]) * 0.5, cell.y + (w[1] + w[4]) * 0.5, cell.z + (w[2] + w[5]) * 0.5, c);
+				double rx = c.x - now.x;
+				double ry = c.y - now.y;
+				double rz = c.z - now.z;
+				float cvx = (float) (vx + spin.y * rz - spin.z * ry) * res;
+				float cvy = (float) (vy + spin.z * rx - spin.x * rz) * res;
+				float cvz = (float) (vz + spin.x * ry - spin.y * rx) * res;
+				int base = o + n * 48;
+				putFloats(b, base, (float) (c.x - r.ox) * res, (float) (c.y - r.oy) * res, (float) (c.z - r.oz) * res, q.x);
+				putFloats(b, base + 16, cvx, cvy, cvz, q.y);
 				putFloats(b, base + 32, q.z, (float) (w[3] - w[0]) * 0.5F * res, (float) (w[4] - w[1]) * 0.5F * res,
 					-Math.max((float) (w[5] - w[2]) * 0.5F * res, 1.0E-3F));
-			} else {
-				putFloats(b, base + 32, q.z, q.w, 0.5F * res, 1.0F);
+				n++;
 			}
-			n++;
 		}
 		return n;
 	}
@@ -2851,6 +3388,7 @@ public final class WaterWorld {
 		this.sources.clear();
 		this.chunkScanQueue.clear();
 		this.waveMakers.clear();
+		this.waterDrains.clear();
 		this.portalBlocks.clear();
 		this.pumpCache.clear();
 		this.pumpCacheFrame = -1L;
@@ -3019,6 +3557,9 @@ public final class WaterWorld {
 
 	public void shutdown() {
 		ClipRecorder.get().shutdown();
+		me.skaffy.client.jelly.JellyWorld.shutdown();
+		me.skaffy.client.ice.IceWorld.shutdown();
+		me.skaffy.client.trees.FallenLeaves.get().close();
 		this.clear();
 		if (this.rain != null) {
 			Vk.waitIdle();
@@ -3047,6 +3588,22 @@ public final class WaterWorld {
 		if (this.sandRenderer != null) {
 			this.sandRenderer.close();
 			this.sandRenderer = null;
+		}
+		if (this.crystalRenderer != null) {
+			this.crystalRenderer.close();
+			this.crystalRenderer = null;
+		}
+		if (this.grassRenderer != null) {
+			this.grassRenderer.close();
+			this.grassRenderer = null;
+		}
+		if (this.grassFlow != null) {
+			this.grassFlow.close();
+			this.grassFlow = null;
+		}
+		if (this.treeRenderer != null) {
+			this.treeRenderer.close();
+			this.treeRenderer = null;
 		}
 		if (this.uboRing != null) {
 			this.uboRing.close();

@@ -33,14 +33,15 @@ import org.jspecify.annotations.Nullable;
 import org.lwjgl.vulkan.VK10;
 import org.lwjgl.vulkan.VkCommandBuffer;
 
-final class RainSystem implements AutoCloseable {
+public final class RainSystem implements AutoCloseable {
 	private static final int UBO_BYTES = 304;
 	private static final int COL_RAINS = 1;
 	private static final int COL_WATER = 2;
 	private static final int COL_LAVA = 8;
+	private static final int COL_LEAVES = 16;
 	static final int EVENT_CAPACITY = 8192;
 
-	record Kicks(VkBuf events, int originX, int originZ, int capacity) {
+	public record Kicks(VkBuf events, int originX, int originZ, int capacity) {
 	}
 	private static final int REFRESH_PER_TICK = 512;
 	private static final float SPAWN_ABOVE = 22.0F;
@@ -48,6 +49,8 @@ final class RainSystem implements AutoCloseable {
 	private static final int ORIGIN_DRIFT = 512;
 
 	private final ComputeProgram step = new ComputeProgram("rain_step.comp", Desc.UBO, Desc.SSBO, Desc.SSBO, Desc.SSBO, Desc.SSBO, Desc.SSBO);
+	private final ComputeProgram stepTrees = new ComputeProgram("rain_step.comp", java.util.Map.of("TREES", "1"), Desc.UBO, Desc.SSBO, Desc.SSBO,
+		Desc.SSBO, Desc.SSBO, Desc.SSBO, Desc.SSBO, Desc.SSBO, Desc.SSBO, Desc.SSBO);
 	private final ComputeProgram splashStep = new ComputeProgram("rain_splash_step.comp", Desc.UBO, Desc.SSBO);
 	private final Map<Integer, GraphicsProgram[]> draws = new HashMap<>();
 	private final Sampler linear = new Sampler(true);
@@ -75,6 +78,10 @@ final class RainSystem implements AutoCloseable {
 
 	boolean wanted(ClientLevel level) {
 		return WaterSettings.realisticRain && level.getRainLevel(1.0F) > 0.01F;
+	}
+
+	@Nullable Kicks leafHits(ClientLevel level) {
+		return this.wanted(level) ? this.kicks() : null;
 	}
 
 	@Nullable Kicks kicks() {
@@ -145,6 +152,7 @@ final class RainSystem implements AutoCloseable {
 		this.colX[i] = x;
 		this.colZ[i] = z;
 		int flags = 0;
+		int depth = 0;
 		float topY = level.getMinY();
 		int light = 0;
 		if (level.hasChunk(x >> 4, z >> 4)) {
@@ -169,9 +177,30 @@ final class RainSystem implements AutoCloseable {
 			if (lava) {
 				flags |= COL_LAVA;
 			}
+			if (state.getBlock() instanceof net.minecraft.world.level.block.LeavesBlock) {
+				flags |= COL_LEAVES;
+				int y = top - 2;
+				int minY = Math.max(level.getMinY(), top - 33);
+				BlockState below = state;
+				while (y >= minY) {
+					below = level.getBlockState(pos.set(x, y, z));
+					if (!(below.isAir() || below.getBlock() instanceof net.minecraft.world.level.block.LeavesBlock)) {
+						break;
+					}
+					y--;
+				}
+				double ground = y + 1.0;
+				if (y >= minY) {
+					var groundShape = below.getCollisionShape(level, pos);
+					FluidState gf = below.getFluidState();
+					double gTop = Math.max(groundShape.isEmpty() ? 0.0 : groundShape.max(Direction.Axis.Y), gf.isEmpty() ? 0.0 : gf.getHeight(level, pos));
+					ground = y + (gTop > 0.0 ? gTop : 1.0);
+				}
+				depth = Math.clamp((int) Math.round((topY - ground) * 8.0), 0, 255);
+			}
 			light = level.getBrightness(LightLayer.BLOCK, pos) | level.getBrightness(LightLayer.SKY, pos) << 4;
 		}
-		m.putInt(i * 16, x).putInt(i * 16 + 4, z).putFloat(i * 16 + 8, topY).putInt(i * 16 + 12, flags | light << 8);
+		m.putInt(i * 16, x).putInt(i * 16 + 4, z).putFloat(i * 16 + 8, topY).putInt(i * 16 + 12, flags | light << 8 | depth << 16);
 	}
 
 	private GraphicsProgram[] draws(int colorFormat) {
@@ -260,9 +289,16 @@ final class RainSystem implements AutoCloseable {
 		Desc u = Desc.ubo(this.ubo, o, UBO_BYTES);
 
 		Vk.barrier(cb);
-		this.step.bind(cb, u, Desc.ssbo(this.drops), Desc.ssbo(this.splashes), Desc.ssbo(this.cursor), Desc.ssbo(this.columns),
-			Desc.ssbo(this.events[slot]));
-		this.step.dispatch(cb, ComputeProgram.groups(this.capacity, 256), 1, 1);
+		me.skaffy.client.trees.TreeRenderer.RainView trees = me.skaffy.client.trees.TreeRenderer.rainView();
+		if (trees != null) {
+			this.stepTrees.bind(cb, u, Desc.ssbo(this.drops), Desc.ssbo(this.splashes), Desc.ssbo(this.cursor), Desc.ssbo(this.columns),
+				Desc.ssbo(this.events[slot]), trees.params(), trees.blocks(), trees.table(), trees.motion());
+			this.stepTrees.dispatch(cb, ComputeProgram.groups(this.capacity, 256), 1, 1);
+		} else {
+			this.step.bind(cb, u, Desc.ssbo(this.drops), Desc.ssbo(this.splashes), Desc.ssbo(this.cursor), Desc.ssbo(this.columns),
+				Desc.ssbo(this.events[slot]));
+			this.step.dispatch(cb, ComputeProgram.groups(this.capacity, 256), 1, 1);
+		}
 		Vk.barrier(cb);
 		this.splashStep.bind(cb, u, Desc.ssbo(this.splashes));
 		this.splashStep.dispatch(cb, ComputeProgram.groups(this.splashCapacity, 256), 1, 1);
@@ -297,7 +333,8 @@ final class RainSystem implements AutoCloseable {
 		java.util.Map<Long, double[]> where = new java.util.HashMap<>();
 		for (int i = 0; i < n; i++) {
 			int at = 16 + i * 16;
-			if (m.getFloat(at + 12) < 1.5F) {
+			float kind = m.getFloat(at + 12);
+			if (kind < 1.5F || kind > 2.5F) {
 				continue;
 			}
 			double x = m.getFloat(at) + origin[0];
@@ -325,6 +362,7 @@ final class RainSystem implements AutoCloseable {
 			}
 		});
 		this.step.close();
+		this.stepTrees.close();
 		this.splashStep.close();
 		this.linear.close();
 		for (AutoCloseable c : new AutoCloseable[]{this.ubo, this.drops, this.splashes, this.cursor, this.columns, this.events[0], this.events[1],

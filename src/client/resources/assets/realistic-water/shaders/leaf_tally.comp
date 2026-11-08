@@ -1,0 +1,28 @@
+#version 450
+#include "common.glsl"
+#include "leaf.glsl"
+layout(local_size_x = 256) in;
+layout(std430, binding = 1) readonly buffer Parts { Particle parts[]; };
+layout(std430, binding = 2) readonly buffer Counters { uint counters[]; };
+layout(std430, binding = 3) buffer Out { uvec4 head; ivec4 entries[]; };
+layout(push_constant) uniform PC { ivec4 a; ivec4 b; } pc;
+
+void main() {
+    uint i = GID_U;
+    if (i >= counters[pc.a.x]) {
+        return;
+    }
+    Particle p = parts[i];
+    if (p.pos.w < 0.0) {
+        return;
+    }
+    uint kind = leafKind(leafBits(p.vel));
+    if (kind < 4u) {
+        return;
+    }
+    uint o = atomicAdd(head.x, 1u);
+    if (o >= uint(pc.a.y)) {
+        return;
+    }
+    entries[o] = ivec4(pc.b.xyz + ivec3(floor(p.pos.xyz / float(max(pc.b.w, 1)))), int(kind));
+}

@@ -35,6 +35,12 @@ public class RealisticBlockMinecraftMixin {
 		} else if (mc.player != null && RealisticKelp.get().tryGrab(mc)) {
 			this.rightClickDelay = 4;
 			ci.cancel();
+		} else if (mc.player != null && me.skaffy.client.trees.TreeGrab.get().tryGrab(mc)) {
+			this.rightClickDelay = 4;
+			ci.cancel();
+		} else if (mc.player != null && me.skaffy.client.grass.RealisticGrass.get().tryGrab(mc)) {
+			this.rightClickDelay = 4;
+			ci.cancel();
 		}
 	}
 

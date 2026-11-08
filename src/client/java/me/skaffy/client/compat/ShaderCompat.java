@@ -81,6 +81,8 @@ public final class ShaderCompat {
 
 	public static void beginLevel() {
 		drawn = false;
+		me.skaffy.client.grass.GrassPack.get().beginFrame();
+		me.skaffy.client.trees.TreePack.get().beginFrame();
 		WaterWorld.get().beginLevel();
 	}
 
@@ -153,6 +155,10 @@ public final class ShaderCompat {
 			drawn = true;
 			WaterWorld.get().renderFrame(target);
 		});
+	}
+
+	public static void runOutsidePasses(Runnable action) {
+		outsidePasses(action);
 	}
 
 	private static void outsidePasses(Runnable action) {
@@ -258,7 +264,8 @@ public final class ShaderCompat {
 	}
 
 	public static void vitrailShadowGathered() {
-		if (!WaterWorld.get().hasShadowCasters() && !RealisticKelp.get().hasStrands()) {
+		if (!WaterWorld.get().hasShadowCasters() && !RealisticKelp.get().hasStrands() && !me.skaffy.client.grass.GrassPack.active()
+			&& !me.skaffy.client.trees.TreePack.active() && !me.skaffy.client.jelly.JellyWorld.wanted()) {
 			return;
 		}
 		lookUpShadowGeometry();
@@ -284,6 +291,9 @@ public final class ShaderCompat {
 			if (shadowStorage.get(null) instanceof SubmitNodeCollector collector) {
 				WaterWorld.get().submitShadowCasters(collector, camera);
 				RealisticKelp.get().submit(collector, camera);
+				me.skaffy.client.grass.GrassPack.get().submit(collector, camera);
+				me.skaffy.client.trees.TreePack.get().submitShadow(collector, camera);
+				me.skaffy.client.jelly.JellyWorld.submitShadows(collector, camera);
 			}
 		} catch (IllegalAccessException | RuntimeException e) {
 			shadowStorage = null;

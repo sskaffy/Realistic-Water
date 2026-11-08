@@ -79,5 +79,11 @@ void main() {
     uint full = uint(clamp(sum / (G.simA.y * float(res * res * res)), 0.0, 1.0) * 255.0 + 0.5);
     uint fast = uint(clamp(speed / float(res) * 16.0, 0.0, 255.0));
     uint temp = particles > 0.0 ? uint(clamp(heat / (particles * HEAT_FP), 0.0, 255.0) + 0.5) : 0u;
-    fill[t] = full | (fast << 8) | (temp << 16);
+    uint ice = 0u;
+#ifndef MPM
+    if (particles > 0.0 && heatOn() && G.freezeA.z > 0.0) {
+        ice = uint(clamp(-heat / (particles * HEAT_FP) / latentFreeze() * 127.0, 0.0, 255.0));
+    }
+#endif
+    fill[t] = full | (fast << 8) | (temp << 16) | (ice << 24);
 }

@@ -1,0 +1,58 @@
+#version 450
+#include "common.glsl"
+#define TREE_PARAMS_BINDING 1
+#define TREE_BLOCKS_BINDING 2
+#include "tree_common.glsl"
+layout(local_size_x = 64) in;
+layout(std430, binding = 3) writeonly buffer LeafList { uint leafList[]; };
+layout(std430, binding = 4) writeonly buffer StickList { uint stickList[]; };
+layout(std430, binding = 5) buffer Args { uint args[]; };
+layout(push_constant) uniform PC { int pass; } pc;
+
+bool visible(vec3 rel, float radius) {
+    vec4 clip = G.proj * (G.view * vec4(rel, 1.0));
+    float kx = radius * sqrt(G.proj[0][0] * G.proj[0][0] + 1.0);
+    float ky = radius * sqrt(G.proj[1][1] * G.proj[1][1] + 1.0);
+    return clip.w > -radius && clip.x - clip.w <= kx && -clip.x - clip.w <= kx && clip.y - clip.w <= ky && -clip.y - clip.w <= ky;
+}
+
+void main() {
+    if (pc.pass == 1) {
+        if (GID_U == 0u) {
+            args[0] = 6u;
+            args[1] = min(args[8], uint(T.caps.x));
+            args[2] = 0u;
+            args[3] = 0u;
+            args[4] = uint(TREE_STICK_VERTS);
+            args[5] = min(args[9], uint(T.caps.y));
+            args[6] = 0u;
+            args[7] = 0u;
+        }
+        return;
+    }
+    uint slot = GID_U;
+    if (slot >= uint(T.cam.w)) {
+        return;
+    }
+    TreeBlock b = tblocks[slot];
+    if (!treeActive(b)) {
+        return;
+    }
+    vec3 rel = G.domainOrigin.xyz + vec3(b.pos.xyz - T.cam.xyz) + 0.5;
+    if (!visible(rel, 1.4)) {
+        return;
+    }
+    float dist = length(rel);
+    int leaves = treeLeafCount(dist);
+    uint base = atomicAdd(args[8], uint(leaves));
+    for (int i = 0; i < leaves && base + uint(i) < uint(T.caps.x); i++) {
+        leafList[base + uint(i)] = (slot << 10) | uint(i);
+    }
+    int sticks = treeStickCount(b);
+    if (sticks > 0) {
+        uint sbase = atomicAdd(args[9], uint(sticks));
+        for (int k = 0; k < sticks && sbase + uint(k) < uint(T.caps.y); k++) {
+            stickList[sbase + uint(k)] = (slot << 3) | uint(k);
+        }
+    }
+}

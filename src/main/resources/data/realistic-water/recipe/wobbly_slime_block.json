@@ -1,0 +1,12 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "building",
+  "ingredients": [
+    "minecraft:slime_block",
+    "minecraft:slime_ball"
+  ],
+  "result": {
+    "id": "realistic-water:wobbly_slime_block",
+    "count": 1
+  }
+}

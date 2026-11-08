@@ -57,10 +57,22 @@ public abstract class LevelRendererMixin {
 		ci.cancel();
 	}
 
+	@Inject(method = "submitFeatures", at = @At("HEAD"))
+	private void realisticWater$beginFeatures(CallbackInfo ci) {
+		me.skaffy.client.jelly.GelItems.beginWorld();
+	}
+
+	@Inject(method = "submitFeatures", at = @At("TAIL"))
+	private void realisticWater$endFeatures(CallbackInfo ci) {
+		me.skaffy.client.jelly.GelItems.endWorld();
+	}
+
 	@Inject(method = "submitEntities", at = @At("TAIL"))
 	private void realisticWater$submitPackMaterials(PoseStack poseStack, LevelRenderState levelRenderState, SubmitNodeCollector output, CallbackInfo ci) {
 		WaterWorld.get().submitPackMaterials(output, levelRenderState.cameraRenderState.pos);
 		me.skaffy.client.kelp.RealisticKelp.get().submit(output, levelRenderState.cameraRenderState.pos);
+		me.skaffy.client.grass.GrassPack.get().submit(output, levelRenderState.cameraRenderState.pos);
+		me.skaffy.client.trees.TreePack.get().submit(output, levelRenderState.cameraRenderState.pos);
 	}
 
 	@Inject(method = "executeOutline", at = @At("HEAD"))

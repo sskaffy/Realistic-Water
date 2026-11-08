@@ -70,18 +70,20 @@ final class LeafRenderer implements AutoCloseable {
 	private GraphicsProgram leaves(int colorFormat) {
 		return this.leaves.computeIfAbsent(colorFormat, format -> new GraphicsProgram("leaf.vert", "leaf.frag", Map.of(),
 			new GraphicsProgram.State(format, VkTex.D32, true, true, VK10.VK_COMPARE_OP_GREATER, GraphicsProgram.Blend.NONE), Desc.UBO, Desc.SSBO, Desc.SSBO,
-			Desc.SSBO, Desc.TEX, Desc.SSBO, Desc.TEX));
+			Desc.SSBO, Desc.TEX, Desc.SSBO, Desc.TEX, Desc.SSBO, Desc.SSBO));
 	}
 
 	void record(VkCommandBuffer cb, List<WaterRenderer.Body> bodies, int width, int height, int colorFormat, long mainColorView, long mainDepthView,
 		long lightmap) {
 		GraphicsProgram leaves = this.leaves(colorFormat);
+		Desc atlas = me.skaffy.client.trees.FallenLeaves.get().atlasDesc();
+		Desc looks = me.skaffy.client.trees.FallenLeaves.get().looksDesc();
 		GraphicsProgram.begin(cb, width, height, mainColorView, null, mainDepthView);
 		for (WaterRenderer.Body body : bodies) {
 			WaterRegion r = body.region();
 			leaves.bind(cb, body.ubo(), Desc.ssbo(r.currentParticles()), Desc.ssbo(this.textures), Desc.ssbo(r.light()),
 				Desc.tex(lightmap, this.linear.handle), Desc.ssbo(r.staticSolid),
-				Desc.tex(WaterWorld.packShadowView != 0L ? WaterWorld.packShadowView : lightmap, this.nearest.handle));
+				Desc.tex(WaterWorld.packShadowView != 0L ? WaterWorld.packShadowView : lightmap, this.nearest.handle), atlas, looks);
 			leaves.drawIndirect(cb, r.args, WaterRegion.ARGS_FLUID_DRAW);
 		}
 		GraphicsProgram.end(cb);

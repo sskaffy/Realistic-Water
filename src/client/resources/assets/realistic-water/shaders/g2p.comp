@@ -159,14 +159,48 @@ vec3 collideStatic(vec3 x, vec3 xn, inout vec3 v) {
     return r;
 }
 
+vec3 vesselVel(int e, vec3 p) {
+    return G.ent[e * 3 + 1].xyz + cross(G.ent[e * 3 + 4].xyz, p - G.ent[e * 3].xyz);
+}
+
+bool vesselCollide(int e, vec3 x, vec3 v, out vec3 surface, out vec3 normal) {
+    surface = x;
+    normal = vec3(0.0, 1.0, 0.0);
+    Vessel s = vesselOf(e);
+    vec4 inv = vec4(-s.q.xyz, s.q.w);
+    vec3 l = quatRotate(inv, x - s.c);
+    if (!vesselSolid(s, l, 0.0)) {
+        return false;
+    }
+    vec3 back = quatRotate(inv, (v - vesselVel(e, x)) * DT * 2.0);
+    vec3 prev = l - back;
+    bool cavity;
+    if (vesselInCavity(s, prev)) {
+        cavity = true;
+    } else if (any(greaterThan(abs(prev), s.h))) {
+        cavity = false;
+    } else {
+        cavity = vesselPrefersCavity(s, l);
+    }
+    vec3 lp;
+    vec3 ln;
+    if (!vesselExit(s, l, 0.0, cavity, lp, ln)) {
+        return false;
+    }
+    surface = s.c + quatRotate(s.q, lp);
+    normal = quatRotate(s.q, ln);
+    return true;
+}
+
 vec3 collideEntities(vec3 x, inout vec3 v) {
     for (int e = 0; e < numEntities(); e++) {
         vec3 s;
         vec3 n;
-        if (!entInside(e, x, 0.0, s, n)) {
+        bool vessel = entIsContainer(e);
+        if (vessel ? !vesselCollide(e, x, v, s, n) : !entInside(e, x, 0.0, s, n)) {
             continue;
         }
-        vec3 ve = entVel(e);
+        vec3 ve = vessel ? vesselVel(e, s) : entVel(e);
         x = s;
         float vn = dot(v, n);
         float en = dot(ve, n);
@@ -178,6 +212,18 @@ vec3 collideEntities(vec3 x, inout vec3 v) {
         }
     }
     return x;
+}
+
+bool drainWater(vec3 x) {
+    if (!isWater()) {
+        return false;
+    }
+    for (int e = 0; e < numEntities(); e++) {
+        if (entIsDrain(e) && all(greaterThanEqual(x, entMin(e))) && all(lessThan(x, entMax(e)))) {
+            return true;
+        }
+    }
+    return false;
 }
 
 float intakeFill(vec3 lo, vec3 hi) {
@@ -302,8 +348,8 @@ bool stepHeat(vec3 x, inout vec3 v, inout float temp, inout uint seed, out bool 
                 temp += (target - temp) * (1.0 - exp(-rate * DT));
             }
             heated = true;
-        } else if (code >= 5u) {
-            temp += G.heatB.y * (0.0 - temp) * perFlux;
+        } else if (code >= 5u && temp > 0.0) {
+            temp = max(temp - G.heatB.y * temp * perFlux, 0.0);
         }
     }
     if (magmaTarget < 0.0 && G.heatC.y > 0.0) {
@@ -340,8 +386,9 @@ bool stepHeat(vec3 x, inout vec3 v, inout float temp, inout uint seed, out bool 
         float q = G.heatB.x * (temp - ambient) + 6000.0 * max(t * t * t - ta * ta * ta, 0.0);
         temp = max(temp - q * perFlux, min(temp, ambient));
     }
-    v.y += -G.gravityDt.y * expansion(temp) * (temp - around) * DT;
-    temp = max(temp, 0.0);
+    float liquidT = max(temp, 0.0);
+    v.y += -G.gravityDt.y * expansion(liquidT) * (liquidT - max(around, 0.0)) * DT;
+    temp = max(temp, G.freezeA.z > 0.0 ? -2.0 * G.freezeA.z : 0.0);
     if (temp > 100.0) {
         float excess = temp - 100.0;
         temp = 100.0;
@@ -423,7 +470,7 @@ bool oceanRelax(vec3 x, inout vec3 v, inout vec3 dx, inout uint seed, out float 
     deviation = 0.0;
     float surface;
     vec3 target;
-    if (!oceanTarget(x, surface, target)) {
+    if (!oceanTarget(x, surface, target) || insideVesselCavity(x)) {
         return true;
     }
     float res = G.camGrid.w;
@@ -450,6 +497,14 @@ void main() {
     float tag = p.pos.w;
     float rest = 0.0;
     float temp = p.vel.w;
+    bool freezing = heatOn() && G.freezeA.z > 0.0;
+    if (freezing && G.freezeA.x > 0.5) {
+        temp = G.freezeA.y;
+    }
+    bool wasIce = freezing && solidIce(temp);
+    if (!wasIce && drainWater(x)) {
+        return;
+    }
     float maxSpeed = G.simB.x;
     bool gridded = inInnerBox(x);
     vec3 dx;
@@ -458,11 +513,10 @@ void main() {
         vec3 uOld = sampleVelOld(x);
         v = mix(uNew, v + (uNew - uOld), G.simA.x);
         dx = DT * sampleVel(x + 0.5 * DT * uNew);
-        if (!waterFilm(x, v, dx, tag)) {
+        if (!wasIce && !waterFilm(x, v, dx, tag)) {
             return;
         }
         if (heatOn()) {
-            temp = p.vel.w;
             uint heatSeed = hash(i * 2246822519u + uint(pc.a.w) * 3266489917u);
             bool heated;
             bool kept = stepHeat(x, v, temp, heatSeed, heated);
@@ -479,7 +533,25 @@ void main() {
             }
             boilBubbles(x, v, temp, heated, heatSeed);
         }
-        if (oceanOn()) {
+        if (freezing && solidIce(temp)) {
+            v = vec3(0.0);
+            dx = vec3(0.0);
+        } else if (freezing && temp < 0.0) {
+            float f = iceFraction(temp);
+            v = mix(v, uNew, f);
+            ivec3 cb = ivec3(floor(x)) - ivec3(0, 1, 0);
+            bool held = solidAt(x - vec3(0.0, 1.0, 0.0)) || countAt(cb) > 0;
+            if (held) {
+                float damp = exp(-G.freezeA.w * f * DT);
+                v.xz *= damp;
+                float res = G.camGrid.w;
+                if (f > 0.6 && length(v) < 0.25 * res) {
+                    v.xz = vec2(0.0);
+                }
+            }
+            dx = mix(dx, v * DT, f);
+        }
+        if (oceanOn() && !(freezing && solidIce(temp))) {
             uint oceanSeed = hash(i * 3266489917u + uint(pc.a.w) * 668265263u);
             float deviation;
             bool keep = oceanRelax(x, v, dx, oceanSeed, deviation);
@@ -520,9 +592,18 @@ void main() {
         dx *= maxStep / dl;
     }
     vec3 xn = collideStatic(x, x + dx, v);
-    xn = collideEntities(xn, v);
-    uint pumpSeed = hash(i * 2654435761u + uint(pc.a.w) * 40503u);
-    xn = pumpWater(xn, v, pumpSeed);
+    bool iceNow = freezing && solidIce(temp);
+    if (iceNow) {
+        v = vec3(0.0);
+        xn = x;
+    } else {
+        xn = collideEntities(xn, v);
+        uint pumpSeed = hash(i * 2654435761u + uint(pc.a.w) * 40503u);
+        xn = pumpWater(xn, v, pumpSeed);
+        if (drainWater(xn)) {
+            return;
+        }
+    }
     if (any(isnan(xn)) || any(isinf(xn)) || any(isnan(v))) {
         return;
     }
@@ -534,12 +615,13 @@ void main() {
     if (oceanOn() && (xn.x < G.oceanA.y || xn.x >= G.oceanB.y || xn.z < G.oceanA.z || xn.z >= G.oceanB.z)) {
         return;
     }
-    if ((lightWordAt(xn) & VANILLA_SINK) != 0u) {
+    if ((lightWordAt(xn) & VANILLA_SINK) != 0u && !insideVesselCavity(xn)) {
         return;
     }
     uint groupTotal = subgroupAdd(1u);
     uint prefix = subgroupExclusiveAdd(1u);
     float groupMax = subgroupMax(length(v));
+    REPORT_DIR_SPEED(v)
     uint base = 0u;
     if (subgroupElect()) {
         base = atomicAdd(counters[pc.a.y], groupTotal);

@@ -1,0 +1,12 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "building",
+  "ingredients": [
+    "minecraft:honey_block",
+    "minecraft:honey_bottle"
+  ],
+  "result": {
+    "id": "realistic-water:wobbly_honey_block",
+    "count": 1
+  }
+}

@@ -22,7 +22,7 @@ void main() {
         return;
     }
     int ci = cellIndex(c);
-    if (staticSolid[ci] != 0u || entityAt(center) >= 0) {
+    if (staticSolid[ci] != 0u || entityAt(center) >= 0 || insideVesselCavity(center)) {
         return;
     }
     float surface;

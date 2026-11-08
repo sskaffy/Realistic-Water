@@ -8,7 +8,7 @@ public final class BoatHull {
 	public static final double HALF_LENGTH = 0.875;
 	public static final double RIM = 0.5625;
 	private static final double FLOOR = 0.1875;
-	private static final double WALL = 0.125;
+	public static final double WALL = 0.125;
 	private static final double RAFT_DECK = 0.375;
 	public static final double RAFT_DENSITY = 0.4;
 	public static final double PLANK_DENSITY = 600.0;

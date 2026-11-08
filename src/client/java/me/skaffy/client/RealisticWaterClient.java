@@ -23,6 +23,7 @@ import net.minecraft.client.gui.screens.MenuScreens;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientChunkEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
+import me.skaffy.client.grass.RealisticGrass;
 import me.skaffy.client.kelp.RealisticKelp;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
@@ -67,6 +68,19 @@ public class RealisticWaterClient implements ClientModInitializer {
 		ClientTickEvents.END_CLIENT_TICK.register(RealisticPlatform::tick);
 		ClientTickEvents.END_CLIENT_TICK.register(DynamicLights::tick);
 		ClientTickEvents.END_CLIENT_TICK.register(mc -> RealisticKelp.get().tick(mc));
+		ClientTickEvents.END_CLIENT_TICK.register(mc -> RealisticGrass.get().tick(mc));
+		ClientTickEvents.END_CLIENT_TICK.register(mc -> me.skaffy.client.trees.RealisticTrees.get().tick(mc));
+		ClientTickEvents.END_CLIENT_TICK.register(me.skaffy.client.jelly.JellyWorld::tick);
+		ClientTickEvents.END_CLIENT_TICK.register(me.skaffy.client.ice.IceWorld::tick);
+		ClientTickEvents.END_CLIENT_TICK.register(me.skaffy.client.trees.LeafSink::tick);
+		ClientTickEvents.END_CLIENT_TICK.register(mc -> me.skaffy.client.trees.TreeGrab.get().tick(mc));
+		ClientTickEvents.END_CLIENT_TICK.register(mc -> me.skaffy.client.trees.FallenLeaves.get().tick(mc));
+		me.skaffy.client.trees.FallenLeaves.init();
+		me.skaffy.client.jelly.JellyModel.register();
+		me.skaffy.client.ice.IceModel.register();
+		me.skaffy.client.jelly.GelItemProperty.register();
+		RealisticGrass.init();
+		me.skaffy.client.trees.RealisticTrees.init();
 		RealisticKelp.init();
 		me.skaffy.client.realistic.ModelShapes.install();
 		ClientPlayNetworking.registerGlobalReceiver(SteamPayload.TYPE, (payload, context) -> context.client().execute(
@@ -95,6 +109,14 @@ public class RealisticWaterClient implements ClientModInitializer {
 		ClientChunkEvents.CHUNK_LOAD.register(water::onChunkLoad);
 		ClientChunkEvents.CHUNK_LOAD.register((lvl, chunk) -> RealisticKelp.get().onChunkLoad(lvl, chunk));
 		ClientChunkEvents.CHUNK_UNLOAD.register(water::onChunkUnload);
+		ClientChunkEvents.CHUNK_LOAD.register((lvl, chunk) -> RealisticGrass.get().onChunkLoad(lvl, chunk));
+		ClientChunkEvents.CHUNK_UNLOAD.register((lvl, chunk) -> RealisticGrass.get().onChunkUnload(lvl, chunk));
+		ClientChunkEvents.CHUNK_LOAD.register((lvl, chunk) -> me.skaffy.client.trees.RealisticTrees.get().onChunkLoad(lvl, chunk));
+		ClientChunkEvents.CHUNK_UNLOAD.register((lvl, chunk) -> me.skaffy.client.trees.RealisticTrees.get().onChunkUnload(lvl, chunk));
+		ClientChunkEvents.CHUNK_LOAD.register(me.skaffy.client.jelly.JellyWorld::onChunkLoad);
+		ClientChunkEvents.CHUNK_UNLOAD.register(me.skaffy.client.jelly.JellyWorld::onChunkUnload);
+		ClientChunkEvents.CHUNK_LOAD.register(me.skaffy.client.ice.IceWorld::onChunkLoad);
+		ClientChunkEvents.CHUNK_UNLOAD.register(me.skaffy.client.ice.IceWorld::onChunkUnload);
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> water.clear());
 		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> water.shutdown());
 	}

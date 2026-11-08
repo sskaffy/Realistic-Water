@@ -44,11 +44,20 @@ void main() {
     }
     float tag = isSand() ? 0.001 + 0.998 * rand(seed) : 0.0;
     if (isLeaves()) {
-        tag = float(hash(seed) & 0x3FFFFu);
+        uint bits = hash(seed) & 0x3FCFFu;
+        if (e.vel.w > 0.5) {
+            uint code = uint(e.vel.w + 0.5);
+            uint kind = code & 15u;
+            bits = (bits & ~0x303u) | (kind & 3u) | (((kind >> 2) & 3u) << 8);
+            if ((code >> 4) > 0u) {
+                bits = (bits & ~0xFCu) | ((((code >> 4) - 1u) & 63u) << 2);
+            }
+        }
+        tag = float(bits);
     } else if (isSteam()) {
         tag = rand(seed);
     } else if (isWater()) {
-        tag = G.heatA.y;
+        tag = e.vel.w != 0.0 ? e.vel.w : G.heatA.y;
     }
     dst[o] = Particle(vec4(p, 0.0), vec4(e.vel.xyz, tag));
 }

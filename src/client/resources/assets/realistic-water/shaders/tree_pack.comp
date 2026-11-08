@@ -1,0 +1,193 @@
+#version 450
+#include "common.glsl"
+#define TREE_PARAMS_BINDING 1
+#define TREE_BLOCKS_BINDING 2
+#define TREE_MODS_BINDING 6
+#include "tree_common.glsl"
+layout(local_size_x = 64) in;
+layout(std430, binding = 3) writeonly buffer Verts { uint verts[]; };
+layout(std430, binding = 4) buffer Count { uint counts[]; };
+layout(std430, binding = 5) readonly buffer Motion { TreeMotion motion[]; };
+
+layout(push_constant) uniform PC {
+    vec4 offset;
+    ivec4 info;
+    ivec4 parts;
+} pc;
+
+void writeVertex(uint v, vec3 pos, uint color, vec2 uv, uint light, vec3 normal, vec3 tangent) {
+    uint o = v * uint(pc.info.x);
+    verts[o] = floatBitsToUint(pos.x);
+    verts[o + 1u] = floatBitsToUint(pos.y);
+    verts[o + 2u] = floatBitsToUint(pos.z);
+    verts[o + 3u] = color;
+    verts[o + 4u] = floatBitsToUint(uv.x);
+    verts[o + 5u] = floatBitsToUint(uv.y);
+    verts[o + 6u] = 10u << 16;
+    verts[o + 7u] = light;
+    verts[o + 8u] = packSnorm4x8(vec4(normal, 0.0));
+    if (pc.info.x >= 14) {
+        verts[o + 9u] = 0u;
+        verts[o + 10u] = 0u;
+        verts[o + 11u] = floatBitsToUint(uv.x);
+        verts[o + 12u] = floatBitsToUint(uv.y);
+        verts[o + 13u] = packSnorm4x8(vec4(tangent, 1.0));
+    }
+}
+
+uint packColor(vec3 c) {
+    uvec3 b = uvec3(round(clamp(c, 0.0, 1.0) * 255.0));
+    return b.r | (b.g << 8) | (b.b << 16) | (255u << 24);
+}
+
+vec2 atlasUV(int cell, vec2 local) {
+    return (vec2(float(cell % TREE_ATLAS_CELLS), float(cell / TREE_ATLAS_CELLS)) + clamp(local, 0.002, 0.998)) / float(TREE_ATLAS_CELLS);
+}
+
+const vec2 LC[4] = vec2[](vec2(-1.0, -1.0), vec2(1.0, -1.0), vec2(1.0, 1.0), vec2(-1.0, 1.0));
+const int CT[4] = int[](0, 0, 1, 1);
+const int CS[4] = int[](0, 1, 1, 0);
+
+void main() {
+    uint g = GID_U;
+    if (pc.info.z == 1) {
+        uint capA = uint(pc.parts.x);
+        bool stale = g < capA ? g >= min(counts[0], capA)
+            : g - capA >= min(counts[1], uint(pc.info.y) - capA) && g - capA < uint(pc.info.w);
+        if (!stale) {
+            return;
+        }
+        for (uint k = 0u; k < 4u; k++) {
+            uint o = (g * 4u + k) * uint(pc.info.x);
+            verts[o] = 0u;
+            verts[o + 1u] = 0u;
+            verts[o + 2u] = 0u;
+        }
+        return;
+    }
+    if (g >= uint(T.cam.w)) {
+        return;
+    }
+    TreeBlock b = tblocks[g];
+    if (!treeActive(b)) {
+        return;
+    }
+    vec3 corner = vec3(b.pos.xyz - T.cam.xyz);
+    float dist = length(pc.offset.xyz + corner + 0.5);
+    int leaves = treeLeafCount(dist);
+    bool vanilla = treeVanilla();
+    int sides = vanilla ? 4 : TREE_STICK_SIDES;
+    int segments = vanilla ? 1 : TREE_STICK_SEGMENTS;
+    int sticks = treeStickCount(b);
+    int casting = 0;
+    for (int i = 0; i < leaves; i++) {
+        casting += treeLeafCasts(b.pos.xyz, i) ? 1 : 0;
+    }
+    uint quadsA = uint(casting + sticks * sides * segments);
+    uint quadsB = uint(leaves - casting);
+    uint capA = uint(pc.parts.x);
+    uint capB = uint(pc.info.y) - capA;
+    uint baseA = atomicAdd(counts[0], quadsA);
+    uint baseB = atomicAdd(counts[1], quadsB);
+    bool fitsA = baseA + quadsA <= capA;
+    bool fitsB = baseB + quadsB <= capB;
+    uint vA = baseA * 4u;
+    uint vB = (capA + baseB) * 4u;
+    uint light = uint(floor(b.look.w / 16.0) * 16.0) | (uint(mod(b.look.w, 16.0) * 16.0) << 16);
+    vec3 leafAvg = treeUnpackRgb(b.info.z);
+    int leafCell = int(b.info.x & 255u);
+    TreeMotion m = motion[g];
+    vec3 dParent = m.link.x >= 0 ? motion[m.link.x].total.xyz : vec3(0.0);
+    int barkCell = int((b.info.x >> 8) & 255u);
+
+    for (int i = 0; i < leaves; i++) {
+        TreeLeaf l = treeLeaf(b, i, leaves);
+        treeLeafMove(l, m);
+        if (!treeLeafModify(b, i, corner, l)) {
+            l.size = 0.0;
+        }
+        uint s = hash(l.seed ^ 0x68E31DA4u);
+        vec3 color;
+        int cell;
+        vec2 o = vec2(0.0);
+        float w = 1.0;
+        if (vanilla) {
+            w = min(l.size, 1.0);
+            o = vec2(rand(s), rand(s)) * (1.0 - w);
+            color = b.look.rgb;
+            cell = leafCell;
+        } else {
+            float variation = mix(0.82, 1.15, rand(s));
+            vec3 hue = mix(vec3(1.05, 0.98, 1.35), vec3(0.92, 1.03, 1.06), rand(s));
+            color = leafAvg * b.look.rgb * 1.44 * variation * hue;
+            cell = int(l.seed & 3u);
+        }
+        color *= l.ao;
+        vec3 normal = normalize(l.outward * 0.8 + vec3(0.0, 0.7, 0.0) + l.normal * 0.2);
+        bool casts = treeLeafCasts(b.pos.xyz, i);
+        if (casts ? !fitsA : !fitsB) {
+            continue;
+        }
+        uint v = casts ? vA : vB;
+        if (casts) {
+            vA += 4u;
+        } else {
+            vB += 4u;
+        }
+        for (int k = 0; k < 4; k++) {
+            vec2 c = LC[k];
+            vec3 pos = corner + l.centre + l.across * (c.x * l.size * 0.5) + l.along * (c.y * l.size * 0.5);
+            vec2 local = o + vec2(c.x * 0.5 + 0.5, 0.5 - c.y * 0.5) * w;
+            writeVertex(v, pc.offset.xyz + pos, packColor(color), atlasUV(cell, local), light, normal, l.across);
+            v++;
+        }
+    }
+
+    if (!fitsA) {
+        return;
+    }
+    uint v = vA;
+    for (int k = 0; k < sticks; k++) {
+        TreeStick st = treeStick(b, k, m.total.xyz, dParent);
+        vec4 target;
+        float growth;
+        int stickMod = treeLeafMod(b, TREE_STICK_MOD + k, target, growth);
+        vec3 shift = stickMod == TREE_MOD_HELD ? target.xyz * clamp(target.w, 0.0, 1.0) : vec3(0.0);
+        float grow = stickMod == TREE_MOD_REMOVED ? 0.0 : stickMod == TREE_MOD_REGROW ? clamp(growth, 0.0, 1.0) : 1.0;
+        float len = length(st.b - st.a);
+        vec3 color = vanilla ? vec3(0.72) : treeUnpackRgb(b.info.w) * 0.85 * 0.72;
+        int cell = vanilla ? barkCell : TREE_WHITE_CELL;
+        for (int seg = 0; seg < segments; seg++) {
+            for (int side = 0; side < sides; side++) {
+                for (int c = 0; c < 4; c++) {
+                    float t = float(seg + CT[c]) / float(segments);
+                    int around = side + CS[c];
+                    vec3 centre = treeStickAt(st, t);
+                    vec3 dir = treeStickDir(st, t);
+                    vec3 ref = abs(dir.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+                    vec3 u = normalize(cross(dir, ref));
+                    vec3 ww = cross(dir, u);
+                    float r = mix(st.ra, st.rb, t) * grow;
+                    float angle = float(around) / float(sides) * 6.2831853;
+                    vec3 offset;
+                    vec3 normal;
+                    vec2 local;
+                    if (vanilla) {
+                        angle += 0.78539816;
+                        offset = (u * cos(angle) + ww * sin(angle)) * r * 1.41421356;
+                        float mid = (float(side) + 0.5) / float(sides) * 6.2831853 + 0.78539816;
+                        normal = u * cos(mid) + ww * sin(mid);
+                        local = vec2(float(around) * 2.0 * r, t * min(len, 1.0));
+                    } else {
+                        offset = (u * cos(angle) + ww * sin(angle)) * r;
+                        normal = normalize(offset);
+                        local = vec2(0.5);
+                    }
+                    vec3 at = grow <= 0.0 ? corner + st.a : corner + centre + offset + shift;
+                    writeVertex(v, pc.offset.xyz + at, packColor(color), atlasUV(cell, local), light, normal, dir);
+                    v++;
+                }
+            }
+        }
+    }
+}

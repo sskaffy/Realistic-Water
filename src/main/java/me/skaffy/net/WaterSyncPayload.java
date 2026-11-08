@@ -47,8 +47,13 @@ public record WaterSyncPayload(long[] positions, byte[] amounts) implements Cust
 		return TYPE;
 	}
 
+	public static final int FROZEN_BIT = 64;
+
 	public static BlockState stateFor(int amount) {
-		BlockState full = ModContent.REALISTIC_WATER_BLOCK.defaultBlockState().setValue(RealisticWaterBlock.INFINITE, false);
+		boolean frozen = (amount & FROZEN_BIT) != 0;
+		amount &= 15;
+		BlockState full = ModContent.REALISTIC_WATER_BLOCK.defaultBlockState().setValue(RealisticWaterBlock.INFINITE, false)
+			.setValue(RealisticWaterBlock.FROZEN, frozen);
 		return amount >= 8 ? full : full.setValue(LiquidBlock.LEVEL, 8 - Math.max(1, amount));
 	}
 
@@ -68,9 +73,9 @@ public record WaterSyncPayload(long[] positions, byte[] amounts) implements Cust
 			if (RealisticWaterBlock.isInfinite(current) || RealisticWaterBlock.isOcean(current)) {
 				continue;
 			}
-			boolean ours = RealisticWaterFluid.isRealistic(current.getFluidState()) && current.getBlock() == ModContent.REALISTIC_WATER_BLOCK;
+			boolean ours = current.getBlock() == ModContent.REALISTIC_WATER_BLOCK;
 			int amount = amounts[i];
-			if (amount <= 0) {
+			if ((amount & 15) <= 0) {
 				if (ours) {
 					level.setBlock(pos, Blocks.AIR.defaultBlockState(), SYNC_FLAGS);
 				}

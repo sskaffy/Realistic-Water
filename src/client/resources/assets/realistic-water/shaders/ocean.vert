@@ -8,6 +8,7 @@ layout(location = 2) out float vAmp;
 layout(location = 3) out vec2 vLight;
 layout(location = 4) out vec3 vSideNormal;
 layout(location = 5) out vec2 vSlopeDev;
+layout(location = 6) out float vUnderZone;
 
 const int CORNER[6] = int[](0, 1, 2, 0, 2, 3);
 const vec2 CORNER_XZ[4] = vec2[](vec2(0.0, 0.0), vec2(0.0, 1.0), vec2(1.0, 1.0), vec2(1.0, 0.0));
@@ -16,9 +17,10 @@ const vec3 SIDE_NORMAL[4] = vec3[](vec3(0.0, 0.0, -1.0), vec3(0.0, 0.0, 1.0), ve
 
 #define UNDER_ZONE 0.45
 
-bool insideZone(vec3 p) {
+bool insideZone(ivec3 block) {
+    vec3 p = vec3(block) + vec3(0.5, OCEAN_REST, 0.5);
     for (int z = 0; z < G.caps.z; z++) {
-        if (all(greaterThanEqual(p, G.ent[z * 2].xyz)) && all(lessThan(p, G.ent[z * 2 + 1].xyz))) {
+        if (all(greaterThanEqual(p, G.ent[z * 2].xyz)) && all(lessThan(p, G.ent[z * 2 + 1].xyz)) && block.y == int(round(G.ent[z * 2].w))) {
             return true;
         }
     }
@@ -53,9 +55,11 @@ void main() {
     }
     vec3 rel = vec3(block - G.dims.xyz) + local;
     rel.y += amp * oceanHeight(rel.xz);
-    if (local.y > 0.0 && insideZone(vec3(block - G.dims.xyz) + vec3(0.5, OCEAN_REST, 0.5))) {
+    bool under = insideZone(block - G.dims.xyz);
+    if (local.y > 0.0 && under) {
         rel.y -= UNDER_ZONE;
     }
+    vUnderZone = under ? 1.0 : 0.0;
     vRel = rel;
     vAmp = amp;
     vSlopeDev = vec2(0.0);

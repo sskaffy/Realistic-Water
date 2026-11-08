@@ -809,6 +809,10 @@ public class RealisticBlockEntity extends Entity {
 	}
 
 	public List<SweptCollider.Oriented> orientedBoxes(AABB area) {
+		return this.orientedBoxes(area, null);
+	}
+
+	public List<SweptCollider.Oriented> orientedBoxes(AABB area, net.minecraft.world.entity.@Nullable Entity entity) {
 		List<SweptCollider.Oriented> out = new ArrayList<>();
 		RigidBody b = this.body;
 		if (b.cells.isEmpty()) {
@@ -820,7 +824,14 @@ public class RealisticBlockEntity extends Entity {
 		double[] axes = {ax.x, ax.y, ax.z, ay.x, ay.y, ay.z, az.x, az.y, az.z};
 		Vector3d centre = new Vector3d();
 		for (RigidBody.Cell cell : b.cells) {
-			for (double[] box : this.playerBoxes(cell)) {
+			double[][] cellBoxes = this.playerBoxes(cell);
+			if (entity != null && cell.payload instanceof BlockState gelState) {
+				int gel = me.skaffy.block.WobblyBlocks.gelKind(gelState);
+				if (gel >= 0) {
+					cellBoxes = sunkCell(cell, cellBoxes, me.skaffy.block.WobblyBlocks.topDent(entity, gel == 1));
+				}
+			}
+			for (double[] box : cellBoxes) {
 				double hx = (box[3] - box[0]) * 0.5;
 				double hy = (box[4] - box[1]) * 0.5;
 				double hz = (box[5] - box[2]) * 0.5;
@@ -835,6 +846,31 @@ public class RealisticBlockEntity extends Entity {
 			}
 		}
 		return out;
+	}
+
+	private double[][] sunkCell(RigidBody.Cell cell, double[][] boxes, double dent) {
+		Object kind = cell.payload instanceof BlockState s ? s.getBlock() : null;
+		boolean up = !sameGel(this.body.cellAt(cell.x, cell.y + 1, cell.z), kind);
+		boolean west = !sameGel(this.body.cellAt(cell.x - 1, cell.y, cell.z), kind);
+		boolean east = !sameGel(this.body.cellAt(cell.x + 1, cell.y, cell.z), kind);
+		boolean north = !sameGel(this.body.cellAt(cell.x, cell.y, cell.z - 1), kind);
+		boolean south = !sameGel(this.body.cellAt(cell.x, cell.y, cell.z + 1), kind);
+		double side = dent * 0.5;
+		double[][] out = new double[boxes.length][];
+		for (int i = 0; i < boxes.length; i++) {
+			double[] b = boxes[i].clone();
+			b[0] += west ? side : 0.0;
+			b[3] -= east ? side : 0.0;
+			b[2] += north ? side : 0.0;
+			b[5] -= south ? side : 0.0;
+			b[4] -= up ? dent : 0.0;
+			out[i] = b;
+		}
+		return out;
+	}
+
+	private static boolean sameGel(RigidBody.@Nullable Cell other, @Nullable Object kind) {
+		return other != null && other.payload instanceof BlockState s && s.getBlock() == kind;
 	}
 
 	public List<VoxelShape> collisionShapes(AABB area) {

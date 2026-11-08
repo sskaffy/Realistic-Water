@@ -258,6 +258,183 @@ vec3 shadeAboveWater(vec2 uv, vec3 n, float fd, float sceneDist, float ambient, 
     return mix(water, reflection, F) + sunSpecular(n, V, footprint, lostRough) * smoothstep(0.5, 0.95, bs.y);
 }
 
+float hash3(ivec3 c) {
+    return float(hash(uint(c.x) * 73856093u ^ uint(c.y) * 19349663u ^ uint(c.z) * 83492791u)) * (1.0 / 4294967295.0);
+}
+
+float vnoise(vec3 p) {
+    ivec3 b = ivec3(floor(p));
+    vec3 f = p - vec3(b);
+    f = f * f * (3.0 - 2.0 * f);
+    float a = mix(hash3(b), hash3(b + ivec3(1, 0, 0)), f.x);
+    float c = mix(hash3(b + ivec3(0, 1, 0)), hash3(b + ivec3(1, 1, 0)), f.x);
+    float d = mix(hash3(b + ivec3(0, 0, 1)), hash3(b + ivec3(1, 0, 1)), f.x);
+    float e = mix(hash3(b + ivec3(0, 1, 1)), hash3(b + ivec3(1, 1, 1)), f.x);
+    return mix(mix(a, c, f.y), mix(d, e, f.y), f.z);
+}
+
+float grainHeight(vec3 p) {
+    return vnoise(p) + 0.5 * vnoise(p * 2.3 + 17.0);
+}
+
+vec3 grainNormal(vec3 world, vec3 nWorld, float scale, float amp, float footprint) {
+    float fade = 1.0 - smoothstep(0.3, 1.2, footprint * scale);
+    if (amp * fade <= 1e-3) {
+        return nWorld;
+    }
+    const float E = 0.35;
+    vec3 p = world * scale;
+    float h0 = grainHeight(p);
+    vec3 g = vec3(grainHeight(p + vec3(E, 0.0, 0.0)), grainHeight(p + vec3(0.0, E, 0.0)), grainHeight(p + vec3(0.0, 0.0, E))) - h0;
+    g /= E;
+    g -= nWorld * dot(g, nWorld);
+    return normalize(nWorld - g * amp * fade);
+}
+
+vec3 worldDir(vec3 viewDir) {
+    return normalize((G.invView * vec4(viewDir, 0.0)).xyz);
+}
+
+vec3 frozenReflection(vec3 P, vec3 n, vec3 V, vec2 bs, vec3 lightColor) {
+    vec3 Rv = reflect(-V, n);
+    float hit;
+    vec3 ssr = traceReflection(P + n * 0.05, Rv, hit);
+    float skyVisible = smoothstep(0.0, 0.7, bs.y);
+    return mix(skyColor(worldDir(Rv)) * mix(lightColor * 0.3, vec3(1.0), skyVisible), ssr, hit);
+}
+
+float crystalSparkle(vec3 world, vec3 nW, vec3 Vw, vec3 Lw, float footprint, float scale) {
+    ivec3 c = ivec3(floor(world * scale));
+    uint h = hash(uint(c.x) * 73856093u ^ uint(c.y) * 19349663u ^ uint(c.z) * 83492791u);
+    if ((h & 7u) > 1u) {
+        return 0.0;
+    }
+    vec3 r = vec3(float((h >> 8) & 255u), float((h >> 16) & 255u), float(h >> 24)) / 255.0 * 2.0 - 1.0;
+    vec3 facet = normalize(nW + r * 0.8);
+    float s = pow(max(dot(facet, normalize(Lw + Vw)), 0.0), 600.0);
+    return s * 6.0 * (1.0 - smoothstep(0.5, 2.0, footprint * scale));
+}
+
+float crackAt(vec3 q) {
+    ivec3 b = ivec3(floor(q));
+    float f1 = 9.0;
+    float f2 = 9.0;
+    for (int k = 0; k < 27; k++) {
+        ivec3 c = b + ivec3(k % 3, (k / 3) % 3, k / 9) - 1;
+        uint h = hash(uint(c.x) * 73856093u ^ uint(c.y) * 19349663u ^ uint(c.z) * 83492791u);
+        vec3 feature = vec3(c) + vec3(float(h & 1023u), float((h >> 10) & 1023u), float((h >> 20) & 1023u)) / 1023.0;
+        float d = length(q - feature);
+        if (d < f1) {
+            f2 = f1;
+            f1 = d;
+        } else if (d < f2) {
+            f2 = d;
+        }
+    }
+    return 1.0 - smoothstep(0.0, 0.035, f2 - f1);
+}
+
+vec3 iceInterior(vec3 entry, vec3 dir, float len, float footprint, out float trans) {
+    const int STEPS = 6;
+    float stepLen = len / float(STEPS);
+    vec3 add = vec3(0.0);
+    float T = 1.0;
+    float bubbleFade = 1.0 - smoothstep(0.04, 0.12, footprint);
+    for (int i = 0; i < STEPS; i++) {
+        float s = (float(i) + 0.5) * stepLen;
+        vec3 q = entry + dir * s;
+        float cloud = vnoise(q * 1.6) * 0.65 + vnoise(q * 4.1 + 5.3) * 0.35;
+        float core = smoothstep(0.05, 0.5, s);
+        float dens = smoothstep(0.42, 0.85, cloud) * G.freezeB.x * mix(0.3, 1.0, core) * 6.0;
+        float a = 1.0 - exp(-dens * stepLen);
+        add += T * a * vec3(0.93, 0.96, 1.0);
+        vec3 bq = q * vec3(16.0, 6.0, 16.0);
+        ivec3 bc = ivec3(floor(bq));
+        if (hash3(bc + ivec3(911, 37, 5)) < 0.35 * G.freezeB.y) {
+            vec3 centre = vec3(hash3(bc + ivec3(1, 0, 0)), 0.5, hash3(bc + ivec3(0, 0, 1))) * 0.6 + 0.2;
+            float r = 0.1 + 0.12 * hash3(bc + ivec3(0, 1, 0));
+            float bubble = smoothstep(r, r * 0.35, length((fract(bq) - centre) * vec3(1.0, 0.35, 1.0)));
+            add += T * bubble * 0.4 * bubbleFade;
+            T *= 1.0 - bubble * 0.25 * bubbleFade;
+        }
+        if (G.freezeB.z > 0.0 && (i == 1 || i == 4)) {
+            float crack = crackAt(q * 1.3) * G.freezeB.z;
+            add += T * crack * 0.5;
+            T *= 1.0 - crack * 0.3;
+        }
+        T *= 1.0 - a;
+    }
+    trans = T;
+    return add;
+}
+
+vec3 shadeIce(vec2 uv, vec3 n, float fd, vec2 bs) {
+    vec3 P = viewPosAt(uv, fd);
+    vec3 V = normalize(-P);
+    n = dot(n, V) < 0.0 ? -n : n;
+    float footprint = pixelFootprint(fd);
+    vec3 nWorld = worldDir(n);
+    vec3 world = G.misc.yzw + (G.invView * vec4(P, 1.0)).xyz;
+    vec3 nw = grainNormal(world, nWorld, 1.7, 0.05, footprint);
+    n = normalize(mat3(G.view) * nw);
+    float thickness = max(thicknessAt(uv), 0.0);
+    vec2 offset = n.xy * G.waterA.z * 1.1 * clamp(thickness, 0.0, 2.0) / max(fd, 1.0);
+    vec2 ruv = clamp(uv + offset, vec2(0.0), vec2(1.0));
+    float path = max(thicknessAt(ruv), 0.0);
+    if (linearDepth(texture(sceneDepth, ruv).r) < fd) {
+        ruv = uv;
+        path = thickness;
+    }
+    path *= G.waterA.y;
+    vec3 lightColor = vanillaLight(bs);
+    vec3 Vw = worldDir(V);
+    vec3 dir = refract(-Vw, nw, 1.0 / 1.31);
+    dir = dot(dir, dir) > 0.0 ? dir : -Vw;
+    float trans;
+    vec3 inner = iceInterior(world - nw * 0.01, dir, min(path, 3.0), footprint, trans) * lightColor;
+    vec3 body = behindAt(ruv) * exp(-vec3(0.30, 0.07, 0.04) * path) * trans + inner;
+    vec3 reflection = frozenReflection(P, n, V, bs, lightColor);
+    float F = 0.018 + 0.982 * pow(1.0 - clamp(dot(n, V), 0.0, 1.0), 5.0);
+    vec3 color = mix(body, reflection, F) + sunSpecular(n, V, footprint, 0.0) * smoothstep(0.5, 0.95, bs.y) * 1.2;
+    float frost = smoothstep(0.3, 0.9, nw.y) * (0.5 + 0.5 * vnoise(world * 22.0)) * 0.08;
+    return mix(color, vec3(0.9, 0.94, 1.0) * lightColor, frost);
+}
+
+vec3 shadeSlush(vec2 uv, vec3 n, float fd, vec2 bs, float f, vec3 waterColor) {
+    vec3 P = viewPosAt(uv, fd);
+    vec3 V = normalize(-P);
+    n = dot(n, V) < 0.0 ? -n : n;
+    float footprint = pixelFootprint(fd);
+    vec3 nWorld = worldDir(n);
+    vec3 world = G.misc.yzw + (G.invView * vec4(P, 1.0)).xyz;
+    float grain = 7.0 / max(G.freezeB.w, 0.05);
+    float lumpy = smoothstep(0.1, 0.7, f);
+    vec3 nw = grainNormal(world, nWorld, grain * 0.3, 0.4 * lumpy, footprint);
+    nw = grainNormal(world, nw, grain, 0.55 * lumpy, footprint);
+    vec3 nv = normalize(mat3(G.view) * nw);
+    vec3 lightColor = vanillaLight(bs);
+    float tone = vnoise(world * grain * 0.5);
+    vec3 albedo = mix(vec3(0.60, 0.68, 0.75), vec3(0.87, 0.92, 0.96), smoothstep(0.25, 0.85, tone));
+    albedo = mix(albedo * vec3(0.78, 0.84, 0.9), albedo, f);
+    vec3 n2 = nw * nw;
+    float face = n2.x * 0.6 + n2.z * 0.8 + n2.y * (nw.y > 0.0 ? 1.0 : 0.5);
+    vec3 L = normalize(G.sunDir.xyz);
+    float sunWrap = G.sunDir.w > 0.0 ? clamp(dot(nv, L) * 0.5 + 0.5, 0.0, 1.0) : 0.5;
+    vec3 lit = albedo * lightColor * face * mix(0.8, 1.1, sunWrap);
+    float path = max(thicknessAt(uv), 0.0) * G.waterA.y;
+    float opacity = 1.0 - exp(-path * (3.0 + 14.0 * f));
+    vec3 behind = behindAt(uv) * vec3(0.70, 0.80, 0.87);
+    vec3 mush = mix(behind, lit, opacity);
+    float wet = 1.0 - 0.6 * smoothstep(0.5, 1.0, f);
+    vec3 reflection = frozenReflection(P, nv, V, bs, lightColor);
+    float F = (0.02 + 0.98 * pow(1.0 - clamp(dot(nv, V), 0.0, 1.0), 5.0)) * wet;
+    float sunny = smoothstep(0.5, 0.95, bs.y) * G.sunDir.w;
+    vec3 spec = sunSpecular(nv, V, footprint, 0.18) * wet * smoothstep(0.5, 0.95, bs.y);
+    float sparkle = crystalSparkle(world, nw, worldDir(V), worldDir(L), footprint, grain * 4.0) * sunny * f;
+    vec3 slush = mix(mush, reflection, F) + spec + vec3(1.0, 0.98, 0.94) * sparkle;
+    return mix(waterColor, slush, smoothstep(0.03, 0.45, f));
+}
+
 float vanillaFog(vec3 viewPos) {
     vec3 rel = (G.invView * vec4(viewPos, 1.0)).xyz;
     float spherical = length(rel);
@@ -303,6 +480,40 @@ vec3 shadeSlime(vec2 uv, vec3 n, float fd, vec2 bs) {
     float opacity = mix(G.matD.w, 1.0, 1.0 - exp(-path * 3.0));
     vec3 behind = behindAt(uv) * mix(vec3(1.0), albedo * 1.3, 0.75);
     return mix(behind, lit, opacity);
+}
+
+vec3 gelScene(vec2 uv) {
+    return behindAt(uv);
+}
+
+float gelSceneDist(vec2 uv) {
+    return linearDepth(texture(sceneDepth, uv).r);
+}
+
+vec3 gelReflection(vec3 P, vec3 n, vec3 R, float sky) {
+    float hit;
+    vec3 ssr = traceReflection(P + n * 0.05, R, hit);
+    vec3 Rw = (G.invView * vec4(R, 0.0)).xyz;
+    vec3 env = skyColor(Rw) * mix(0.08, 1.0, smoothstep(0.0, 0.7, sky));
+    return mix(env, ssr, hit);
+}
+
+#include "gel_shade.glsl"
+
+vec3 shadeSlimeGel(vec2 uv, vec3 n, float fd, vec2 bs, float sunShadow) {
+    Gel gel;
+    gel.absorb = G.absorb.rgb;
+    gel.scatter = G.scatter.rgb;
+    gel.density = G.scatter.w;
+    gel.haze = G.matE.x;
+    gel.refraction = G.waterA.z;
+    gel.sheen = G.scatter.rgb / max(max(G.scatter.r, G.scatter.g), max(G.scatter.b, 1e-3));
+    gel.glow = G.matE.y;
+    gel.bubbles = G.matE.z;
+    gel.gloss = G.matE.w;
+    vec3 P = viewPosAt(uv, fd);
+    float thickness = max(thicknessAt(uv), 0.0) * G.waterA.y;
+    return gelShade(gel, uv, P, n, thickness, vanillaLight(bs) * G.matD.y, bs.y, (1.0 - sunShadow) * smoothstep(0.5, 0.95, bs.y));
 }
 
 float foamLace(vec2 p, float coverage, float footprint) {
@@ -383,12 +594,14 @@ vec3 shadePixel(vec2 uv) {
         vec3 slime = behindAt(uv);
         float slimeDepth = sceneDev;
         if (hasFluid && matTagged) {
-            slime = shadeSlime(uv, g.xyz, fd, surfaceLight) * (1.0 - matSample.a);
+            slime = G.matC.w > 0.5 ? shadeSlimeGel(uv, g.xyz, fd, surfaceLight, matSample.a)
+                : shadeSlime(uv, g.xyz, fd, surfaceLight) * (1.0 - matSample.a);
             vec4 clip = G.proj * vec4(viewPosAt(uv, fd), 1.0);
             slimeDepth = clip.z / clip.w;
         }
         if (G.matD.x > 0.5) {
-            vec3 inside = slimeRgb(slimeTex[2]) * 0.55 * clamp(G.skyColor.w / 0.85, 0.2, 1.0) * G.matD.y;
+            vec3 insideTint = G.matC.w > 0.5 ? G.scatter.rgb / max(max(G.scatter.r, G.scatter.g), max(G.scatter.b, 1e-3)) * 0.6 : slimeRgb(slimeTex[2]);
+            vec3 inside = insideTint * 0.55 * clamp(G.skyColor.w / 0.85, 0.2, 1.0) * G.matD.y;
             slime = mix(slime, inside, G.matD.z);
         }
         gDepth = slimeDepth;
@@ -430,6 +643,11 @@ vec3 shadePixel(vec2 uv) {
         color = color * exp(-gAbsorb * visible * G.misc.x) + deep * (1.0 - exp(-fog * visible));
     } else if (hasFluid) {
         color = lavaPass ? shadeAboveLava(uv, g.xyz, fd, ambient) : shadeAboveWater(uv, g.xyz, fd, sceneDist, ambient, surfaceLight);
+        float frozen = !lavaPass && matTagged && !seaSurface ? matSample.a / 0.7 : 0.0;
+        if (frozen > 0.01) {
+            vec3 slush = frozen < 1.99 ? mix(color, shadeSlush(uv, g.xyz, fd, surfaceLight, min(frozen, 1.0), color), clamp(G.freezeC.x, 0.0, 1.0)) : color;
+            color = frozen > 1.0 ? mix(slush, shadeIce(uv, g.xyz, fd, surfaceLight), clamp(frozen - 1.0, 0.0, 1.0)) : slush;
+        }
         vec4 clip = G.proj * vec4(viewPosAt(uv, fd), 1.0);
         outDepth = clip.z / clip.w;
     }

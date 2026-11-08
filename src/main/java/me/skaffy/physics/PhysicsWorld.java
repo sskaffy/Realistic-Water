@@ -74,6 +74,7 @@ public final class PhysicsWorld {
 		final Vector3d rb = new Vector3d();
 		double depth;
 		double mu;
+		double bounce;
 		double kn;
 		double bias;
 		double jn;
@@ -213,6 +214,7 @@ public final class PhysicsWorld {
 			this.pool.add(c);
 		}
 		this.contacts.add(c);
+		c.bounce = 0.0;
 		c.jn = 0.0;
 		c.jt.zero();
 		return c;
@@ -222,8 +224,8 @@ public final class PhysicsWorld {
 		return x > box[0] && x < box[3] && y > box[1] && y < box[4] && z > box[2] && z < box[5];
 	}
 
-	private static boolean solidAt(PhysicsView view, double x, double y, double z) {
-		double[][] boxes = view.boxes((int) Math.floor(x), (int) Math.floor(y), (int) Math.floor(z));
+	private static boolean solidAt(PhysicsView view, RigidBody b, double x, double y, double z) {
+		double[][] boxes = view.boxesFor(b, (int) Math.floor(x), (int) Math.floor(y), (int) Math.floor(z));
 		if (boxes != null) {
 			for (double[] box : boxes) {
 				if (inside(box, x, y, z)) {
@@ -244,7 +246,7 @@ public final class PhysicsWorld {
 			int bx = (int) Math.floor(p.x);
 			int by = (int) Math.floor(p.y);
 			int bz = (int) Math.floor(p.z);
-			double[][] boxes = view.boxes(bx, by, bz);
+			double[][] boxes = view.boxesFor(b, bx, by, bz);
 			if (boxes == null) {
 				continue;
 			}
@@ -265,7 +267,7 @@ public final class PhysicsWorld {
 						break;
 					}
 					double s = pen[k] + 1e-4;
-					if (!solidAt(view, p.x + DIRS[k][0] * s, p.y + DIRS[k][1] * s, p.z + DIRS[k][2] * s)) {
+					if (!solidAt(view, b, p.x + DIRS[k][0] * s, p.y + DIRS[k][1] * s, p.z + DIRS[k][2] * s)) {
 						best = k;
 					} else {
 						pen[k] = -1.0;
@@ -283,6 +285,7 @@ public final class PhysicsWorld {
 				c.n.set(DIRS[best][0], DIRS[best][1], DIRS[best][2]);
 				c.depth = pen[best];
 				c.mu = this.friction * b.pointFriction[i / 3] * view.friction(bx, by, bz);
+				c.bounce = Math.max(b.pointBounce[i / 3], view.bounce(bx, by, bz));
 				break;
 			}
 		}
@@ -347,6 +350,7 @@ public final class PhysicsWorld {
 			b.dirToWorld(DIRS[best][0], DIRS[best][1], DIRS[best][2], c.n);
 			c.depth = pen[best];
 			c.mu = this.friction * Math.sqrt(a.pointFriction[i / 3] * cell.friction);
+			c.bounce = Math.max(a.pointBounce[i / 3], cell.bounce);
 		}
 	}
 
@@ -377,7 +381,7 @@ public final class PhysicsWorld {
 		c.bias = Math.min(BETA / dt * Math.max(c.depth - SLOP, 0.0), MAX_BIAS);
 		double vn = this.relativeVelocity(c, new Vector3d()).dot(c.n);
 		if (vn < -1.5) {
-			c.bias = Math.max(c.bias, -this.restitution * vn);
+			c.bias = Math.max(c.bias, -Math.max(this.restitution, c.bounce * 0.85) * vn);
 		}
 	}
 

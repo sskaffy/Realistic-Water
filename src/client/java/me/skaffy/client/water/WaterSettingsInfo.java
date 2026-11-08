@@ -102,6 +102,8 @@ public final class WaterSettingsInfo {
 			"How many simulation cells fit along one block for water. Higher gives finer splashes, thinner sheets and smaller drops. Changing it rebuilds every water body.");
 		integer("boxMargin", "Box margin", Cost.MEDIUM, "Every extra cell of margin adds a shell of cells that are solved each step.", 0, 24,
 			"Empty cells kept around the water so it has room to move into before the simulated area grows.");
+		num("windowLookahead", "Fast-water lookahead", Cost.LOW, "Only uses more GPU memory; empty room is not solved.", 0, 3, 0.05,
+			"Seconds of travel the simulated area reserves ahead of fast water, only on the sides it is moving toward. Water falling from high up then grows the area a few times instead of every few frames, each of which was a stutter. 0 turns it off.");
 		num("cfl", "CFL number", Cost.HIGH, "Lower means more substeps per frame for fast water.", 0.25, 6, 0.05,
 			"How many cells water may travel in one substep. Lower is more stable and accurate for fast flows but runs more substeps.");
 		num("maxDt", "Max substep time", Cost.HIGH, "Lower forces more substeps every frame, even for calm water.", 0.002, 0.1, 0.001,
@@ -357,6 +359,23 @@ public final class WaterSettingsInfo {
 			"Seconds a lone blob of slime survives.");
 		integer("slimeStrandedNeighbors", "Stranded neighbour count", Cost.LOW, "Fewer keeps more blobs alive.", 0, 64,
 			"Slime with fewer particles than this around it counts as stranded. Low so small blobs and strings survive.");
+		toggle("slimeOldTexture", "Old slime texture", Cost.NONE, LOOK,
+			"Draw realistic slime the old way: the vanilla slime block texture, matte and mostly opaque. Off (default): clear green gel "
+				+ "you can see into, that bends and blurs what is behind it, glows where the sun shines through, holds tiny air bubbles and "
+				+ "has a wet shine. Opacity applies to the old look only.");
+		num("slimeGelAbsorbR", "Gel absorption red", Cost.NONE, LOOK, 0, 10, 0.01, "How much red light a block of gel swallows. Higher is less see-through.");
+		num("slimeGelAbsorbG", "Gel absorption green", Cost.NONE, LOOK, 0, 10, 0.01, "How much green light a block of gel swallows.");
+		num("slimeGelAbsorbB", "Gel absorption blue", Cost.NONE, LOOK, 0, 10, 0.01, "How much blue light a block of gel swallows.");
+		num("slimeGelScatterR", "Gel colour red", Cost.NONE, LOOK, 0, 2, 0.01, "Red of the colour the gel glows with inside.");
+		num("slimeGelScatterG", "Gel colour green", Cost.NONE, LOOK, 0, 2, 0.01, "Green of the colour the gel glows with inside.");
+		num("slimeGelScatterB", "Gel colour blue", Cost.NONE, LOOK, 0, 2, 0.01, "Blue of the colour the gel glows with inside.");
+		num("slimeGelDensity", "Gel cloudiness", Cost.NONE, LOOK, 0, 10, 0.05, "How quickly the gel's own colour builds up with depth (milky vs clear).");
+		num("slimeGelHaze", "Gel haze", Cost.LOW, "Blurs the scene behind with up to 9 samples per pixel.", 0, 4, 0.05,
+			"How much the gel blurs what is seen through it, more through thicker gel.");
+		num("slimeGelRefraction", "Gel refraction", Cost.NONE, LOOK, 0, 0.3, 0.005, "How strongly the gel bends what is behind it.");
+		num("slimeGelGlow", "Gel sun glow", Cost.NONE, LOOK, 0, 3, 0.05, "How brightly sunlight shining through the gel lights it up.");
+		num("slimeGelBubbles", "Gel bubbles", Cost.NONE, LOOK, 0, 3, 0.05, "Tiny air bubbles held in the gel. 0 = none.");
+		num("slimeGelGloss", "Gel shine", Cost.NONE, LOOK, 0, 3, 0.05, "Strength of the sun's highlights on the wet surface.");
 		num("slimeOpacity", "Opacity", Cost.NONE, LOOK, 0, 1, 0.01,
 			"How solid slime looks where it is thin. 1 hides everything behind it; thick slime is always fully opaque.");
 		num("slimeBrightness", "Brightness", Cost.NONE, LOOK, 0, 3, 0.01,
@@ -536,8 +555,9 @@ public final class WaterSettingsInfo {
 		toggle("packShadowPerLeaf", "Shadow for every leaf", Cost.MEDIUM, "Reads every leaf's position back and adds one quad per leaf to the shadow pass.",
 			"Every realistic leaf casts its own leaf-shaped shadow. Off, leaf piles cast shadows shaped like sand piles instead.");
 		toggle("packDrawMaterials", "Pack draws sand, slime, leaves", Cost.MEDIUM, "Reads their surfaces and every leaf back from the GPU each frame.",
-			"While a Vitrail pack runs, sand and slime (as smooth surfaces) and leaves are drawn by the pack itself, so they get all of its lighting, "
-				+ "shadows, fog, reflections and colour grading. They then trail the simulation by a few frames. Off draws them ourselves.");
+			"While a Vitrail pack runs, sand, leaves and the old textured slime are drawn by the pack itself, so they get all of its lighting, "
+				+ "shadows, fog, reflections and colour grading (they then trail the simulation by a few frames). The gel slime and wobbly blocks are "
+				+ "always drawn with their own gel look; the pack gets them for its shadows. Off draws them all ourselves.");
 		integer("packShadowDetail", "Shadow shape detail", Cost.MEDIUM, "Higher reads back and draws many more caster boxes; 8 and above is heavy on big piles.", 1, 16,
 			"How many pieces per block the shadow of sand and slime (and leaves, with every-leaf shadows off) is built from. "
 				+ "1 casts block-sized steps, 4 follows the pile's shape closely.");
@@ -565,6 +585,137 @@ public final class WaterSettingsInfo {
 			"Eighths of a block of water each drop on lava turns to steam. 0 turns it off.");
 		num("rainFeed", "Rain feeds water", Cost.LOW, "Adds a few particles to realistic water now and then.", 0, 2, 0.005,
 			"How many blocks of depth a minute rain adds to realistic water it falls on. 0 turns it off.");
+
+		category("Wobbly blocks");
+		toggle("wobblyBlocks", "Wobbly slime and honey blocks", Cost.MEDIUM, "Simulated and drawn on the CPU and GPU near you; calm blocks cost little.",
+			"Wobbly Slime Blocks and Wobbly Honey Blocks are drawn as soft clear gel that dents under your feet, rings when you land on "
+				+ "it, bulges at the sides, shakes in explosions, and (honey) pulls after you when you step off. Off: they look like the "
+				+ "vanilla blocks (they still fall, hang and can be shoved).");
+		num("wobblySoftness", "Softness", Cost.NONE, LOOK, 0.3, 3, 0.05,
+			"How soft the gel is: higher wobbles slower and further, lower is firmer and quicker.");
+		integer("wobblyRange", "Range", Cost.LOW, "More blocks meshed every frame.", 8, 512,
+			"Blocks around you within which wobbly blocks are drawn as gel and react to bodies.");
+		num("honeyGelAbsorbR", "Honey absorption red", Cost.NONE, LOOK, 0, 10, 0.01, "How much red light a block of honey swallows.");
+		num("honeyGelAbsorbG", "Honey absorption green", Cost.NONE, LOOK, 0, 10, 0.01, "How much green light a block of honey swallows.");
+		num("honeyGelAbsorbB", "Honey absorption blue", Cost.NONE, LOOK, 0, 10, 0.01, "How much blue light a block of honey swallows.");
+		num("honeyGelScatterR", "Honey colour red", Cost.NONE, LOOK, 0, 2, 0.01, "Red of the colour honey glows with inside.");
+		num("honeyGelScatterG", "Honey colour green", Cost.NONE, LOOK, 0, 2, 0.01, "Green of the colour honey glows with inside.");
+		num("honeyGelScatterB", "Honey colour blue", Cost.NONE, LOOK, 0, 2, 0.01, "Blue of the colour honey glows with inside.");
+		num("honeyGelDensity", "Honey cloudiness", Cost.NONE, LOOK, 0, 10, 0.05, "How quickly honey's own colour builds up with depth.");
+		num("honeyGelHaze", "Honey haze", Cost.LOW, "Blurs the scene behind with up to 9 samples per pixel.", 0, 4, 0.05,
+			"How much honey blurs what is seen through it.");
+
+		category("Realistic ice");
+		toggle("realisticIce", "Realistic ice", Cost.MEDIUM, "Every visible ice face is shaded with refraction and a short march through the ice; "
+			+ "the faces are cached and only rebuilt where ice changes.",
+			"Vanilla ice (and frost-walker ice) is drawn as clear, real-looking ice: it bends what is behind it, shows blue only through "
+				+ "thick ice, has milky clouds, trapped air bubbles and fracture planes inside, and a frosty top. The blocks stay vanilla "
+				+ "ice (same item, same slipperiness, same melting). Off: the vanilla ice texture.");
+		num("realisticIceCloudiness", "Cloudiness", Cost.NONE, LOOK, 0, 1, 0.01,
+			"Milky clouds inside the ice, thicker toward its core. 0 is perfectly clear ice.");
+		num("realisticIceBubbles", "Air bubbles", Cost.NONE, LOOK, 0, 1, 0.01,
+			"How many trapped air bubbles (short vertical streaks) there are inside the ice.");
+		num("realisticIceCracks", "Cracks", Cost.NONE, LOOK, 0, 1, 0.01,
+			"Strength of the thin white fracture planes inside the ice.");
+		num("realisticIceRefraction", "Refraction", Cost.NONE, LOOK, 0, 2, 0.01,
+			"How strongly the ice bends what is seen through it.");
+
+		category("Realistic grass");
+		toggle("realisticGrass", "Realistic grass", Cost.HIGH, "Every grass block near you is drawn as its own blades and simulated on the GPU.",
+			"Short grass, tall grass and their dry versions near you become real grass that bends in the wind and gets pushed and "
+				+ "trampled by players, mobs, items and realistic blocks. Further away the vanilla grass stays.");
+		integer("grassStyle", "Grass style", Cost.HIGH, "0 is the heaviest (one spring per blade); 2 is about one spring per block.", 0, 2,
+			"0 = blades: every blade is its own spring. 1 = clumps: a few blades bend together (cheaper). 2 = cards: the two crossed "
+				+ "planes of vanilla grass, drawn as blade shapes, each bending as one piece (cheapest).");
+		toggle("grassTrails", "Grass remembers trails", Cost.NONE, LOOK,
+			"Trampled grass stays pressed down where things walked and stands back up slowly, leaving paths. Off: it springs back at once.");
+		num("grassTrailTime", "Trail recovery time", Cost.NONE, LOOK, 1, 600, 1,
+			"Seconds for fully trampled grass to stand back up when trails are on.");
+		toggle("grassCartoon", "Cartoon grass", Cost.NONE, LOOK,
+			"Stylised look: saturated colours from a deep base to bright tips, banded light and a soft rim, instead of natural shading.");
+		toggle("grassPackDraw", "Shader pack draws grass", Cost.MEDIUM, "Every blade goes through the pack's entity shader (and its shadow pass) as real geometry.",
+			"With a Vitrail shader pack running, the pack draws the realistic grass itself, so it gets the pack's lighting, shadows (cast "
+				+ "and received), fog, colour grading and effects like any entity. The blades still move the same. Off: the grass is drawn "
+				+ "by this mod on top of the pack's image, with its own shading and grass shadows. Cards use the vanilla grass texture here.");
+		integer("grassRadius", "Grass range", Cost.HIGH, "Blocks around you; the number of grass blocks grows with its square.", 8, 512,
+			"How far from you grass is realistic, in blocks (whole chunks). Beyond it the vanilla grass is drawn. Far blades thin out gradually.");
+		integer("grassBlades", "Blades per block", Cost.HIGH, "Each blade is drawn and simulated every frame.", 4, 1024,
+			"Blades in one grass block for the blades style (clumps use a fifth as many clumps of five blades).");
+		num("grassHeight", "Grass height", Cost.NONE, LOOK, 0.3, 2.5, 0.05,
+			"Scales every blade's height. 1 matches the vanilla grass sprites (short grass 0.88, tall grass 2 blocks).");
+		num("grassWidth", "Blade width", Cost.LOW, "Wider blades cover more pixels.", 0.3, 3, 0.05,
+			"Scales how wide each blade is.");
+		num("grassWind", "Grass wind", Cost.NONE, LOOK, 0, 4, 0.05,
+			"How strongly the wind moves the grass. Rain makes it stronger and thunder stronger still.");
+		num("grassStiffness", "Grass stiffness", Cost.NONE, LOOK, 0.2, 4, 0.05,
+			"How hard blades spring back upright. 1 sways like real grass (a few times a second, settling softly); lower is floppier, higher stiffer.");
+		integer("grassPush", "How things push grass", Cost.NONE, LOOK, 0, 1,
+			"0 = contact: blades are pushed out of the way where bodies actually touch them, along the way they move and to the sides. "
+				+ "1 = wind push: each body pushes the grass around it with a soft field of air, smoother and wider. Both bend blades past "
+				+ "their limit to leave trails when trails are on.");
+		integer("grassShadows", "Grass shadows", Cost.MEDIUM, "Draws the grass a second time (half the blades) into its own shadow map.", 0, 2,
+			"Blades cast sun shadows on each other and on the ground. 0 = off, 1 = only with a shader pack (vanilla has no sun "
+				+ "shadows), 2 = always. Blades also receive the shader pack's own shadows (trees, buildings) whenever pack shadows are on.");
+		num("grassShadowStrength", "Grass shadow strength", Cost.NONE, LOOK, 0, 1, 0.01,
+			"How much sunlight a blade's shadow takes away.");
+		num("grassPullStrength", "Grass pull-out strength", Cost.NONE, LOOK, 0.05, 3, 0.05,
+			"How far past where a held blade can reach your hand has to pull it (in blocks) before it comes out of the ground. "
+				+ "Right-click grass with an empty hand to grab a blade, sneak + right-click to grab a bunch.");
+		num("grassLieTime", "Pulled grass lies for", Cost.NONE, LOOK, 5, 3600, 5,
+			"Seconds a pulled-out blade lies on the ground (drying out) before it is gone and starts growing back.");
+		num("grassRegrowTime", "Grass regrow time", Cost.NONE, LOOK, 1, 3600, 1,
+			"Seconds for a pulled-out blade to grow back to full height from its root.");
+		num("grassGrabRadius", "Grab bunch size", Cost.NONE, LOOK, 0.05, 0.6, 0.01,
+			"Radius in blocks around the grabbed blade that sneak + right-click grabs too (up to 64 blades).");
+		integer("grassShadowResolution", "Grass shadow detail", Cost.MEDIUM, "Pixels per side of the grass shadow map.", 256, 8192,
+			"Size of the grass shadow map; it covers the grass range around you, so a bigger range needs more for the same sharpness.");
+
+		category("Realistic tree leaves");
+		toggle("realisticTreeLeaves", "Realistic tree leaves", Cost.HIGH, "Hundreds of leaves and a few sticks drawn per leaves block near you.",
+			"Leaves blocks near you are drawn as many overlapping leaves around sticks that branch back to the tree's logs, with a "
+				+ "lumpy outline instead of cubes. Only the look changes. Further away the vanilla leaves stay. Client-side only.");
+		integer("treeLeafRadius", "Tree leaves range", Cost.HIGH, "Blocks around you; the number of leaves blocks grows with its square.", 8, 512,
+			"How far from you leaves are realistic, in blocks (whole chunks). Beyond it the vanilla leaves are drawn. Far leaves "
+				+ "thin out (and get bigger) gradually.");
+		integer("treeLeavesPerBlock", "Leaves per block", Cost.HIGH, "Every leaf is a quad drawn each frame.", 8, 1024,
+			"Leaves in one leaves block close to you. With vanilla leaf textures an eighth of this is drawn.");
+		num("treeLeafSize", "Leaf size", Cost.LOW, "Bigger leaves cover more pixels.", 0.3, 3, 0.05,
+			"Scales every leaf. 1 is a realistic leaf about a fifth of a block long (vanilla textures: 5 vanilla pixels); the default is 1.25.");
+		toggle("treeVanillaTextures", "Vanilla leaf textures", Cost.NONE, LOOK,
+			"Leaves show pieces of the vanilla leaves texture and sticks are square rods with the log's bark, all one size and "
+				+ "stopping just short of each other. Off: smooth leaves in the leaves' own colour on round, tapering sticks.");
+		integer("treeStickRule", "How sticks branch", Cost.NONE, LOOK, 0, 1,
+			"0 = each leaves block's stick goes to the neighbour on its shortest way to a log (straight branches toward the trunk). "
+				+ "1 = to a random neighbour that is closer to a log (picked by position, so it never changes).");
+		integer("treeSideSticks", "Extra sticks per block", Cost.LOW, "Each is a small tube drawn every frame.", 0, 6,
+			"Smaller sticks in every leaves block that branch off and end in the leaves. Leaves far from any log only have these.");
+		toggle("treePackDraw", "Shader pack draws tree leaves", Cost.MEDIUM, "Every leaf goes through the pack's entity shader (and its shadow pass).",
+			"With a Vitrail shader pack running, the pack draws the realistic leaves itself, so they get the pack's lighting, "
+				+ "shadows, fog and effects. Off: they are drawn by this mod on top of the pack's image.");
+		num("treeLeafDetailRange", "Full leaves within", Cost.HIGH, "Blocks this close get every leaf.", 0, 512, 1,
+			"Distance in blocks up to which leaves blocks get all their leaves; from there to the range they thin out.");
+		num("treeLeafFarDensity", "Leaves far away", Cost.MEDIUM, "Fewer, bigger leaves far away.", 0.02, 1, 0.01,
+			"Share of the leaves a block keeps at the edge of the range (they grow so the block stays as full).");
+		num("treeWind", "Tree wind", Cost.LOW, "One spring per leaves block, stepped every frame.", 0, 4, 0.05,
+			"How strongly the wind sways branches and flutters leaves. 0 = no wind. Rain makes it stronger and thunder stronger still.");
+		num("treeRainHits", "Rain on leaves", Cost.LOW, "Drops are found by their leaves block on the GPU.", 0, 3, 0.05,
+			"How hard realistic rain drops landing on leaves flick them down and bounce the branch. 0 = drops don't move leaves.");
+		num("treeGrabRadius", "Grab bunch size", Cost.NONE, "Only when you grab.", 0.01, 2, 0.01,
+			"Right-click leaves or a stick with an empty hand to grab it; sneaking grabs every leaf within this distance (blocks) of "
+				+ "the grabbed leaf.");
+		num("treeLeafPullDistance", "Pull to pluck", Cost.NONE, "Only when you grab.", 0.05, 3, 0.05,
+			"How far (blocks) you have to pull a grabbed leaf from its spot, for a quarter second, before it comes off. Let go and it "
+				+ "falls; the tree grows it back later.");
+		num("treeFallenLeafLife", "Fallen leaf life", Cost.NONE, "One timer per fallen leaf, ticked on the CPU.", 10, 3600, 10,
+			"Seconds a leaf that came off a tree lies on the ground before it disappears (one leaf at a time). It only counts while "
+				+ "the pile is loaded and within the tree leaves range, and survives relogging. Plucked leaves grow back on their "
+				+ "tree after this long. Leaves you place yourself never disappear.");
+		toggle("treeLeafSinking", "Sink into leaves", Cost.NONE, "A different hitbox for you only.",
+			"You stand in tree leaves instead of on them: you always sink in 0.2 (the top is at 0.8), and sides open to air let you in "
+				+ "a little. Your own choice: other players choose for themselves.");
+		num("treeShadowLeaves", "Leaves casting shadows", Cost.LOW, "The pack's shadow pass draws this share of the leaves.", 0, 1, 0.01,
+			"With a shader pack drawing the leaves: the share of leaves that cast sun shadows (sticks always do). Lower lets more "
+				+ "light through the canopy onto the leaves inside and the ground; 1 makes trees as dark inside as solid leaves.");
 
 		category("Realistic kelp");
 		toggle("realisticKelp", "Realistic kelp", Cost.MEDIUM, "Only kelp that moves is simulated; still kelp sleeps.",
@@ -701,6 +852,30 @@ public final class WaterSettingsInfo {
 			"Hot water hurts players and mobs whose feet are in it: 1 health point at an average of 60 degrees, rising to 4 at 100 "
 				+ "(2 points are one heart), times this. Hits come as often as vanilla allows, like a magma block. Fire Resistance protects "
 				+ "completely. 0 turns it off.");
+
+		category("Freezing (preview)");
+		toggle("waterFreezing", "Freezing", Cost.NONE, "Uses the water temperature data; needs Water temperature on.",
+			"Water below 0 degrees turns into slush (ice crystals in water) and then solid ice that holds still, and melts back the same way. "
+				+ "Solid ice is a real block you can stand on. For now only /water freeze sets it, so the looks can be checked.");
+		num("slushDrag", "Slush stiffness", Cost.NONE, LOOK, 0, 40, 0.5,
+			"How strongly slush drags on whatever holds it up, per second at full ice, so it heaps and slumps instead of running.");
+		num("iceCloudiness", "Ice cloudiness", Cost.NONE, LOOK, 0, 1, 0.01,
+			"Milky clouds inside the ice, thicker toward its core. 0 is perfectly clear ice.");
+		num("iceBubbles", "Ice air bubbles", Cost.NONE, LOOK, 0, 1, 0.01,
+			"How many trapped air bubbles (short vertical streaks) there are inside the ice.");
+		num("iceCracks", "Ice cracks", Cost.NONE, LOOK, 0, 1, 0.01,
+			"Strength of the thin white fracture planes inside the ice.");
+		num("slushGrainSize", "Slush grain size", Cost.NONE, LOOK, 0.2, 4, 0.05,
+			"Size of the lumps and crystals on slush's own surface look; 1 is about a seventh of a block for the lumps.");
+		toggle("slushCrystals", "Slush ice crystals", Cost.MEDIUM, "One small quad per slush particle near the surface, plus a pass over the water's particles.",
+			"Slush shows as small ice crystals floating in the water and moving with it, seen through the water's surface.");
+		num("slushCrystalSize", "Slush crystal size", Cost.MEDIUM, "Bigger crystals cover more pixels; tiny far ones are skipped.", 0, 0.2, 0.005,
+			"Radius of the biggest ice crystals in slush, in blocks (0.03 is about 3 cm). Crystals in watery slush are about half that.");
+		num("slushCrystalOpacity", "Slush crystal opacity", Cost.NONE, LOOK, 0, 1, 0.01,
+			"How solid the ice crystals in slush look. Their middles are clearer than this and their rims frostier; 1 is opaque.");
+		num("slushSurface", "Slush surface look", Cost.LOW, "Off (0) skips the slush surface shading.", 0, 1, 0.01,
+			"How much the top of slush is shaded as a lumpy white mush instead of plain water. 0 keeps the water's own surface and "
+				+ "shows the slush only through its crystals.");
 
 		category("Steam");
 		num("steamParticleSize", "Steam particle size", Cost.HIGH, "Halving it makes eight times as many points for the same steam.", 0.005, 1, 0.005,

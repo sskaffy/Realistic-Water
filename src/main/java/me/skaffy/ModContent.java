@@ -5,6 +5,7 @@ import me.skaffy.block.RealisticLeavesBlock;
 import me.skaffy.block.RealisticSandBlock;
 import me.skaffy.block.RealisticWaterBlock;
 import me.skaffy.block.WaveMakerBlock;
+import me.skaffy.block.WaterDrainBlock;
 import me.skaffy.fluid.RealisticLavaFluid;
 import me.skaffy.fluid.RealisticSlimeFluid;
 import me.skaffy.fluid.RealisticWaterFluid;
@@ -43,6 +44,7 @@ import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.DispenserBlock;
 import net.minecraft.world.level.block.SoundType;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.block.state.properties.NoteBlockInstrument;
@@ -165,6 +167,10 @@ public final class ModContent {
 			.setId(REALISTIC_LEAVES_KEY)
 	));
 
+	public static final net.minecraft.world.level.block.entity.BlockEntityType<me.skaffy.block.LeafPileBlockEntity> LEAF_PILE = Registry.register(
+		BuiltInRegistries.BLOCK_ENTITY_TYPE, RealisticWater.id("leaf_pile"),
+		new net.minecraft.world.level.block.entity.BlockEntityType<>(me.skaffy.block.LeafPileBlockEntity::new, java.util.Set.of(REALISTIC_LEAVES)));
+
 	public static final ResourceKey<Item> REALISTIC_LEAVES_ITEM_KEY = ResourceKey.create(Registries.ITEM, RealisticWater.id("realistic_leaves"));
 	public static final Item REALISTIC_LEAVES_ITEM = registerBlockItem(REALISTIC_LEAVES_ITEM_KEY, REALISTIC_LEAVES);
 
@@ -180,6 +186,30 @@ public final class ModContent {
 
 	public static final ResourceKey<Item> WAVE_MAKER_ITEM_KEY = ResourceKey.create(Registries.ITEM, RealisticWater.id("wave_maker"));
 	public static final Item WAVE_MAKER_ITEM = registerBlockItem(WAVE_MAKER_ITEM_KEY, WAVE_MAKER);
+
+	public static final ResourceKey<Block> WATER_DRAIN_KEY = ResourceKey.create(Registries.BLOCK, RealisticWater.id("water_drain"));
+	public static final Block WATER_DRAIN = Registry.register(BuiltInRegistries.BLOCK, WATER_DRAIN_KEY, new WaterDrainBlock(
+		BlockBehaviour.Properties.of()
+			.mapColor(MapColor.METAL)
+			.strength(1.5F, 6.0F)
+			.sound(SoundType.METAL)
+			.setId(WATER_DRAIN_KEY)
+	));
+	public static final ResourceKey<Item> WATER_DRAIN_ITEM_KEY = ResourceKey.create(Registries.ITEM, RealisticWater.id("water_drain"));
+	public static final Item WATER_DRAIN_ITEM = registerBlockItem(WATER_DRAIN_ITEM_KEY, WATER_DRAIN);
+	public static final ResourceKey<Block> WOBBLY_SLIME_BLOCK_KEY = ResourceKey.create(Registries.BLOCK, RealisticWater.id("wobbly_slime_block"));
+	public static final Block WOBBLY_SLIME_BLOCK = Registry.register(BuiltInRegistries.BLOCK, WOBBLY_SLIME_BLOCK_KEY, new me.skaffy.block.WobblySlimeBlock(
+		BlockBehaviour.Properties.of().mapColor(MapColor.GRASS).friction(0.8F).bounceRestitution(1.0F).sound(SoundType.SLIME_BLOCK).noOcclusion()
+			.setId(WOBBLY_SLIME_BLOCK_KEY)));
+	public static final ResourceKey<Item> WOBBLY_SLIME_ITEM_KEY = ResourceKey.create(Registries.ITEM, RealisticWater.id("wobbly_slime_block"));
+	public static final Item WOBBLY_SLIME_ITEM = registerBlockItem(WOBBLY_SLIME_ITEM_KEY, WOBBLY_SLIME_BLOCK);
+	public static final ResourceKey<Block> WOBBLY_HONEY_BLOCK_KEY = ResourceKey.create(Registries.BLOCK, RealisticWater.id("wobbly_honey_block"));
+	public static final Block WOBBLY_HONEY_BLOCK = Registry.register(BuiltInRegistries.BLOCK, WOBBLY_HONEY_BLOCK_KEY, new me.skaffy.block.WobblyHoneyBlock(
+		BlockBehaviour.Properties.of().mapColor(MapColor.COLOR_ORANGE).speedFactor(0.4F).jumpFactor(0.5F).noOcclusion().sound(SoundType.HONEY_BLOCK)
+			.setId(WOBBLY_HONEY_BLOCK_KEY)));
+	public static final ResourceKey<Item> WOBBLY_HONEY_ITEM_KEY = ResourceKey.create(Registries.ITEM, RealisticWater.id("wobbly_honey_block"));
+	public static final Item WOBBLY_HONEY_ITEM = registerBlockItem(WOBBLY_HONEY_ITEM_KEY, WOBBLY_HONEY_BLOCK);
+
 	public static final SoundEvent BOILING = Registry.register(BuiltInRegistries.SOUND_EVENT, RealisticWater.id("block.realistic_water.boil"),
 		SoundEvent.createVariableRangeEvent(RealisticWater.id("block.realistic_water.boil")));
 	public static final SoundEvent WAVE_MAKER_RUN = Registry.register(BuiltInRegistries.SOUND_EVENT, RealisticWater.id("block.wave_maker.run"),
@@ -242,6 +272,11 @@ public final class ModContent {
 	}
 
 	static void init() {
+		var waterBucketBehavior = java.util.Objects.requireNonNull(
+			DispenserBlock.DISPENSER_REGISTRY.get(Items.WATER_BUCKET), "Water bucket dispenser behavior");
+		DispenserBlock.registerBehavior(REALISTIC_WATER_BUCKET, waterBucketBehavior);
+		DispenserBlock.registerBehavior(SMALL_REALISTIC_WATER_BUCKET, waterBucketBehavior);
+
 		CreativeModeTabEvents.modifyOutputEvent(CreativeModeTabs.TOOLS_AND_UTILITIES)
 			.register(output -> {
 				output.insertAfter(Items.WATER_BUCKET, REALISTIC_WATER_BUCKET);
@@ -250,6 +285,12 @@ public final class ModContent {
 				output.insertAfter(REALISTIC_LAVA_BUCKET, REALISTIC_SLIME_BUCKET);
 				output.insertAfter(REALISTIC_SLIME_BUCKET, CONVERTER);
 				output.insertAfter(CONVERTER, WAVE_MAKER_ITEM);
+				output.insertAfter(WAVE_MAKER_ITEM, WATER_DRAIN_ITEM);
+			});
+		CreativeModeTabEvents.modifyOutputEvent(CreativeModeTabs.FUNCTIONAL_BLOCKS)
+			.register(output -> {
+				output.accept(WOBBLY_SLIME_ITEM);
+				output.accept(WOBBLY_HONEY_ITEM);
 			});
 		CreativeModeTabEvents.modifyOutputEvent(CreativeModeTabs.NATURAL_BLOCKS)
 			.register(output -> {

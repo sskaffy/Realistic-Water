@@ -54,7 +54,7 @@ public class RealisticBoatRenderer extends EntityRenderer<RealisticBoatEntity, R
 		state.hurtDir = 1;
 		state.damageTime = 0.0F;
 		state.bubbleAngle = 0.0F;
-		state.isUnderWater = false;
+		state.isUnderWater = !BoatWaterMask.needed(entity.level(), entity.getBoundingBox());
 		state.rowingTimeLeft = entity.rowingTime(0, partialTicks);
 		state.rowingTimeRight = entity.rowingTime(1, partialTicks);
 		state.type = entity.vanillaType();

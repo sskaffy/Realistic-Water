@@ -55,7 +55,7 @@ public class RealisticBlockItem extends Item {
 			return false;
 		}
 		Block block = item.getBlock();
-		if (block == ModContent.WAVE_MAKER) {
+		if (block == ModContent.WAVE_MAKER || block == ModContent.WOBBLY_SLIME_BLOCK || block == ModContent.WOBBLY_HONEY_BLOCK) {
 			return true;
 		}
 		return !REFUSED.contains(block) && !BuiltInRegistries.BLOCK.getKey(block).getNamespace().equals(RealisticWater.MOD_ID);

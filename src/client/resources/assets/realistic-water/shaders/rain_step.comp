@@ -7,6 +7,70 @@ layout(std430, binding = 3) buffer Cursor { uint cursor[]; };
 layout(std430, binding = 4) readonly buffer Columns { ivec4 cols[]; };
 layout(std430, binding = 5) buffer Events { uvec4 eventCount; vec4 events[]; };
 
+#ifdef TREES
+uint hash(uint x) {
+    return rhash(x);
+}
+float rand(inout uint state) {
+    return rrand(state);
+}
+#define TREE_PARAMS_BINDING 6
+#define TREE_BLOCKS_BINDING 7
+#include "tree_common.glsl"
+layout(std430, binding = 8) readonly buffer TreeTable { uint ttable[]; };
+layout(std430, binding = 9) readonly buffer TreeMotions { TreeMotion tmotion[]; };
+
+int treeLookup(ivec3 p) {
+    uint key = uint(p.x & 2047) | (uint(p.z & 2047) << 11) | (uint(p.y & 1023) << 22);
+    uint mask = uint(T.sim.x);
+    uint h = rhash(key) & mask;
+    for (int probe = 0; probe < 64; probe++) {
+        uint k = ttable[h * 2u];
+        if (k == key) {
+            return int(ttable[h * 2u + 1u]);
+        }
+        if (k == 0xFFFFFFFFu) {
+            return -1;
+        }
+        h = (h + 1u) & mask;
+    }
+    return -1;
+}
+
+float hitLeaves(int slot, vec3 p0, vec3 p1, vec3 camTree, out vec3 hit) {
+    TreeBlock b = tblocks[slot];
+    if (!treeActive(b)) {
+        return 2.0;
+    }
+    vec3 corner = vec3(b.pos.xyz - T.cam.xyz);
+    int count = treeLeafCount(length(corner + 0.5 - camTree));
+    TreeMotion m = tmotion[slot];
+    vec3 a = p0 - corner;
+    vec3 d = p1 - p0;
+    float best = 2.0;
+    for (int i = 0; i < count; i++) {
+        TreeLeaf l = treeLeaf(b, i, count);
+        treeLeafMove(l, m);
+        float denom = dot(l.normal, d);
+        if (abs(denom) < 1e-6) {
+            continue;
+        }
+        float t = dot(l.normal, l.centre - a) / denom;
+        if (t < 0.0 || t > 1.0 || t >= best) {
+            continue;
+        }
+        vec3 q = a + d * t - l.centre;
+        float u = dot(q, l.across) / (l.size * 0.38);
+        float v = dot(q, l.along) / (l.size * 0.5);
+        if (u * u + v * v <= 1.0) {
+            best = t;
+            hit = corner + l.centre;
+        }
+    }
+    return best;
+}
+#endif
+
 void event(vec3 at, float kind) {
     uint e = atomicAdd(eventCount.x, 1u);
     if (e < uint(R.extra.x)) {
@@ -54,14 +118,66 @@ void main() {
     ivec4 col = cols[columnIndex(c)];
     bool known = col.x == c.x && col.y == c.y;
     int flags = col.w & 0xFF;
+    float top = intBitsToFloat(col.z);
+#ifdef TREES
+    if (known && (flags & COL_LEAVES) != 0 && (flags & COL_RAINS) != 0 && d.pos.y <= top && T.cam.w > 0) {
+        vec3 toTree = T.rain.xyz;
+        vec3 p1 = d.pos.xyz + toTree;
+        vec3 p0 = p1 - d.vel.xyz * R.shift.w;
+        ivec3 canopyTop = T.cam.xyz + ivec3(floor(vec3(p1.x, top - 0.5 + toTree.y, p1.z)));
+        if (treeLookup(canopyTop) >= 0) {
+            float ground = top - float((col.w >> 16) & 255) / 8.0;
+            vec3 camTree = R.cam.xyz + toTree;
+            float best = 2.0;
+            vec3 hit = vec3(0.0);
+            int y0 = int(floor(min(p0.y, top + toTree.y - 1e-3)));
+            int y1 = int(floor(p1.y));
+            for (int y = y0; y >= y1 && y >= y0 - 3; y--) {
+                int slot = treeLookup(T.cam.xyz + ivec3(int(floor(p1.x)), y, int(floor(p1.z))));
+                if (slot >= 0) {
+                    vec3 h;
+                    float t = hitLeaves(slot, p0, p1, camTree, h);
+                    if (t < best) {
+                        best = t;
+                        hit = h;
+                    }
+                }
+            }
+            if (best <= 1.0) {
+                vec3 at = p0 + (p1 - p0) * best - toTree;
+                event(hit - toTree, EVENT_LEAF);
+                int droplets = int(R.splash.x * 0.5 + rrand(seed));
+                uint base = droplets > 0 ? atomicAdd(cursor[0], uint(droplets)) : 0u;
+                for (int k = 0; k < droplets; k++) {
+                    float a = rrand(seed) * 6.2831853;
+                    float out_ = R.splash.y * (0.15 + 0.35 * rrand(seed));
+                    Drop s;
+                    s.pos = vec4(at, 0.0);
+                    s.vel = vec4(cos(a) * out_, R.splash.y * (0.2 + 0.5 * rrand(seed)), sin(a) * out_, R.splash.z * (0.4 + 0.6 * rrand(seed)));
+                    splashes[(base + uint(k)) % uint(R.counts.y)] = s;
+                }
+                respawn(d, seed, true);
+                drops[i] = d;
+                return;
+            }
+            if (d.pos.y > ground) {
+                drops[i] = d;
+                return;
+            }
+            top = ground;
+            flags &= ~COL_LEAVES;
+        }
+    }
+#endif
     if (known && (flags & COL_RAINS) == 0) {
         respawn(d, seed, true);
-    } else if (known && d.pos.y <= intBitsToFloat(col.z)) {
-        float top = intBitsToFloat(col.z);
+    } else if (known && d.pos.y <= top) {
         bool water = (flags & COL_WATER) != 0;
         bool lava = (flags & COL_LAVA) != 0;
         if (water || lava) {
             event(vec3(d.pos.x, top, d.pos.z), lava ? EVENT_LAVA : EVENT_WATER);
+        } else if ((flags & COL_LEAVES) != 0) {
+            event(vec3(d.pos.x, top, d.pos.z), EVENT_LEAF);
         }
         int droplets = lava ? 0 : water ? int(rrand(seed) < 0.4) : int(R.splash.x + rrand(seed));
         int ripple = water ? 1 : 0;

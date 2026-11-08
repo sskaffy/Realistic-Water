@@ -20,6 +20,7 @@ public final class VkBuf implements AutoCloseable {
 	public static final int INDIRECT = VK10.VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
 	public static final int SRC = VK10.VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
 	public static final int DST = VK10.VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+	public static final int VERTEX = VK10.VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
 
 	public final long handle;
 	public final long allocation;

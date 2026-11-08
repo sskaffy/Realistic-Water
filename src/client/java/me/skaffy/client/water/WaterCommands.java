@@ -64,6 +64,10 @@ public final class WaterCommands {
 			.then(op("leaves")
 				.executes(c -> ball(c, 2, Material.LEAVES))
 				.then(argument("size", IntegerArgumentType.integer(1, 64)).executes(c -> ball(c, IntegerArgumentType.getInteger(c, "size"), Material.LEAVES))))
+			.then(op("freeze")
+				.then(op("water").executes(c -> freeze(c, "water")))
+				.then(op("slush").executes(c -> freeze(c, "slush")))
+				.then(op("ice").executes(c -> freeze(c, "ice"))))
 			.then(op("remove")
 				.executes(c -> {
 					WaterWorld.get().removeAll(Minecraft.getInstance().options.renderDistance().get() + 2, Material.WATER);
@@ -107,6 +111,11 @@ public final class WaterCommands {
 				.then(argument("seconds", DoubleArgumentType.doubleArg(0.05))
 					.executes(c -> render(c, 60))
 					.then(argument("fps", IntegerArgumentType.integer(1, 240)).executes(c -> render(c, IntegerArgumentType.getInteger(c, "fps")))))));
+	}
+
+	private static int freeze(CommandContext<FabricClientCommandSource> c, String phase) {
+		c.getSource().sendFeedback(Component.literal(WaterWorld.get().forcePhase(phase)));
+		return 1;
 	}
 
 	private static int ball(CommandContext<FabricClientCommandSource> c, int size, Material material) {

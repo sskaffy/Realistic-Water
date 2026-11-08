@@ -1,0 +1,7 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": ["III", "IHI", "III"],
+  "key": { "I": "minecraft:iron_ingot", "H": "minecraft:hopper" },
+  "result": { "id": "realistic-water:water_drain", "count": 1 }
+}

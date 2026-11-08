@@ -59,6 +59,7 @@ public class RealisticWater implements ModInitializer {
 		PayloadTypeRegistry.serverboundPlay().register(LavaSyncPayload.TYPE, LavaSyncPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(SlimeSyncPayload.TYPE, SlimeSyncPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(LeavesSyncPayload.TYPE, LeavesSyncPayload.CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(me.skaffy.net.FallenLeavesPayload.TYPE, me.skaffy.net.FallenLeavesPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(RemoveAllWaterPayload.TYPE, RemoveAllWaterPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(FluidMixPayload.TYPE, FluidMixPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(VanillaFeedPayload.TYPE, VanillaFeedPayload.CODEC);
@@ -71,6 +72,7 @@ public class RealisticWater implements ModInitializer {
 		PayloadTypeRegistry.serverboundPlay().register(BodyStatePayload.TYPE, BodyStatePayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(BodyPushPayload.TYPE, BodyPushPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(OceanModePayload.TYPE, OceanModePayload.CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(me.skaffy.net.LeafModePayload.TYPE, me.skaffy.net.LeafModePayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(OceanZonesPayload.TYPE, OceanZonesPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(OceanSyncPayload.TYPE, OceanSyncPayload.CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(BodyPushPayload.TYPE, BodyPushPayload.CODEC);
@@ -91,7 +93,10 @@ public class RealisticWater implements ModInitializer {
 		ServerTickEvents.END_LEVEL_TICK.register(OceanServer::tick);
 		ServerChunkEvents.CHUNK_UNLOAD.register(OceanServer::onChunkUnload);
 		ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> server.execute(() -> OceanServer.forget(handler.getPlayer())));
+		ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> me.skaffy.trees.LeafSinking.forget(handler.getPlayer()));
 		ServerPlayNetworking.registerGlobalReceiver(OceanModePayload.TYPE, (payload, context) -> context.server().execute(() -> payload.apply(context.player())));
+		ServerPlayNetworking.registerGlobalReceiver(me.skaffy.net.LeafModePayload.TYPE,
+			(payload, context) -> context.server().execute(() -> payload.apply(context.player())));
 		ServerPlayNetworking.registerGlobalReceiver(OceanZonesPayload.TYPE, (payload, context) -> {
 			if (isAuthority(context.server(), context.player())) {
 				context.server().execute(() -> payload.apply(context.player()));
@@ -133,6 +138,11 @@ public class RealisticWater implements ModInitializer {
 			}
 		});
 		ServerPlayNetworking.registerGlobalReceiver(SlimeSyncPayload.TYPE, (payload, context) -> {
+			if (isAuthority(context.server(), context.player())) {
+				context.server().execute(() -> payload.apply(context.player()));
+			}
+		});
+		ServerPlayNetworking.registerGlobalReceiver(me.skaffy.net.FallenLeavesPayload.TYPE, (payload, context) -> {
 			if (isAuthority(context.server(), context.player())) {
 				context.server().execute(() -> payload.apply(context.player()));
 			}

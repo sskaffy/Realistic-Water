@@ -240,6 +240,36 @@ public final class RealisticPhysics {
 		}
 
 		@Override
+		public double bounce(int x, int y, int z) {
+			this.pos.set(x, y, z);
+			return this.level.hasChunkAt(this.pos) ? this.level.getBlockState(this.pos).getBlock().getBounceRestitution() : 0.0;
+		}
+
+		@Override
+		public double[][] boxesFor(me.skaffy.physics.RigidBody body, int x, int y, int z) {
+			this.pos.set(x, y, z);
+			if (this.level.hasChunkAt(this.pos)) {
+				BlockState state = this.level.getBlockState(this.pos);
+				int gel = me.skaffy.block.WobblyBlocks.gelKind(state);
+				if (gel >= 0) {
+					double volume = (body.maxX - body.minX) * (body.maxY - body.minY) * (body.maxZ - body.minZ);
+					VoxelShape shape = me.skaffy.block.WobblyBlocks.sunk(this.level, this.pos.immutable(), state,
+						me.skaffy.block.WobblyBlocks.topDent(volume, gel == 1), gel == 1);
+					if (shape != null) {
+						List<AABB> list = shape.toAabbs();
+						double[][] out = new double[list.size()][];
+						for (int i = 0; i < list.size(); i++) {
+							AABB b = list.get(i);
+							out[i] = new double[]{x + b.minX, y + b.minY, z + b.minZ, x + b.maxX, y + b.maxY, z + b.maxZ};
+						}
+						return out;
+					}
+				}
+			}
+			return this.boxes(x, y, z);
+		}
+
+		@Override
 		public double[][] boxes(int x, int y, int z) {
 			long key = BlockPos.asLong(x, y, z);
 			double[][] cached = this.boxes.get(key);

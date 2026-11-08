@@ -1,0 +1,6 @@
+{
+  "variants": {
+    "open=false": { "model": "realistic-water:block/water_drain_closed" },
+    "open=true": { "model": "realistic-water:block/water_drain" }
+  }
+}

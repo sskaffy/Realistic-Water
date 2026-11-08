@@ -131,11 +131,17 @@ public final class BlockMaterials {
 	}
 
 	public static double grip(float vanillaFriction) {
+		if (vanillaFriction >= 0.9F) {
+			return Math.clamp(1.0 - vanillaFriction, 0.005, 0.05);
+		}
 		return Math.clamp((1.0 - vanillaFriction) / 0.4, 0.05, 1.5);
 	}
 
 	public static RigidBody.Cell cell(int x, int y, int z, BlockState state) {
-		return new RigidBody.Cell(x, y, z, density(state) * WEIGHT, flammable(state), grip(state.getBlock().getFriction()), state, solidBoxes(state));
+		RigidBody.Cell cell = new RigidBody.Cell(x, y, z, density(state) * WEIGHT, flammable(state), grip(state.getBlock().getFriction()), state,
+			solidBoxes(state));
+		cell.bounce = state.getBlock().getBounceRestitution();
+		return cell;
 	}
 
 	private static final double[][] FULL = {{0, 0, 0, 1, 1, 1}};

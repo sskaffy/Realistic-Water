@@ -11,6 +11,20 @@ struct Particle {
 #define MAX_REMOVE 16
 #define AABB_BIAS 1048576
 
+#define C_DIR_SPEED 16
+#define REPORT_DIR_SPEED(v) { \
+    vec3 dirNeg_ = vec3(subgroupMax(max(-(v).x, 0.0)), subgroupMax(max(-(v).y, 0.0)), subgroupMax(max(-(v).z, 0.0))); \
+    vec3 dirPos_ = vec3(subgroupMax(max((v).x, 0.0)), subgroupMax(max((v).y, 0.0)), subgroupMax(max((v).z, 0.0))); \
+    if (subgroupElect()) { \
+        atomicMax(counters[C_DIR_SPEED], floatBitsToUint(dirNeg_.x)); \
+        atomicMax(counters[C_DIR_SPEED + 1], floatBitsToUint(dirNeg_.y)); \
+        atomicMax(counters[C_DIR_SPEED + 2], floatBitsToUint(dirNeg_.z)); \
+        atomicMax(counters[C_DIR_SPEED + 3], floatBitsToUint(dirPos_.x)); \
+        atomicMax(counters[C_DIR_SPEED + 4], floatBitsToUint(dirPos_.y)); \
+        atomicMax(counters[C_DIR_SPEED + 5], floatBitsToUint(dirPos_.z)); \
+    } \
+}
+
 layout(std140, set = 0, binding = 0) uniform Globals {
     ivec4 dims;
     ivec4 faces;
@@ -72,7 +86,22 @@ layout(std140, set = 0, binding = 0) uniform Globals {
     vec4 waveA[8];
     vec4 heatE;
     vec4 seaFoam;
+    vec4 freezeA;
+    vec4 freezeB;
+    vec4 freezeC;
 } G;
+
+float latentFreeze() {
+    return max(G.freezeA.z, 1.0);
+}
+
+float iceFraction(float h) {
+    return clamp(-h / latentFreeze(), 0.0, 1.0);
+}
+
+bool solidIce(float h) {
+    return h <= -latentFreeze();
+}
 
 bool isWater() {
     return G.matA.x < 0.5;
@@ -222,9 +251,31 @@ int numEntities() {
 }
 
 bool entIsCell(int e) { return abs(G.ent[e * 3 + 2].w - 1.0) < 0.5; }
-bool entIsPump(int e) { return G.ent[e * 3 + 2].w > 1.5; }
+bool entIsPump(int e) { return abs(G.ent[e * 3 + 2].w - 2.0) < 0.5; }
+bool entIsDrain(int e) { return abs(G.ent[e * 3 + 2].w - 3.0) < 0.5; }
 bool entIsBox(int e) { return G.ent[e * 3 + 2].w < -1e-4; }
-bool entIsBody(int e) { return entIsCell(e) || entIsBox(e); }
+bool entIsContainer(int e) { return abs(G.ent[e * 3 + 2].w - 4.0) < 0.5; }
+bool entIsExtra(int e) { return abs(G.ent[e * 3 + 2].w - 5.0) < 0.5; }
+bool entIsBody(int e) { return entIsCell(e) || entIsBox(e) || entIsContainer(e); }
+
+struct Vessel {
+    vec3 c;
+    vec4 q;
+    vec3 h;
+    float wall;
+    float floorTop;
+};
+
+Vessel vesselOf(int e) {
+    Vessel s;
+    s.c = G.ent[e * 3].xyz;
+    vec3 qv = vec3(G.ent[e * 3].w, G.ent[e * 3 + 1].w, G.ent[e * 3 + 2].x);
+    s.q = vec4(qv, sqrt(max(1.0 - dot(qv, qv), 0.0)));
+    s.h = vec3(G.ent[e * 3 + 2].y, G.ent[e * 3 + 2].z, G.ent[e * 3 + 3].x);
+    s.wall = G.ent[e * 3 + 3].y;
+    s.floorTop = -s.h.y + G.ent[e * 3 + 3].z;
+    return s;
+}
 vec3 entMin(int e) { return G.ent[e * 3].xyz; }
 vec3 entMax(int e) { return G.ent[e * 3 + 1].xyz; }
 vec3 entVel(int e) { return entIsBody(e) ? G.ent[e * 3 + 1].xyz : G.ent[e * 3 + 2].xyz; }
@@ -234,11 +285,91 @@ vec3 quatRotate(vec4 q, vec3 v) {
     return v + q.w * t + cross(q.xyz, t);
 }
 
+bool vesselInCavity(Vessel s, vec3 l) {
+    return abs(l.x) < s.h.x - s.wall && abs(l.z) < s.h.z - s.wall && l.y > s.floorTop;
+}
+
+bool vesselSolid(Vessel s, vec3 l, float pad) {
+    vec3 h = s.h + pad;
+    if (any(greaterThan(abs(l), h))) {
+        return false;
+    }
+    return !(abs(l.x) < s.h.x - s.wall - pad && abs(l.z) < s.h.z - s.wall - pad && l.y > s.floorTop + pad);
+}
+
+bool vesselPrefersCavity(Vessel s, vec3 l) {
+    float toOut = min(min(s.h.x - abs(l.x), s.h.z - abs(l.z)), min(s.h.y - l.y, l.y + s.h.y));
+    float ix = abs(l.x) - (s.h.x - s.wall);
+    float iz = abs(l.z) - (s.h.z - s.wall);
+    float iy = s.floorTop - l.y;
+    float toIn = max(max(ix, iz), iy);
+    return toIn < toOut && l.y > -s.h.y + 0.5 * (s.floorTop + s.h.y);
+}
+
+bool vesselExit(Vessel s, vec3 l, float pad, bool cavity, out vec3 lp, out vec3 ln) {
+    lp = l;
+    ln = vec3(0.0, 1.0, 0.0);
+    if (cavity) {
+        float ex = s.h.x - s.wall - pad - 0.01;
+        float ez = s.h.z - s.wall - pad - 0.01;
+        float fy = s.floorTop + pad + 0.01;
+        if (ex <= 0.0 || ez <= 0.0) {
+            return false;
+        }
+        float dx = abs(l.x) - ex;
+        float dz = abs(l.z) - ez;
+        float dy = fy - l.y;
+        lp = vec3(clamp(l.x, -ex, ex), max(l.y, fy), clamp(l.z, -ez, ez));
+        if (dy >= dx && dy >= dz) {
+            ln = vec3(0.0, 1.0, 0.0);
+        } else if (dx >= dz) {
+            ln = vec3(-sign(l.x), 0.0, 0.0);
+        } else {
+            ln = vec3(0.0, 0.0, -sign(l.z));
+        }
+        return true;
+    }
+    vec3 h = s.h + pad;
+    vec3 d = h - abs(l);
+    int a = d.x < d.y ? (d.x < d.z ? 0 : 2) : (d.y < d.z ? 1 : 2);
+    ln = vec3(0.0);
+    ln[a] = l[a] >= 0.0 ? 1.0 : -1.0;
+    lp[a] = ln[a] * (h[a] + 0.01);
+    return true;
+}
+
+bool insideVesselCavity(vec3 p) {
+    for (int e = 0; e < MAX_ENTITIES; e++) {
+        if (e >= G.caps.z) {
+            break;
+        }
+        if (entIsContainer(e)) {
+            Vessel s = vesselOf(e);
+            if (vesselInCavity(s, quatRotate(vec4(-s.q.xyz, s.q.w), p - s.c))) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 bool entInside(int e, vec3 p, float pad, out vec3 surface, out vec3 normal) {
     surface = p;
     normal = vec3(0.0, 1.0, 0.0);
-    if (entIsPump(e)) {
+    if (entIsPump(e) || entIsDrain(e) || entIsExtra(e)) {
         return false;
+    }
+    if (entIsContainer(e)) {
+        Vessel s = vesselOf(e);
+        vec3 l = quatRotate(vec4(-s.q.xyz, s.q.w), p - s.c);
+        vec3 lp;
+        vec3 ln;
+        if (!vesselSolid(s, l, pad) || !vesselExit(s, l, pad, vesselPrefersCavity(s, l), lp, ln)) {
+            return false;
+        }
+        surface = s.c + quatRotate(s.q, lp);
+        normal = quatRotate(s.q, ln);
+        return true;
     }
     if (entIsBody(e)) {
         vec3 c = G.ent[e * 3].xyz;

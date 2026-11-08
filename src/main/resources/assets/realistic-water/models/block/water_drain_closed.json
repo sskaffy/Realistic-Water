@@ -1,0 +1,6 @@
+{
+  "parent": "realistic-water:block/water_drain",
+  "textures": {
+    "top": "realistic-water:block/water_drain_top_closed"
+  }
+}

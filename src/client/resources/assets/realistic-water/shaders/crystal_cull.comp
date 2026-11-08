@@ -1,0 +1,47 @@
+#version 450
+#include "common.glsl"
+layout(local_size_x = 256) in;
+layout(std430, binding = 1) readonly buffer Parts { Particle parts[]; };
+layout(std430, binding = 2) readonly buffer Count { int cellCount[]; };
+layout(std430, binding = 3) writeonly buffer Crystals { vec4 crystals[]; };
+layout(std430, binding = 4) buffer Args { uint args[]; };
+layout(std430, binding = 5) readonly buffer Counters { uint counters[]; };
+layout(push_constant) uniform PC { ivec4 a; } pc;
+
+#define ARGS_CRYSTAL_INSTANCES 29
+
+int countAt(ivec3 c) {
+    return inBox(c) ? cellCount[cellIndex(c)] : 0;
+}
+
+void main() {
+    uint i = GID_U;
+    if (i >= counters[pc.a.x]) {
+        return;
+    }
+    Particle p = parts[i];
+    float h = p.vel.w;
+    if (p.pos.w < 0.0 || h >= 0.0 || solidIce(h)) {
+        return;
+    }
+    float f = iceFraction(h);
+    ivec3 c = ivec3(floor(p.pos.xyz));
+    int reach = max(int(G.camGrid.w * 0.5), 2);
+    if (countAt(c + ivec3(0, reach, 0)) > 0 && countAt(c + ivec3(reach, 0, 0)) > 0 && countAt(c - ivec3(reach, 0, 0)) > 0
+        && countAt(c + ivec3(0, 0, reach)) > 0 && countAt(c - ivec3(0, 0, reach)) > 0 && countAt(c - ivec3(0, reach, 0)) > 0) {
+        return;
+    }
+    vec3 rel = G.domainOrigin.xyz + p.pos.xyz * G.domainOrigin.w;
+    float dist = max(length(rel), 0.05);
+    float r = G.freezeC.y * mix(0.5, 1.0, f);
+    float pixelR = r * G.proj[1][1] * 0.5 * G.screen.y / dist;
+    if (pixelR < 0.6) {
+        return;
+    }
+    uint o = atomicAdd(args[ARGS_CRYSTAL_INSTANCES], 1u);
+    if (o >= uint(pc.a.y)) {
+        return;
+    }
+    crystals[o * 2u] = vec4(p.pos.xyz, r);
+    crystals[o * 2u + 1u] = vec4(p.vel.xyz, f);
+}

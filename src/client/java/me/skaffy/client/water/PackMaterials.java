@@ -16,7 +16,7 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.util.LightCoordsUtil;
 import net.minecraft.world.phys.Vec3;
 
-final class PackMaterials {
+public final class PackMaterials {
 	record Mesh(Material material, float[] vertices, int vertexCount, int[] quads, int quadCount) {
 	}
 
@@ -30,12 +30,12 @@ final class PackMaterials {
 	private PackMaterials() {
 	}
 
-	static boolean active() {
+	public static boolean active() {
 		return WaterSettings.packDrawMaterials && ShaderCompat.VITRAIL && ShaderCompat.packRunning();
 	}
 
 	static boolean drawnByPack(Material material) {
-		return material == Material.SLIME || material == Material.LEAVES;
+		return material == Material.SLIME && WaterSettings.slimeOldTexture || material == Material.LEAVES;
 	}
 
 	static Mesh mesh(Material material, ByteBuffer m, int copiedVerts, int copiedQuads, int ox, int oy, int oz, int res) {
@@ -126,6 +126,14 @@ final class PackMaterials {
 					int variant = v;
 					collector.submitCustomGeometry(pose, RenderTypes.entityCutout(LEAF[v]), (p, buf) -> emitLeaves(p, buf, leaves, variant, camera, level, light));
 				}
+				int kinds = ShadowCasters.kindsIn(leaves.all(), leaves.allCount());
+				for (int k = 4; k < 16; k++) {
+					if ((kinds & 1 << k) != 0) {
+						int kind = k;
+						collector.submitCustomGeometry(pose, RenderTypes.entityCutout(me.skaffy.client.trees.FallenLeaves.atlasTexture(false)),
+							(p, buf) -> emitLeaves(p, buf, leaves, kind, camera, level, light));
+					}
+				}
 			}
 		}
 	}
@@ -141,7 +149,18 @@ final class PackMaterials {
 			return;
 		}
 		Identifier texture = mesh.material() == Material.SLIME ? SLIME : SAND;
-		collector.submitCustomGeometry(pose, RenderTypes.entityCutout(texture), (p, buf) -> emitMesh(p, buf, mesh, camera, level, light));
+		collector.submitCustomGeometry(pose, RenderTypes.entityCutout(texture), (p, buf) -> emitMesh(p, buf, mesh, camera, level, light, -1));
+	}
+
+	public static final Identifier WHITE = RealisticWater.id("textures/grass/white.png");
+
+	public static int gelTint(float r, float g, float b, float alpha) {
+		float max = Math.max(Math.max(r, g), Math.max(b, 1.0E-3F));
+		int ri = Math.clamp(Math.round(r / max * 0.9F * 255.0F), 0, 255);
+		int gi = Math.clamp(Math.round(g / max * 0.9F * 255.0F), 0, 255);
+		int bi = Math.clamp(Math.round(b / max * 0.9F * 255.0F), 0, 255);
+		int ai = Math.clamp(Math.round(alpha * 255.0F), 0, 255);
+		return ai << 24 | ri << 16 | gi << 8 | bi;
 	}
 
 	private static int lightAt(ClientLevel level, Long2IntOpenHashMap cache, double x, double y, double z) {
@@ -155,7 +174,7 @@ final class PackMaterials {
 		return coords;
 	}
 
-	private static void emitMesh(PoseStack.Pose p, VertexConsumer buf, Mesh mesh, Vec3 camera, ClientLevel level, Long2IntOpenHashMap light) {
+	private static void emitMesh(PoseStack.Pose p, VertexConsumer buf, Mesh mesh, Vec3 camera, ClientLevel level, Long2IntOpenHashMap light, int color) {
 		float[] v = mesh.vertices();
 		int[] q = mesh.quads();
 		for (int i = 0; i < mesh.quadCount(); i++) {
@@ -182,7 +201,7 @@ final class PackMaterials {
 					u = x;
 					t = -y;
 				}
-				buf.addVertex(p, (float) (x - camera.x), (float) (y - camera.y), (float) (z - camera.z)).setColor(-1)
+				buf.addVertex(p, (float) (x - camera.x), (float) (y - camera.y), (float) (z - camera.z)).setColor(color)
 					.setUv(u - (float) Math.floor(u), t - (float) Math.floor(t)).setOverlay(OverlayTexture.NO_OVERLAY)
 					.setLight(lightAt(level, light, x + nx * 0.5, y + ny * 0.5, z + nz * 0.5)).setNormal(p, nx, ny, nz);
 			}
@@ -228,15 +247,34 @@ final class PackMaterials {
 				nz = -nz;
 			}
 			int lit = lightAt(level, light, wx, wy + 0.25, wz);
-			leafVertex(p, buf, x - hx - sx, y - sy, z - hz - sz, 0.0F, 1.0F, lit, nx, ny, nz);
-			leafVertex(p, buf, x - hx + sx, y + sy, z - hz + sz, 0.0F, 0.0F, lit, nx, ny, nz);
-			leafVertex(p, buf, x + hx + sx, y + sy, z + hz + sz, 1.0F, 0.0F, lit, nx, ny, nz);
-			leafVertex(p, buf, x + hx - sx, y - sy, z + hz - sz, 1.0F, 1.0F, lit, nx, ny, nz);
+			float u0 = 0.0F;
+			float v0 = 0.0F;
+			float u1 = 1.0F;
+			float v1 = 1.0F;
+			int color = -1;
+			if (variant >= 4) {
+				me.skaffy.client.trees.FallenLeaves.PackLeaf pl = me.skaffy.client.trees.FallenLeaves.get().packLeaf(variant, ShadowCasters.yawBits(yaw));
+				u0 = pl.u0();
+				v0 = pl.v0();
+				u1 = pl.u1();
+				v1 = pl.v1();
+				color = pl.color();
+				float scale = pl.size() / Math.max(d[o + 5], 1.0E-4F);
+				hx *= scale;
+				hz *= scale;
+				sx *= scale * pl.aspect();
+				sy *= scale * pl.aspect();
+				sz *= scale * pl.aspect();
+			}
+			leafVertex(p, buf, x - hx - sx, y - sy, z - hz - sz, u0, v1, lit, nx, ny, nz, color);
+			leafVertex(p, buf, x - hx + sx, y + sy, z - hz + sz, u0, v0, lit, nx, ny, nz, color);
+			leafVertex(p, buf, x + hx + sx, y + sy, z + hz + sz, u1, v0, lit, nx, ny, nz, color);
+			leafVertex(p, buf, x + hx - sx, y - sy, z + hz - sz, u1, v1, lit, nx, ny, nz, color);
 		}
 	}
 
 	private static void leafVertex(PoseStack.Pose p, VertexConsumer buf, float x, float y, float z, float u, float v, int light, float nx, float ny,
-		float nz) {
-		buf.addVertex(p, x, y, z).setColor(-1).setUv(u, v).setOverlay(OverlayTexture.NO_OVERLAY).setLight(light).setNormal(p, nx, ny, nz);
+		float nz, int color) {
+		buf.addVertex(p, x, y, z).setColor(color).setUv(u, v).setOverlay(OverlayTexture.NO_OVERLAY).setLight(light).setNormal(p, nx, ny, nz);
 	}
 }

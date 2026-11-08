@@ -61,7 +61,7 @@ public final class RealisticCollision {
 			if (body == carried && entity instanceof net.minecraft.world.entity.player.Player) {
 				continue;
 			}
-			List<SweptCollider.Oriented> some = body.orientedBoxes(area);
+			List<SweptCollider.Oriented> some = body.orientedBoxes(area, entity);
 			if (some.isEmpty()) {
 				continue;
 			}

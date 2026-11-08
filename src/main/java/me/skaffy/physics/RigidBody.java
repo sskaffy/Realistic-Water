@@ -27,6 +27,7 @@ public final class RigidBody {
 		final double[] eighths = {1, 1, 1, 1, 1, 1, 1, 1};
 		public double burn;
 		public boolean burning;
+		public double bounce;
 
 		public Cell(int x, int y, int z, double density, boolean flammable, double friction, Object payload) {
 			this(x, y, z, density, flammable, friction, payload, null);
@@ -134,6 +135,7 @@ public final class RigidBody {
 	final Matrix3d rotation = new Matrix3d();
 	double[] points = new double[0];
 	double[] pointFriction = new double[0];
+	double[] pointBounce = new double[0];
 	private double[] warm = new double[0];
 	private Object[] warmOther = new Object[0];
 	private int[] warmStep = new int[0];
@@ -283,7 +285,7 @@ public final class RigidBody {
 						int v = cell.y * n + j;
 						int w = cell.z * n + k;
 						if (seen.add(key(u, v, w)) && !this.buried(u, v, w, n)) {
-							out.add(new double[]{(double) u / n, (double) v / n, (double) w / n, cell.friction});
+							out.add(new double[]{(double) u / n, (double) v / n, (double) w / n, cell.friction, cell.bounce});
 						}
 					}
 				}
@@ -291,12 +293,14 @@ public final class RigidBody {
 		}
 		this.points = new double[out.size() * 3];
 		this.pointFriction = new double[out.size()];
+		this.pointBounce = new double[out.size()];
 		for (int i = 0; i < out.size(); i++) {
 			double[] p = out.get(i);
 			this.points[i * 3] = p[0];
 			this.points[i * 3 + 1] = p[1];
 			this.points[i * 3 + 2] = p[2];
 			this.pointFriction[i] = p[3];
+			this.pointBounce[i] = p.length > 4 ? p[4] : 0.0;
 		}
 		this.warm = new double[out.size() * 7];
 		this.warmOther = new Object[out.size()];
@@ -350,7 +354,7 @@ public final class RigidBody {
 						double gy = cell.y + b[1] + (b[4] - b[1]) * j / ny;
 						double gz = cell.z + b[2] + (b[5] - b[2]) * k / nz;
 						if (!this.insideFullNeighbour(cell, gx, gy, gz)) {
-							out.add(new double[]{gx, gy, gz, cell.friction});
+							out.add(new double[]{gx, gy, gz, cell.friction, cell.bounce});
 						}
 					}
 				}

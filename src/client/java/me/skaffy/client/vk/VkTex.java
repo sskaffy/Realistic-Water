@@ -82,6 +82,15 @@ public final class VkTex implements AutoCloseable {
 		}
 	}
 
+	public void clearDepth(VkCommandBuffer cb, float depth) {
+		try (MemoryStack stack = MemoryStack.stackPush()) {
+			org.lwjgl.vulkan.VkClearDepthStencilValue value = org.lwjgl.vulkan.VkClearDepthStencilValue.calloc(stack).depth(depth).stencil(0);
+			VkImageSubresourceRange range = VkImageSubresourceRange.calloc(stack)
+				.aspectMask(VK10.VK_IMAGE_ASPECT_DEPTH_BIT).baseMipLevel(0).levelCount(1).baseArrayLayer(0).layerCount(1);
+			VK10.vkCmdClearDepthStencilImage(cb, this.image, VK10.VK_IMAGE_LAYOUT_GENERAL, value, range);
+		}
+	}
+
 	public static void copy(VkCommandBuffer cb, long srcImage, long dstImage, int aspect, int width, int height) {
 		copy(cb, srcImage, dstImage, aspect, 0, 0, width, height);
 	}

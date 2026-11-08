@@ -222,7 +222,7 @@ public class RealisticBlockRenderer extends EntityRenderer<RealisticBlockEntity,
 				}
 				TntMinecartRenderer.submitWhiteSolidBlock(state.litModel, poseStack, collector, state.litLight, TntRenderer.isLit(state.fuse), state.outlineColor);
 				poseStack.popPose();
-			} else {
+			} else if (!me.skaffy.client.jelly.JellyWorld.drawsBodyCell(block.blockState) && !me.skaffy.client.ice.IceWorld.drawsBodyCell(block.blockState)) {
 				collector.submitMovingBlock(poseStack, block, state.outlineColor);
 			}
 			if (i == state.crackIndex) {

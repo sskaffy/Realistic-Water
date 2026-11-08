@@ -3,7 +3,11 @@
 	"package": "me.skaffy.client.mixin",
 	"compatibilityLevel": "JAVA_25",
 	"client": [
+		"AbstractBoatRendererMixin",
 		"RealisticBlockMinecraftMixin",
+		"RenderTypeFeatureRendererGrassMixin",
+		"EntityRendererJellyMixin",
+		"StagedDrawAccessor",
 		"BlockEntityRenderDistanceMixin",
 		"BlockLightEngineMixin",
 		"ClientChunkCacheGridMixin",

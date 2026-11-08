@@ -22,8 +22,10 @@ struct Drop {
 #define COL_RAINS 1
 #define COL_WATER 2
 #define COL_LAVA 8
+#define COL_LEAVES 16
 #define EVENT_WATER 1.0
 #define EVENT_LAVA 2.0
+#define EVENT_LEAF 3.0
 
 uint rhash(uint x) {
     x ^= x >> 16;

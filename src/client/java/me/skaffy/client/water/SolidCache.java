@@ -32,7 +32,14 @@ final class SolidCache {
 		final long[] @Nullable [] partial = new long[4096][];
 	}
 
+	final boolean ignoreIce;
+
 	SolidCache(int res, boolean ignoreSand) {
+		this(res, ignoreSand, false);
+	}
+
+	SolidCache(int res, boolean ignoreSand, boolean ignoreIce) {
+		this.ignoreIce = ignoreIce;
 		this.res = res;
 		this.ignoreSand = ignoreSand;
 		this.bitsPerBlock = res * res * res;
@@ -110,7 +117,8 @@ final class SolidCache {
 
 	private void voxelizeBlock(ClientLevel level, BlockPos pos, BlockState state, Section s, int i) {
 		s.partial[i] = null;
-		boolean skip = state.isAir() || (this.ignoreSand && state.getBlock() instanceof RealisticSandBlock);
+		boolean skip = state.isAir() || (this.ignoreSand && state.getBlock() instanceof RealisticSandBlock)
+			|| (this.ignoreIce && me.skaffy.block.RealisticWaterBlock.isFrozen(state));
 		VoxelShape shape = skip ? null : state.getCollisionShape(level, pos);
 		if (shape == null || shape.isEmpty()) {
 			s.kind[i] = EMPTY;

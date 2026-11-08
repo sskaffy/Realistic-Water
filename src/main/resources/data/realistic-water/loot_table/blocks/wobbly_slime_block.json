@@ -1,0 +1,15 @@
+{
+  "type": "minecraft:block",
+  "pools": [
+    {
+      "rolls": 1,
+      "entries": [
+        {
+          "type": "minecraft:item",
+          "name": "realistic-water:wobbly_slime_block"
+        }
+      ]
+    }
+  ],
+  "random_sequence": "realistic-water:blocks/wobbly_slime_block"
+}

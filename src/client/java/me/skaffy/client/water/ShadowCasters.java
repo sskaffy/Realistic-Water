@@ -69,7 +69,7 @@ final class ShadowCasters {
 			int bits = (int) m.getFloat(at + 28);
 			float speed = (float) Math.sqrt(vx * vx + vy * vy + vz * vz) / res;
 			float moving = smoothstep(0.05F, 0.6F, speed);
-			float phase = ((bits >> 8) & 1023) / 1024.0F * TAU;
+			float phase = ((bits >> 10) & 255) / 256.0F * TAU;
 			float burn = ((bits >> 18) & 63) / 63.0F;
 			int a = every * LEAF_FLOATS;
 			all[a] = ox + m.getFloat(at) / res;
@@ -78,7 +78,7 @@ final class ShadowCasters {
 			all[a + 3] = ((bits >> 2) & 63) / 64.0F * TAU;
 			all[a + 4] = speed > 3.0F ? phase : moving * 0.75F * (float) Math.sin(phase);
 			all[a + 5] = size * (1.0F - 0.6F * burn);
-			all[a + 6] = bits & 3;
+			all[a + 6] = (bits & 3) | ((bits >> 8) & 3) << 2;
 			every++;
 			if (speed < RESTING_SPEED || !WaterSettings.packShadowPerLeaf) {
 				resting.addTo(BlockPos.asLong((int) Math.floor(all[a] * d), (int) Math.floor(all[a + 1] * d), (int) Math.floor(all[a + 2] * d)), 1);
@@ -214,6 +214,14 @@ final class ShadowCasters {
 					int variant = v;
 					collector.submitCustomGeometry(pose, RenderTypes.entityCutout(LEAF[v]), (p, buf) -> emitLeaves(p, buf, leaves, variant, camera));
 				}
+				int kinds = kindsIn(leaves.data(), leaves.count());
+				for (int k = 4; k < 16; k++) {
+					if ((kinds & 1 << k) != 0) {
+						int kind = k;
+						collector.submitCustomGeometry(pose, RenderTypes.entityCutout(me.skaffy.client.trees.FallenLeaves.atlasTexture(true)),
+							(p, buf) -> emitLeaves(p, buf, leaves, kind, camera));
+					}
+				}
 			}
 		}
 	}
@@ -240,12 +248,39 @@ final class ShadowCasters {
 		}
 	}
 
+	static int kindsIn(float[] d, int count) {
+		int mask = 0;
+		for (int i = 0; i < count; i++) {
+			mask |= 1 << ((int) d[i * LEAF_FLOATS + 6] & 15);
+		}
+		return mask;
+	}
+
+	static int yawBits(float yaw) {
+		return Math.round(yaw / TAU * 64.0F) & 63;
+	}
+
 	private static void emitLeaves(PoseStack.Pose p, VertexConsumer buf, Leaves leaves, int variant, Vec3 camera) {
 		float[] d = leaves.data();
 		for (int i = 0; i < leaves.count(); i++) {
 			int o = i * LEAF_FLOATS;
 			if ((int) d[o + 6] != variant) {
 				continue;
+			}
+			float u0 = 0.0F;
+			float v0 = 0.0F;
+			float u1 = 1.0F;
+			float v1 = 1.0F;
+			float lengthScale = 1.0F;
+			float widthScale = 1.0F;
+			if (variant >= 4) {
+				me.skaffy.client.trees.FallenLeaves.PackLeaf pl = me.skaffy.client.trees.FallenLeaves.get().packLeaf(variant, yawBits(d[o + 3]));
+				u0 = pl.u0();
+				v0 = pl.v0();
+				u1 = pl.u1();
+				v1 = pl.v1();
+				lengthScale = pl.size() / Math.max(d[o + 5], 1.0E-4F);
+				widthScale = lengthScale * pl.aspect();
 			}
 			float x = (float) (d[o] - camera.x);
 			float y = (float) (d[o + 1] - camera.y);
@@ -269,14 +304,19 @@ final class ShadowCasters {
 				ny /= len;
 				nz /= len;
 			}
-			vertex(p, buf, x - hx - sx, y - sy, z - hz - sz, 0.0F, 0.0F, nx, ny, nz);
-			vertex(p, buf, x - hx + sx, y + sy, z - hz + sz, 0.0F, 1.0F, nx, ny, nz);
-			vertex(p, buf, x + hx + sx, y + sy, z + hz + sz, 1.0F, 1.0F, nx, ny, nz);
-			vertex(p, buf, x + hx - sx, y - sy, z + hz - sz, 1.0F, 0.0F, nx, ny, nz);
-			vertex(p, buf, x + hx - sx, y - sy, z + hz - sz, 1.0F, 0.0F, -nx, -ny, -nz);
-			vertex(p, buf, x + hx + sx, y + sy, z + hz + sz, 1.0F, 1.0F, -nx, -ny, -nz);
-			vertex(p, buf, x - hx + sx, y + sy, z - hz + sz, 0.0F, 1.0F, -nx, -ny, -nz);
-			vertex(p, buf, x - hx - sx, y - sy, z - hz - sz, 0.0F, 0.0F, -nx, -ny, -nz);
+			hx *= lengthScale;
+			hz *= lengthScale;
+			sx *= widthScale;
+			sy *= widthScale;
+			sz *= widthScale;
+			vertex(p, buf, x - hx - sx, y - sy, z - hz - sz, u0, v0, nx, ny, nz);
+			vertex(p, buf, x - hx + sx, y + sy, z - hz + sz, u0, v1, nx, ny, nz);
+			vertex(p, buf, x + hx + sx, y + sy, z + hz + sz, u1, v1, nx, ny, nz);
+			vertex(p, buf, x + hx - sx, y - sy, z + hz - sz, u1, v0, nx, ny, nz);
+			vertex(p, buf, x + hx - sx, y - sy, z + hz - sz, u1, v0, -nx, -ny, -nz);
+			vertex(p, buf, x + hx + sx, y + sy, z + hz + sz, u1, v1, -nx, -ny, -nz);
+			vertex(p, buf, x - hx + sx, y + sy, z - hz + sz, u0, v1, -nx, -ny, -nz);
+			vertex(p, buf, x - hx - sx, y - sy, z - hz - sz, u0, v0, -nx, -ny, -nz);
 		}
 	}
 

@@ -1,0 +1,547 @@
+#version 450
+#include "common.glsl"
+#define GRASS_PARAMS_BINDING 1
+#define GRASS_BLOCKS_BINDING 2
+#include "grass_common.glsl"
+layout(local_size_x = 128) in;
+layout(std430, binding = 3) buffer State { vec4 st[]; };
+
+struct GrabEntry {
+    uvec4 id;
+    vec4 off;
+};
+layout(std430, binding = 4) buffer Grab {
+    uint pickKey;
+    uint grabCount;
+    uint pad0;
+    uint pad1;
+    vec4 picked;
+    GrabEntry entries[GRAB_ENTRIES];
+} grab;
+
+layout(std430, binding = 5) readonly buffer Flow { int flow[]; };
+layout(std430, binding = 6) readonly buffer Floor { uint floorBits[]; };
+#define FLOOR_SIZE 64
+
+float floorAt(vec3 gp, float otherwise) {
+    if (P.floorOrigin.w == 0) {
+        return otherwise;
+    }
+    ivec3 b = P.cam.xyz + ivec3(floor(gp)) - P.floorOrigin.xyz;
+    if (b.x < 0 || b.z < 0 || b.x >= FLOOR_SIZE || b.z >= FLOOR_SIZE || b.y < 0) {
+        return otherwise;
+    }
+    int top = min(b.y, FLOOR_SIZE - 1);
+    uint col = uint(b.x + b.z * FLOOR_SIZE) * uint(FLOOR_SIZE / 32);
+    for (int w = top >> 5; w >= 0; w--) {
+        uint bits = floorBits[col + uint(w)];
+        if (w == top >> 5) {
+            int sh = top & 31;
+            bits &= sh == 31 ? 0xFFFFFFFFu : ((1u << uint(sh + 1)) - 1u);
+        }
+        if (bits != 0u) {
+            return float(P.floorOrigin.y + w * 32 + findMSB(bits) + 1 - P.cam.y);
+        }
+    }
+    return otherwise;
+}
+
+#define FLOW_MASK 262143u
+#define FLOW_CELL 4.0
+#define FLOW_FP 256.0
+#define MAX_SUBSTEPS 8
+#define AIR_DRAG 8.0
+#define ITERATIONS 4
+#define MAX_NEAR 8
+
+int nearCount;
+int nearIndex[MAX_NEAR];
+
+uint packNormal(vec3 n, float strength) {
+    uvec3 q = uvec3(clamp(n * 0.5 + 0.5, 0.0, 1.0) * 511.0 + 0.5);
+    uint s = uint(clamp(strength, 0.0, 1.0) * 31.0 + 0.5);
+    return q.x | (q.y << 9) | (q.z << 18) | (s << 27);
+}
+
+vec4 unpackNormal4(uint v) {
+    vec3 n = vec3(float(v & 511u), float((v >> 9) & 511u), float((v >> 18) & 511u)) / 511.0 * 2.0 - 1.0;
+    float s = float(v >> 27) / 31.0;
+    return s > 0.0 ? vec4(normalize(n + vec3(0.0, 1e-5, 0.0)), s) : vec4(0.0);
+}
+
+vec4 unpackRotation(float packed) {
+    uint u = floatBitsToUint(packed);
+    vec3 v = vec3(float(u & 1023u) / 1023.0, float((u >> 10) & 1023u) / 1023.0, float((u >> 20) & 511u) / 511.0) * 2.0 - 1.0;
+    return vec4(v, sqrt(max(1.0 - dot(v, v), 0.0)));
+}
+
+vec3 pushOutRotated(int c, vec3 p, vec3 q, vec3 rootPos) {
+    vec4 a = P.colliders[c * 3];
+    vec3 h = P.colliders[c * 3 + 1].xyz;
+    float rounding = P.colliders[c * 3 + 2].w;
+    vec4 rot = unpackRotation(a.w);
+    vec4 inv = vec4(-rot.xyz, rot.w);
+    vec3 l = quatRotate(inv, q - a.xyz);
+    vec3 lo = -h + rounding;
+    vec3 hi = h - rounding;
+    vec3 closest = clamp(l, lo, hi);
+    vec3 dv = l - closest;
+    float dist = length(dv);
+    if (dist > 1e-5) {
+        float r = rounding + 0.012;
+        return dist < r ? quatRotate(rot, dv / dist * (r - dist)) : vec3(0.0);
+    }
+    vec3 ex = quatRotate(rot, vec3(1.0, 0.0, 0.0));
+    vec3 ey = quatRotate(rot, vec3(0.0, 1.0, 0.0));
+    vec3 ez = quatRotate(rot, vec3(0.0, 0.0, 1.0));
+    float bottom = a.y - (abs(ex.y) * h.x + abs(ey.y) * h.y + abs(ez.y) * h.z);
+    if (bottom < rootPos.y + 0.25) {
+        return p.y > 0.02 ? vec3(0.0, 0.02 - p.y, 0.0) : vec3(0.0);
+    }
+    float best = 1e9;
+    vec3 move = vec3(0.0);
+    for (int axis = 0; axis < 3; axis++) {
+        for (int s = -1; s <= 1; s += 2) {
+            vec3 e = vec3(0.0);
+            e[axis] = float(s);
+            vec3 world = quatRotate(rot, e);
+            if (world.y < -0.5) {
+                continue;
+            }
+            float d = h[axis] - float(s) * l[axis];
+            if (d < best) {
+                best = d;
+                move = world * d;
+            }
+        }
+    }
+    return move;
+}
+
+vec3 pushOut(int c, vec3 p, vec3 rootPos, float yaw, vec3 shift) {
+    vec4 a = P.colliders[c * 3];
+    vec4 b = P.colliders[c * 3 + 1];
+    vec3 q = p + rootPos - shift;
+    if (b.w > 1.5) {
+        return pushOutRotated(c, p, q, rootPos);
+    }
+    if (b.w < 0.5) {
+        vec3 ab = b.xyz - a.xyz;
+        float t = clamp(dot(q - a.xyz, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
+        vec3 closest = a.xyz + ab * t;
+        vec3 dv = q - closest;
+        float dist = length(dv);
+        float r = a.w + 0.012;
+        if (dist >= r) {
+            return vec3(0.0);
+        }
+        vec3 dir = dist > 1e-4 ? dv / dist : vec3(cos(yaw), 0.0, sin(yaw));
+        return dir * (r - dist);
+    }
+    float rounding = a.w;
+    vec3 lo = a.xyz + rounding;
+    vec3 hi = b.xyz - rounding;
+    vec3 closest = clamp(q, lo, hi);
+    vec3 dv = q - closest;
+    float dist = length(dv);
+    if (dist > 1e-5) {
+        float r = rounding + 0.012;
+        return dist < r ? dv / dist * (r - dist) : vec3(0.0);
+    }
+    if (a.y < rootPos.y + 0.2) {
+        return p.y > 0.02 ? vec3(0.0, 0.02 - p.y, 0.0) : vec3(0.0);
+    }
+    vec3 dlo = q - lo;
+    vec3 dhi = hi - q;
+    vec3 out3 = vec3(dlo.x < dhi.x ? -(dlo.x + rounding) : dhi.x + rounding, dhi.y + rounding,
+        dlo.z < dhi.z ? -(dlo.z + rounding) : dhi.z + rounding);
+    vec3 m = abs(out3);
+    if (m.x <= m.y && m.x <= m.z) {
+        return vec3(out3.x, 0.0, 0.0);
+    }
+    if (m.z <= m.y) {
+        return vec3(0.0, 0.0, out3.z);
+    }
+    return vec3(0.0, out3.y, 0.0);
+}
+
+vec4 pushField(int c, vec3 p, vec3 rootPos, vec3 shift) {
+    vec4 a = P.colliders[c * 3];
+    vec4 b = P.colliders[c * 3 + 1];
+    vec3 q = p + rootPos - shift;
+    vec3 closest;
+    float r;
+    if (b.w > 1.5) {
+        vec4 rot = unpackRotation(a.w);
+        vec3 l = quatRotate(vec4(-rot.xyz, rot.w), q - a.xyz);
+        closest = a.xyz + quatRotate(rot, clamp(l, -b.xyz, b.xyz));
+        r = 0.0;
+    } else if (b.w < 0.5) {
+        vec3 ab = b.xyz - a.xyz;
+        float t = clamp(dot(q - a.xyz, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
+        closest = a.xyz + ab * t;
+        r = a.w;
+    } else {
+        closest = clamp(q, a.xyz, b.xyz);
+        r = 0.0;
+    }
+    vec3 dv = q - closest;
+    dv.y *= 0.3;
+    float dist = length(dv);
+    float reach = 0.7;
+    if (dist > r + reach || dist < 1e-4) {
+        return vec4(0.0);
+    }
+    float f = clamp(1.0 - (dist - r) / reach, 0.0, 1.0);
+    return vec4(dv / dist * f * f * 60.0 + P.colliders[c * 3 + 2].xyz * f * 6.0, f);
+}
+
+vec4 waterAt(vec3 grassPos) {
+    ivec3 c = ivec3(floor(grassPos * FLOW_CELL)) + P.cam.xyz * int(FLOW_CELL);
+    uint i = (hash(uint(c.x) * 73856093u ^ uint(c.y) * 19349663u ^ uint(c.z) * 83492791u) & FLOW_MASK) * 4u;
+    int n = flow[i + 3u];
+    if (n <= 0) {
+        return vec4(0.0);
+    }
+    vec3 v = vec3(float(flow[i]), float(flow[i + 1u]), float(flow[i + 2u])) / (float(n) * FLOW_FP);
+    return vec4(v, clamp(float(n) / 6.0, 0.0, 1.0));
+}
+
+void restChain(GrassUnit n, vec3 setDir, float seg, inout vec3 p[GRASS_NODES], inout vec3 q[GRASS_NODES]) {
+    vec3 at = vec3(0.0);
+    for (int i = 0; i < GRASS_NODES; i++) {
+        at += grassRestDir(n, i, setDir) * seg;
+        p[i] = at;
+        q[i] = at;
+    }
+}
+
+int candidateIndex(int slot) {
+    for (int k = 0; k < 12; k++) {
+        if (P.cand[k >> 2][k & 3] == slot) {
+            return k;
+        }
+    }
+    return -1;
+}
+
+void main() {
+    uint g = GID_U;
+    int U = max(P.info.x, 1);
+    int slot = int(g) / U;
+    int u = int(g) % U;
+    if (slot >= P.cam.w) {
+        return;
+    }
+    GrassBlock b = blocks[slot];
+    if (!grassActive(b)) {
+        return;
+    }
+    GrassUnit n = grassUnit(slot, u);
+    uint base = g * uint(GRASS_STATE);
+    uint gen = grassGen(b);
+    vec3 p[GRASS_NODES];
+    vec3 q[GRASS_NODES];
+    vec4 contact[GRASS_NODES];
+    vec3 setDir = n.base;
+    float phase = 0.0;
+    float grabbed = 0.0;
+    float pull = 0.0;
+    float growth = 1.0;
+    vec3 rootOff = vec3(0.0);
+    float timer = 0.0;
+    float dt = P.timing.y;
+    if (floatBitsToUint(st[base + 8u].w) != gen) {
+        restChain(n, setDir, n.height / float(GRASS_NODES), p, q);
+        for (int i = 0; i < GRASS_NODES; i++) {
+            contact[i] = vec4(0.0);
+        }
+    } else {
+        for (int i = 0; i < GRASS_NODES; i++) {
+            vec4 a = st[base + uint(i)];
+            vec4 pv = st[base + uint(GRASS_NODES + i)];
+            p[i] = a.xyz;
+            q[i] = pv.xyz;
+            contact[i] = unpackNormal4(floatBitsToUint(pv.w));
+        }
+        phase = st[base].w;
+        grabbed = st[base + 1u].w;
+        pull = st[base + 2u].w;
+        growth = st[base + 3u].w;
+        setDir = normalize(st[base + 8u].xyz + vec3(0.0, 1e-5, 0.0));
+        rootOff = st[base + 9u].xyz;
+        timer = st[base + 9u].w;
+    }
+
+    if (phase > 0.5 && phase < 1.5 && grabbed < 0.5) {
+        timer += dt;
+        if (timer > P.life.x) {
+            phase = 2.0;
+            timer = 0.0;
+            growth = 0.0;
+            rootOff = vec3(0.0);
+            setDir = n.base;
+            restChain(n, setDir, 0.0, p, q);
+        }
+    } else if (phase > 1.5) {
+        growth = min(growth + dt / max(P.life.y, 0.1), 1.0);
+        if (growth >= 1.0) {
+            phase = 0.0;
+        }
+    }
+    bool uprooted = phase > 0.5 && phase < 1.5;
+    float H = n.height * growth;
+    float seg = H / float(GRASS_NODES);
+
+    int mode = int(P.grabA.w + 0.5);
+    int cand = mode >= 1 && mode <= 3 ? candidateIndex(slot) : -1;
+    if (mode == 0 && grabbed > 0.5) {
+        grabbed = 0.0;
+    }
+    if (cand >= 0 && phase < 0.5) {
+        vec3 eye = P.grabA.xyz;
+        vec3 dir = P.grabB.xyz;
+        float bestD = 1e9;
+        int bestNode = 0;
+        for (int i = 0; i < GRASS_NODES; i++) {
+            vec3 wv = n.root + rootOff + p[i] - eye;
+            float t = dot(wv, dir);
+            float d = length(wv - dir * t);
+            if (t > 0.0 && d < bestD) {
+                bestD = d;
+                bestNode = i;
+            }
+        }
+        uint local = uint(cand * U + u);
+        if (mode == 1 && bestD < 0.3) {
+            uint key = (uint(bestD / 0.3 * 65535.0) << 16) | ((local & 16383u) << 2) | uint(bestNode);
+            atomicMin(grab.pickKey, key);
+        } else if (mode == 2 && grab.pickKey != 0xFFFFFFFFu && ((grab.pickKey >> 2) & 16383u) == (local & 16383u)) {
+            uint e = atomicAdd(grab.grabCount, 1u);
+            if (e < uint(GRAB_ENTRIES)) {
+                int node = int(grab.pickKey & 3u);
+                vec3 at = n.root + rootOff + p[node];
+                grab.picked = vec4(at, dot(at - eye, dir));
+                grab.entries[e].id = uvec4(g, uint(node), 0u, 0u);
+                grab.entries[e].off = vec4(0.0);
+                grabbed = float(e + 1u);
+            }
+        } else if (mode == 3 && grabbed < 0.5 && P.grabB.w > 0.0 && grab.grabCount > 0u) {
+            vec3 at = n.root + rootOff + p[bestNode];
+            if (length(at - grab.picked.xyz) < P.grabB.w) {
+                uint e = atomicAdd(grab.grabCount, 1u);
+                if (e < uint(GRAB_ENTRIES)) {
+                    grab.entries[e].id = uvec4(g, uint(bestNode), 0u, 0u);
+                    grab.entries[e].off = vec4(at - grab.picked.xyz, 0.0);
+                    grabbed = float(e + 1u);
+                }
+            }
+        }
+    }
+    int holdNode = -1;
+    vec3 holdAt = vec3(0.0);
+    if (grabbed > 0.5 && mode >= 2) {
+        uint e = uint(grabbed) - 1u;
+        holdNode = int(grab.entries[e].id.y);
+        vec3 hand = P.grabA.xyz + P.grabB.xyz * grab.picked.w;
+        holdAt = hand + grab.entries[e].off.xyz - n.root;
+    }
+
+    uint bs = n.seed ^ 0x27D4EB2Fu;
+    float stiffMul = mix(0.75, 1.3, rand(bs));
+    float elastic = mix(0.35, 0.6, rand(bs));
+    int substeps = clamp(int(ceil(dt * 120.0)), 2, MAX_SUBSTEPS);
+    float h = dt / float(substeps);
+
+    nearCount = 0;
+    int colliders = min(P.info.z, MAX_GRASS_COLLIDERS);
+    vec3 here = n.root + rootOff;
+    for (int c = 0; c < colliders && nearCount < MAX_NEAR; c++) {
+        vec4 a = P.colliders[c * 3];
+        vec4 bb = P.colliders[c * 3 + 1];
+        float reach = n.height + 0.8 + (bb.w < 0.5 ? a.w : 0.0);
+        vec3 lo = min(a.xyz, bb.xyz) - reach;
+        vec3 hi = max(a.xyz, bb.xyz) + reach;
+        if (bb.w > 1.5) {
+            float r = length(bb.xyz) + reach;
+            lo = a.xyz - r;
+            hi = a.xyz + r;
+        }
+        if (all(greaterThan(here, lo)) && all(lessThan(here, hi))) {
+            nearIndex[nearCount++] = c;
+        }
+    }
+    bool windPush = P.info.w == 1;
+
+    vec3 world = G.misc.yzw + G.domainOrigin.xyz + n.root;
+    vec2 w = grassWind(world.xz, P.timing.x, n.seed);
+    for (int sub = 0; sub < substeps; sub++) {
+        float behind = dt - h * float(sub + 1);
+        if (uprooted) {
+            vec3 rootVel = (p[0] - q[0]) * exp(-AIR_DRAG * h);
+            rootOff += rootVel + vec3(0.0, -9.8, 0.0) * h * h;
+        }
+        vec3 prevNode = rootOff;
+        for (int i = 0; i < GRASS_NODES; i++) {
+            float frac = float(i + 1) / float(GRASS_NODES);
+            float k = P.spring.x * stiffMul * sqrt(0.6 / max(n.height, 0.25)) * mix(1.5, 0.8, float(i) / float(GRASS_NODES - 1));
+            k *= uprooted ? 0.0 : 1.0;
+            float damping = 2.0 * P.spring.y * sqrt(k) + (uprooted ? AIR_DRAG : 0.0);
+            vec3 target = prevNode + grassRestDir(n, i, setDir) * seg;
+            vec3 acc = vec3(w.x, 0.0, w.y) * 14.0 * frac * (uprooted ? 0.5 : 1.0) + vec3(0.0, uprooted ? -9.8 : -1.0, 0.0);
+            vec4 water = waterAt(n.root + p[i]);
+            if (water.w > 0.0) {
+                vec3 nodeVel = (p[i] - q[i]) / h;
+                acc.xz *= 1.0 - water.w;
+                acc += (water.xyz - nodeVel) * 12.0 * water.w + vec3(0.0, (uprooted ? 10.6 : 3.0) * water.w, 0.0);
+            }
+            float field = 0.0;
+            if (windPush) {
+                for (int c = 0; c < nearCount; c++) {
+                    vec4 f = pushField(nearIndex[c], p[i], n.root, -P.colliders[nearIndex[c] * 3 + 2].xyz * behind);
+                    acc += f.xyz;
+                    field = max(field, f.w);
+                }
+            }
+            vec3 vel = (p[i] - q[i]) * exp(-(damping + field * 25.0) * h);
+            q[i] = p[i];
+            float kh2 = k * h * h;
+            vec3 next = (p[i] + vel + acc * h * h + target * kh2) / (1.0 + kh2);
+            if (contact[i].w > 0.0) {
+                vec3 move = next - p[i];
+                float into = dot(move, contact[i].xyz);
+                if (into < 0.0) {
+                    next -= contact[i].xyz * into * contact[i].w;
+                }
+            }
+            p[i] = next;
+            prevNode = p[i];
+        }
+        vec3 sum[GRASS_NODES];
+        for (int i = 0; i < GRASS_NODES; i++) {
+            sum[i] = vec3(0.0);
+        }
+        for (int it = 0; it < ITERATIONS; it++) {
+            if (!windPush) {
+                for (int c = 0; c < nearCount; c++) {
+                    int ci = nearIndex[c];
+                    vec3 shift = -P.colliders[ci * 3 + 2].xyz * behind;
+                    for (int i = 0; i < GRASS_NODES; i++) {
+                        vec3 corr = pushOut(ci, p[i], n.root, n.yaw, shift);
+                        float cl = length(corr);
+                        float maxCorr = 3.0 * h;
+                        if (cl > maxCorr) {
+                            corr *= maxCorr / cl;
+                        }
+                        if (dot(corr, corr) > 0.0) {
+                            p[i] += corr;
+                            q[i] += corr;
+                            sum[i] += corr;
+                        }
+                    }
+                }
+            }
+            if (holdNode >= 0) {
+                vec3 pullTo = holdAt - p[holdNode];
+                p[holdNode] += pullTo * 0.6;
+                q[holdNode] += pullTo * 0.6;
+            }
+            if (!uprooted) {
+                vec3 prev = vec3(0.0);
+                for (int i = 0; i < GRASS_NODES; i++) {
+                    vec3 before = p[i];
+                    p[i].y = max(p[i].y, 0.015);
+                    vec3 dv = p[i] - prev;
+                    float l = length(dv);
+                    p[i] = prev + (l > 1e-5 ? dv / l : vec3(0.0, 1.0, 0.0)) * seg;
+                    q[i] += (p[i] - before) * 0.9;
+                    prev = p[i];
+                }
+            } else {
+                for (int i = 0; i < GRASS_NODES; i++) {
+                    vec3 a = i == 0 ? rootOff : p[i - 1];
+                    vec3 dv = p[i] - a;
+                    float l = length(dv);
+                    vec3 fix = (l > 1e-5 ? dv / l : vec3(0.0, 1.0, 0.0)) * (l - seg) * 0.5;
+                    if (i == 0) {
+                        rootOff += fix;
+                    } else if (i - 1 != holdNode) {
+                        p[i - 1] += fix;
+                    }
+                    if (i != holdNode) {
+                        p[i] -= fix;
+                    }
+                }
+                float rootFloor = floorAt(n.root + rootOff + vec3(0.0, 0.05, 0.0), n.root.y) - n.root.y;
+                rootOff.y = max(rootOff.y, rootFloor + 0.01);
+                for (int i = 0; i < GRASS_NODES; i++) {
+                    float f = floorAt(n.root + p[i] + vec3(0.0, 0.05, 0.0), n.root.y) - n.root.y;
+                    if (p[i].y <= f + 0.012) {
+                        p[i].y = f + 0.01;
+                        q[i].xz = mix(q[i].xz, p[i].xz, 0.5);
+                        q[i].y = p[i].y;
+                    }
+                }
+            }
+        }
+        for (int i = 0; i < GRASS_NODES; i++) {
+            float l = length(sum[i]);
+            if (l > 1e-6) {
+                vec3 nrm = sum[i] / l;
+                contact[i] = vec4(contact[i].w > 0.0 ? normalize(contact[i].xyz * contact[i].w + nrm) : nrm, 1.0);
+            } else {
+                contact[i].w = max(contact[i].w - h * 6.0, 0.0);
+            }
+        }
+    }
+
+    if (holdNode >= 0 && !uprooted) {
+        float strain = length(holdAt - p[holdNode]);
+        pull = strain > P.life.z ? pull + dt : max(pull - dt * 2.0, 0.0);
+        if (pull > 0.25) {
+            phase = 1.0;
+            timer = 0.0;
+            pull = 0.0;
+        }
+    }
+
+    if (!uprooted && growth > 0.2) {
+        vec3 actual = normalize(p[1] + vec3(0.0, 1e-5, 0.0));
+        float angle = acos(clamp(dot(actual, setDir), -1.0, 1.0));
+        if (angle > elastic) {
+            vec3 axis = cross(setDir, actual);
+            if (dot(axis, axis) > 1e-8) {
+                setDir = rotateAbout(setDir, normalize(axis), angle - elastic);
+            }
+        }
+        float back = acos(clamp(dot(setDir, n.base), -1.0, 1.0));
+        if (back > 1e-4) {
+            vec3 axis = cross(setDir, n.base);
+            if (dot(axis, axis) > 1e-8) {
+                setDir = rotateAbout(setDir, normalize(axis), min(back, dt * P.timing.z * 1.6));
+            }
+        }
+        setDir.y = max(setDir.y, 0.05);
+        setDir = normalize(setDir);
+    }
+
+    bool bad = any(isnan(setDir)) || any(isnan(rootOff));
+    for (int i = 0; i < GRASS_NODES; i++) {
+        bad = bad || any(isnan(p[i])) || any(isnan(q[i]));
+    }
+    if (bad) {
+        setDir = n.base;
+        rootOff = vec3(0.0);
+        phase = 0.0;
+        growth = 1.0;
+        restChain(n, setDir, n.height / float(GRASS_NODES), p, q);
+    }
+
+    float wv[GRASS_NODES] = float[](phase, grabbed, pull, growth);
+    for (int i = 0; i < GRASS_NODES; i++) {
+        st[base + uint(i)] = vec4(p[i], wv[i]);
+        st[base + uint(GRASS_NODES + i)] = vec4(q[i], uintBitsToFloat(packNormal(contact[i].xyz, contact[i].w)));
+    }
+    st[base + 8u] = vec4(setDir, uintBitsToFloat(gen));
+    st[base + 9u] = vec4(rootOff, timer);
+}
