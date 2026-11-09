@@ -79,6 +79,15 @@ public class RealisticFireBlock extends FireBlock {
 		};
 	}
 
+	/** A fire that burns itself out leaves the ground beneath it charred. */
+	private static void scorch(ServerLevel level, BlockPos pos, RandomSource random) {
+		BlockPos below = pos.below();
+		BlockState ground = level.getBlockState(below);
+		if ((ground.is(Blocks.GRASS_BLOCK) || ground.is(Blocks.PODZOL) || ground.is(Blocks.MYCELIUM)) && random.nextFloat() < 0.6F) {
+			level.setBlock(below, Blocks.COARSE_DIRT.defaultBlockState(), 3);
+		}
+	}
+
 	private static BlockState young(BlockState fire, RandomSource random) {
 		return fire.hasProperty(AGE) ? fire.setValue(AGE, random.nextInt(3)) : fire;
 	}
@@ -154,6 +163,7 @@ public class RealisticFireBlock extends FireBlock {
 		} else if (!eternal) {
 			int next = age + 1 + random.nextInt(2);
 			if (next >= 15 || age >= 4 && random.nextFloat() < 0.18F) {
+				scorch(level, pos, random);
 				level.removeBlock(pos, false);
 				return;
 			}

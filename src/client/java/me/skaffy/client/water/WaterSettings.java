@@ -428,6 +428,9 @@ public final class WaterSettings {
 	public static float fireSmokeLight = 0.4F;
 	public static float fireSmokeAmount = 1.0F;
 	public static float fireSparks = 1.0F;
+	public static float fireSparkSize = 0.03F;
+	public static float fireSparkLife = 3.5F;
+	public static float fireSparkBrightness = 2.2F;
 
 	public static String ffmpeg = "";
 	public static boolean renderFreezeWorld = true;

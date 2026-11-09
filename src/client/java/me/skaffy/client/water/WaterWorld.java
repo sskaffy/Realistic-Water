@@ -2641,7 +2641,11 @@ public final class WaterWorld {
 		if (leaves) {
 			this.writeLeafGlobals(level, b, o, res);
 		}
-		if (r.material == Material.SMOKE) {
+		if (r.material == Material.SPARK) {
+			putFloats(b, o + 3840, Material.SPARK.shaderId(), Math.max(WaterSettings.fireSparkLife, 0.1F), 0.9F, 0.25F);
+			putFloats(b, o + 3856, 1.6F, 0.5F, 0.0F, 0.0F);
+			putFloats(b, o + 3872, Math.max(WaterSettings.fireSparkSize, 1e-3F), 1.0F, WaterSettings.fireSparkBrightness, 0.0F);
+		} else if (r.material == Material.SMOKE) {
 			putFloats(b, o + 3840, Material.SMOKE.shaderId(), Math.max(WaterSettings.fireSmokeLife, 0.1F), WaterSettings.fireSmokeRise,
 				WaterSettings.steamDrag * 0.6F);
 			putFloats(b, o + 3856, WaterSettings.steamSwirl * 1.3F, 0.25F, WaterSettings.steamEntityPush, 0.0F);

@@ -11,7 +11,8 @@ public enum Material {
 	STEAM,
 	SMOKE,
 	FLAME,
-	SOUL_FLAME;
+	SOUL_FLAME,
+	SPARK;
 
 	float shaderId() {
 		return switch (this) {
@@ -23,6 +24,7 @@ public enum Material {
 			case SMOKE -> 6.0F;
 			case FLAME -> 7.0F;
 			case SOUL_FLAME -> 8.0F;
+			case SPARK -> 9.0F;
 			default -> 0.0F;
 		};
 	}
@@ -40,7 +42,7 @@ public enum Material {
 	}
 
 	boolean isGas() {
-		return this == STEAM || this == SMOKE || this == FLAME || this == SOUL_FLAME;
+		return this == STEAM || this == SMOKE || this == FLAME || this == SOUL_FLAME || this == SPARK;
 	}
 
 	boolean isParticleOnly() {
@@ -79,6 +81,7 @@ public enum Material {
 			case SMOKE -> "smoke";
 			case FLAME -> "flame";
 			case SOUL_FLAME -> "soul flame";
+			case SPARK -> "spark";
 			default -> "water";
 		};
 	}

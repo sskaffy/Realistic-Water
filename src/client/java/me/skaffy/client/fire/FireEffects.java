@@ -176,6 +176,16 @@ public final class FireEffects {
 			count();
 		}
 
+		// Embers: glowing specks the fire throws up and the wind carries off into the dark. A blaze throws far more.
+		float sparkChance = WaterSettings.fireSparks * (0.3F + 0.45F * i + 0.35F * level6) * (soul ? 0.0F : 1.0F) * (rained ? 0.3F : 1.0F);
+		if ((tick + stagger) % 3 == 0 && random.nextFloat() < sparkChance && kind != FireWorld.Kind.REALISTIC_CANDLE) {
+			water.addGasPuff(Material.SPARK, x, baseY + 0.15 * blaze, z, 0.05 * blaze, 0.08 * blaze,
+				wx * 0.8F, 1.0F + 0.6F * i + 0.4F * level6, wz * 0.8F, 0.08F);
+			emberSpawned++;
+			gpuPuffs++;
+			count();
+		}
+
 		// Steam: a fire touching water, or rain pouring on it, feeds the mod's existing steam.
 		boolean wet = WaterSettings.fireSteam && nextToWater(level, pos);
 		if ((wet || rained) && random.nextFloat() < (wet ? 0.12F : 0.03F)) {
@@ -191,9 +201,9 @@ public final class FireEffects {
 		if (random.nextFloat() < 0.05F * sparks) {
 			double x = pos.getX() + random.nextDouble();
 			double z = pos.getZ() + random.nextDouble();
-			water.addGasPuff(Material.FLAME, x, pos.getY() + 0.95, z, 0.015, 0.02,
+			water.addGasPuff(Material.SPARK, x, pos.getY() + 0.95, z, 0.03, 0.04,
 				(float) windX * 60.0F + (random.nextFloat() - 0.5F) * 0.6F, 1.2F + random.nextFloat() * 1.4F, (float) windZ * 60.0F + (random.nextFloat() - 0.5F) * 0.6F,
-				0.03F);
+				0.06F);
 			emberSpawned++;
 			gpuPuffs++;
 			count();

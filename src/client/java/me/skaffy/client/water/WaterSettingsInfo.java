@@ -948,8 +948,14 @@ public final class WaterSettingsInfo {
 			"Brightness of the darkest smoke.");
 		num("fireSmokeLight", "Smoke light shade", Cost.NONE, LOOK, 0, 1, 0.01,
 			"Brightness of the lightest, oldest smoke.");
-		num("fireSparks", "Lava sparks", Cost.LOW, "More spark puffs.", 0, 4, 0.05,
-			"How often realistic lava throws glowing sparks. 0 turns sparks off.");
+		num("fireSparks", "Ember amount", Cost.LOW, "More ember puffs.", 0, 4, 0.05,
+			"How many glowing embers fires and realistic lava throw up. 0 turns embers off.");
+		num("fireSparkSize", "Ember size", Cost.NONE, LOOK, 0.005, 0.2, 0.0025,
+			"Radius of each glowing ember in blocks.");
+		num("fireSparkLife", "Ember lifetime", Cost.LOW, "Longer keeps more embers alive.", 0.5, 20, 0.25,
+			"Seconds a glowing ember drifts before it goes out.");
+		num("fireSparkBrightness", "Ember brightness", Cost.NONE, LOOK, 0, 8, 0.05,
+			"How brightly embers glow.");
 		toggle("fireEmbers", "Lava embers", Cost.LOW, "A little extra work per lava block.",
 			"Lets realistic lava throw sparks and smoke.");
 		toggle("fireSteam", "Fire steam", Cost.LOW, "Checks the blocks beside every fire.",
