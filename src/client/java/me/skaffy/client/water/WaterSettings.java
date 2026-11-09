@@ -402,6 +402,18 @@ public final class WaterSettings {
 	public static float steamDarkShade = 0.45F;
 	public static float steamLightShade = 0.95F;
 
+	public static boolean fire = true;
+	public static boolean fireVanillaBlocks = false;
+	public static int fireMaxSources = 256;
+	public static float fireRange = 64.0F;
+	public static boolean fireParticles = true;
+	public static float fireParticleDensity = 1.0F;
+	public static float fireParticleRange = 32.0F;
+	public static int fireParticleBudget = 200;
+	public static boolean fireSteam = true;
+	public static boolean fireEmbers = true;
+	public static float fireWind = 1.0F;
+
 	public static String ffmpeg = "";
 	public static boolean renderFreezeWorld = true;
 	public static boolean renderSteadyPreview = true;

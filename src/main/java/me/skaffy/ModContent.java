@@ -1,7 +1,24 @@
 package me.skaffy;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+import me.skaffy.block.RealisticBlastFurnaceBlock;
+import me.skaffy.block.RealisticCampfireBlock;
+import me.skaffy.block.RealisticCandleBlock;
+import me.skaffy.block.RealisticFurnaceBlock;
+import me.skaffy.block.RealisticRedstoneTorchBlock;
+import me.skaffy.block.RealisticRedstoneWallTorchBlock;
+import me.skaffy.block.RealisticSmokerBlock;
+import net.minecraft.world.item.DyeColor;
+import net.minecraft.world.level.block.CandleBlock;
+import me.skaffy.block.RealisticFireBlock;
 import me.skaffy.block.RealisticLavaBlock;
 import me.skaffy.block.RealisticLeavesBlock;
+import me.skaffy.block.RealisticTorchBlock;
+import me.skaffy.block.RealisticWallTorchBlock;
+import me.skaffy.block.RealisticSoulFireBlock;
+import me.skaffy.item.RealisticFireChargeItem;
+import me.skaffy.item.RealisticFlintAndSteelItem;
 import me.skaffy.block.RealisticSandBlock;
 import me.skaffy.block.RealisticWaterBlock;
 import me.skaffy.block.WaveMakerBlock;
@@ -34,6 +51,8 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.LevelAccessor;
 import net.minecraft.world.level.gameevent.GameEvent;
 import org.jspecify.annotations.Nullable;
+import net.minecraft.core.Direction;
+import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
@@ -43,9 +62,12 @@ import me.skaffy.fluid.SmallWaterBucketItem;
 import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.StandingAndWallBlockItem;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.DispenserBlock;
 import net.minecraft.world.level.block.SoundType;
+import net.minecraft.world.level.block.entity.BlockEntityTypes;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.block.state.properties.NoteBlockInstrument;
 import net.minecraft.world.level.material.FlowingFluid;
@@ -261,8 +283,189 @@ public final class ModContent {
 			.build(REALISTIC_BOAT_KEY));
 
 	public static final SimpleParticleType STEAM = Registry.register(BuiltInRegistries.PARTICLE_TYPE, RealisticWater.id("steam"), FabricParticleTypes.simple(true));
+	public static final ResourceKey<Block> REALISTIC_FIRE_KEY = ResourceKey.create(Registries.BLOCK, RealisticWater.id("realistic_fire"));
+	public static final Block REALISTIC_FIRE = Registry.register(BuiltInRegistries.BLOCK, REALISTIC_FIRE_KEY, new RealisticFireBlock(
+		BlockBehaviour.Properties.of()
+			.mapColor(MapColor.FIRE)
+			.replaceable()
+			.noCollision()
+			.instabreak()
+			.lightLevel(state -> 15)
+			.sound(SoundType.WOOL)
+			.pushReaction(PushReaction.POPPED)
+			.noLootTable()
+			.setId(REALISTIC_FIRE_KEY)
+	));
+
+	public static final ResourceKey<Item> REALISTIC_FIRE_ITEM_KEY = ResourceKey.create(Registries.ITEM, RealisticWater.id("realistic_fire"));
+	public static final Item REALISTIC_FIRE_ITEM = registerBlockItem(REALISTIC_FIRE_ITEM_KEY, REALISTIC_FIRE);
+
+	public static final ResourceKey<Block> REALISTIC_SOUL_FIRE_KEY = ResourceKey.create(Registries.BLOCK, RealisticWater.id("realistic_soul_fire"));
+	public static final Block REALISTIC_SOUL_FIRE = Registry.register(BuiltInRegistries.BLOCK, REALISTIC_SOUL_FIRE_KEY, new RealisticSoulFireBlock(
+		BlockBehaviour.Properties.of()
+			.mapColor(MapColor.COLOR_LIGHT_BLUE)
+			.replaceable()
+			.noCollision()
+			.instabreak()
+			.lightLevel(state -> 10)
+			.sound(SoundType.WOOL)
+			.pushReaction(PushReaction.POPPED)
+			.noLootTable()
+			.setId(REALISTIC_SOUL_FIRE_KEY)
+	));
+
+	public static final ResourceKey<Item> REALISTIC_FIRE_CHARGE_KEY = ResourceKey.create(Registries.ITEM, RealisticWater.id("realistic_fire_charge"));
+	public static final Item REALISTIC_FIRE_CHARGE = Registry.register(BuiltInRegistries.ITEM, REALISTIC_FIRE_CHARGE_KEY,
+		new RealisticFireChargeItem(new Item.Properties().setId(REALISTIC_FIRE_CHARGE_KEY)));
+
+	public static final ResourceKey<Item> REALISTIC_FLINT_AND_STEEL_KEY = ResourceKey.create(Registries.ITEM, RealisticWater.id("realistic_flint_and_steel"));
+	public static final Item REALISTIC_FLINT_AND_STEEL = Registry.register(BuiltInRegistries.ITEM, REALISTIC_FLINT_AND_STEEL_KEY,
+		new RealisticFlintAndSteelItem(new Item.Properties().durability(64).setId(REALISTIC_FLINT_AND_STEEL_KEY)));
+
+	public static final ResourceKey<Block> REALISTIC_TORCH_KEY = ResourceKey.create(Registries.BLOCK, RealisticWater.id("realistic_torch"));
+	public static final Block REALISTIC_TORCH = Registry.register(BuiltInRegistries.BLOCK, REALISTIC_TORCH_KEY,
+		new RealisticTorchBlock(ParticleTypes.FLAME, torchProperties(REALISTIC_TORCH_KEY, 14)));
+	public static final ResourceKey<Block> REALISTIC_WALL_TORCH_KEY = ResourceKey.create(Registries.BLOCK, RealisticWater.id("realistic_wall_torch"));
+	public static final Block REALISTIC_WALL_TORCH = Registry.register(BuiltInRegistries.BLOCK, REALISTIC_WALL_TORCH_KEY,
+		new RealisticWallTorchBlock(ParticleTypes.FLAME, torchProperties(REALISTIC_WALL_TORCH_KEY, 14)
+			.overrideLootTable(REALISTIC_TORCH.getLootTable()).overrideDescription(REALISTIC_TORCH.getDescriptionId())));
+	public static final ResourceKey<Item> REALISTIC_TORCH_ITEM_KEY = ResourceKey.create(Registries.ITEM, RealisticWater.id("realistic_torch"));
+	public static final Item REALISTIC_TORCH_ITEM = registerStandingAndWallItem(REALISTIC_TORCH_ITEM_KEY, REALISTIC_TORCH, REALISTIC_WALL_TORCH);
+
+	public static final ResourceKey<Block> REALISTIC_SOUL_TORCH_KEY = ResourceKey.create(Registries.BLOCK, RealisticWater.id("realistic_soul_torch"));
+	public static final Block REALISTIC_SOUL_TORCH = Registry.register(BuiltInRegistries.BLOCK, REALISTIC_SOUL_TORCH_KEY,
+		new RealisticTorchBlock(ParticleTypes.SOUL_FIRE_FLAME, torchProperties(REALISTIC_SOUL_TORCH_KEY, 10)));
+	public static final ResourceKey<Block> REALISTIC_SOUL_WALL_TORCH_KEY = ResourceKey.create(Registries.BLOCK, RealisticWater.id("realistic_soul_wall_torch"));
+	public static final Block REALISTIC_SOUL_WALL_TORCH = Registry.register(BuiltInRegistries.BLOCK, REALISTIC_SOUL_WALL_TORCH_KEY,
+		new RealisticWallTorchBlock(ParticleTypes.SOUL_FIRE_FLAME, torchProperties(REALISTIC_SOUL_WALL_TORCH_KEY, 10)
+			.overrideLootTable(REALISTIC_SOUL_TORCH.getLootTable()).overrideDescription(REALISTIC_SOUL_TORCH.getDescriptionId())));
+	public static final ResourceKey<Item> REALISTIC_SOUL_TORCH_ITEM_KEY = ResourceKey.create(Registries.ITEM, RealisticWater.id("realistic_soul_torch"));
+	public static final Item REALISTIC_SOUL_TORCH_ITEM = registerStandingAndWallItem(REALISTIC_SOUL_TORCH_ITEM_KEY, REALISTIC_SOUL_TORCH, REALISTIC_SOUL_WALL_TORCH);
+
+	public static final ResourceKey<Block> REALISTIC_COPPER_TORCH_KEY = ResourceKey.create(Registries.BLOCK, RealisticWater.id("realistic_copper_torch"));
+	public static final Block REALISTIC_COPPER_TORCH = Registry.register(BuiltInRegistries.BLOCK, REALISTIC_COPPER_TORCH_KEY,
+		new RealisticTorchBlock(ParticleTypes.COPPER_FIRE_FLAME, torchProperties(REALISTIC_COPPER_TORCH_KEY, 14)));
+	public static final ResourceKey<Block> REALISTIC_COPPER_WALL_TORCH_KEY = ResourceKey.create(Registries.BLOCK, RealisticWater.id("realistic_copper_wall_torch"));
+	public static final Block REALISTIC_COPPER_WALL_TORCH = Registry.register(BuiltInRegistries.BLOCK, REALISTIC_COPPER_WALL_TORCH_KEY,
+		new RealisticWallTorchBlock(ParticleTypes.COPPER_FIRE_FLAME, torchProperties(REALISTIC_COPPER_WALL_TORCH_KEY, 14)
+			.overrideLootTable(REALISTIC_COPPER_TORCH.getLootTable()).overrideDescription(REALISTIC_COPPER_TORCH.getDescriptionId())));
+	public static final ResourceKey<Item> REALISTIC_COPPER_TORCH_ITEM_KEY = ResourceKey.create(Registries.ITEM, RealisticWater.id("realistic_copper_torch"));
+	public static final Item REALISTIC_COPPER_TORCH_ITEM = registerStandingAndWallItem(REALISTIC_COPPER_TORCH_ITEM_KEY, REALISTIC_COPPER_TORCH, REALISTIC_COPPER_WALL_TORCH);
+
+	public static final ResourceKey<Block> REALISTIC_REDSTONE_TORCH_KEY = ResourceKey.create(Registries.BLOCK, RealisticWater.id("realistic_redstone_torch"));
+	public static final Block REALISTIC_REDSTONE_TORCH = Registry.register(BuiltInRegistries.BLOCK, REALISTIC_REDSTONE_TORCH_KEY,
+		new RealisticRedstoneTorchBlock(redstoneTorchProperties(REALISTIC_REDSTONE_TORCH_KEY)));
+	public static final ResourceKey<Block> REALISTIC_REDSTONE_WALL_TORCH_KEY = ResourceKey.create(Registries.BLOCK, RealisticWater.id("realistic_redstone_wall_torch"));
+	public static final Block REALISTIC_REDSTONE_WALL_TORCH = Registry.register(BuiltInRegistries.BLOCK, REALISTIC_REDSTONE_WALL_TORCH_KEY,
+		new RealisticRedstoneWallTorchBlock(redstoneTorchProperties(REALISTIC_REDSTONE_WALL_TORCH_KEY)
+			.overrideLootTable(REALISTIC_REDSTONE_TORCH.getLootTable()).overrideDescription(REALISTIC_REDSTONE_TORCH.getDescriptionId())));
+	public static final ResourceKey<Item> REALISTIC_REDSTONE_TORCH_ITEM_KEY = ResourceKey.create(Registries.ITEM, RealisticWater.id("realistic_redstone_torch"));
+	public static final Item REALISTIC_REDSTONE_TORCH_ITEM = registerStandingAndWallItem(REALISTIC_REDSTONE_TORCH_ITEM_KEY, REALISTIC_REDSTONE_TORCH, REALISTIC_REDSTONE_WALL_TORCH);
+
+	public static final ResourceKey<Block> REALISTIC_CAMPFIRE_KEY = ResourceKey.create(Registries.BLOCK, RealisticWater.id("realistic_campfire"));
+	public static final Block REALISTIC_CAMPFIRE = Registry.register(BuiltInRegistries.BLOCK, REALISTIC_CAMPFIRE_KEY,
+		new RealisticCampfireBlock(true, 1, campfireProperties(REALISTIC_CAMPFIRE_KEY, 15)));
+	public static final ResourceKey<Item> REALISTIC_CAMPFIRE_ITEM_KEY = ResourceKey.create(Registries.ITEM, RealisticWater.id("realistic_campfire"));
+	public static final Item REALISTIC_CAMPFIRE_ITEM = registerBlockItem(REALISTIC_CAMPFIRE_ITEM_KEY, REALISTIC_CAMPFIRE);
+
+	public static final ResourceKey<Block> REALISTIC_SOUL_CAMPFIRE_KEY = ResourceKey.create(Registries.BLOCK, RealisticWater.id("realistic_soul_campfire"));
+	public static final Block REALISTIC_SOUL_CAMPFIRE = Registry.register(BuiltInRegistries.BLOCK, REALISTIC_SOUL_CAMPFIRE_KEY,
+		new RealisticCampfireBlock(false, 2, campfireProperties(REALISTIC_SOUL_CAMPFIRE_KEY, 10)));
+	public static final ResourceKey<Item> REALISTIC_SOUL_CAMPFIRE_ITEM_KEY = ResourceKey.create(Registries.ITEM, RealisticWater.id("realistic_soul_campfire"));
+	public static final Item REALISTIC_SOUL_CAMPFIRE_ITEM = registerBlockItem(REALISTIC_SOUL_CAMPFIRE_ITEM_KEY, REALISTIC_SOUL_CAMPFIRE);
+
+	public static final ResourceKey<Block> REALISTIC_FURNACE_KEY = ResourceKey.create(Registries.BLOCK, RealisticWater.id("realistic_furnace"));
+	public static final Block REALISTIC_FURNACE = Registry.register(BuiltInRegistries.BLOCK, REALISTIC_FURNACE_KEY,
+		new RealisticFurnaceBlock(furnaceProperties(REALISTIC_FURNACE_KEY)));
+	public static final ResourceKey<Item> REALISTIC_FURNACE_ITEM_KEY = ResourceKey.create(Registries.ITEM, RealisticWater.id("realistic_furnace"));
+	public static final Item REALISTIC_FURNACE_ITEM = registerBlockItem(REALISTIC_FURNACE_ITEM_KEY, REALISTIC_FURNACE);
+
+	public static final ResourceKey<Block> REALISTIC_BLAST_FURNACE_KEY = ResourceKey.create(Registries.BLOCK, RealisticWater.id("realistic_blast_furnace"));
+	public static final Block REALISTIC_BLAST_FURNACE = Registry.register(BuiltInRegistries.BLOCK, REALISTIC_BLAST_FURNACE_KEY,
+		new RealisticBlastFurnaceBlock(furnaceProperties(REALISTIC_BLAST_FURNACE_KEY)));
+	public static final ResourceKey<Item> REALISTIC_BLAST_FURNACE_ITEM_KEY = ResourceKey.create(Registries.ITEM, RealisticWater.id("realistic_blast_furnace"));
+	public static final Item REALISTIC_BLAST_FURNACE_ITEM = registerBlockItem(REALISTIC_BLAST_FURNACE_ITEM_KEY, REALISTIC_BLAST_FURNACE);
+
+	public static final ResourceKey<Block> REALISTIC_SMOKER_KEY = ResourceKey.create(Registries.BLOCK, RealisticWater.id("realistic_smoker"));
+	public static final Block REALISTIC_SMOKER = Registry.register(BuiltInRegistries.BLOCK, REALISTIC_SMOKER_KEY,
+		new RealisticSmokerBlock(furnaceProperties(REALISTIC_SMOKER_KEY)));
+	public static final ResourceKey<Item> REALISTIC_SMOKER_ITEM_KEY = ResourceKey.create(Registries.ITEM, RealisticWater.id("realistic_smoker"));
+	public static final Item REALISTIC_SMOKER_ITEM = registerBlockItem(REALISTIC_SMOKER_ITEM_KEY, REALISTIC_SMOKER);
+
+	/** Realistic candles keyed by vanilla name, e.g. "candle" and "red_candle". */
+	public static final Map<String, Block> REALISTIC_CANDLES = new LinkedHashMap<>();
+	public static final Map<String, Item> REALISTIC_CANDLE_ITEMS = new LinkedHashMap<>();
+
+	static {
+		registerCandle("candle", MapColor.SAND);
+		for (DyeColor color : DyeColor.values()) {
+			registerCandle(color.getSerializedName() + "_candle", color.getMapColor());
+		}
+	}
 
 	private ModContent() {
+	}
+
+	private static void registerCandle(String vanillaName, MapColor color) {
+		ResourceKey<Block> blockKey = ResourceKey.create(Registries.BLOCK, RealisticWater.id("realistic_" + vanillaName));
+		Block block = Registry.register(BuiltInRegistries.BLOCK, blockKey, new RealisticCandleBlock(BlockBehaviour.Properties.of()
+			.mapColor(color)
+			.noOcclusion()
+			.strength(0.1F)
+			.sound(SoundType.CANDLE)
+			.lightLevel(CandleBlock.LIGHT_EMISSION)
+			.pushReaction(PushReaction.POPPED)
+			.setId(blockKey)));
+		REALISTIC_CANDLES.put(vanillaName, block);
+		REALISTIC_CANDLE_ITEMS.put(vanillaName, registerBlockItem(ResourceKey.create(Registries.ITEM, RealisticWater.id("realistic_" + vanillaName)), block));
+	}
+
+	private static BlockBehaviour.Properties redstoneTorchProperties(ResourceKey<Block> key) {
+		return BlockBehaviour.Properties.of()
+			.noCollision()
+			.instabreak()
+			.lightLevel(state -> state.getValue(BlockStateProperties.LIT) ? 7 : 0)
+			.sound(SoundType.WOOD)
+			.pushReaction(PushReaction.POPPED)
+			.setId(key);
+	}
+
+	private static BlockBehaviour.Properties furnaceProperties(ResourceKey<Block> key) {
+		return BlockBehaviour.Properties.of()
+			.mapColor(MapColor.STONE)
+			.instrument(NoteBlockInstrument.BASEDRUM)
+			.requiresCorrectToolForDrops()
+			.strength(3.5F)
+			.lightLevel(state -> state.getValue(BlockStateProperties.LIT) ? 13 : 0)
+			.setId(key);
+	}
+
+	private static BlockBehaviour.Properties campfireProperties(ResourceKey<Block> key, int light) {
+		return BlockBehaviour.Properties.of()
+			.mapColor(MapColor.PODZOL)
+			.instrument(NoteBlockInstrument.BASS)
+			.strength(2.0F)
+			.sound(SoundType.WOOD)
+			.lightLevel(state -> state.getValue(BlockStateProperties.LIT) ? light : 0)
+			.noOcclusion()
+			.ignitedByLava()
+			.setId(key);
+	}
+
+	private static BlockBehaviour.Properties torchProperties(ResourceKey<Block> key, int light) {
+		return BlockBehaviour.Properties.of()
+			.noCollision()
+			.instabreak()
+			.lightLevel(state -> light)
+			.sound(SoundType.WOOD)
+			.pushReaction(PushReaction.POPPED)
+			.setId(key);
+	}
+
+	private static Item registerStandingAndWallItem(ResourceKey<Item> key, Block standing, Block wall) {
+		StandingAndWallBlockItem item = new StandingAndWallBlockItem(standing, wall, Direction.DOWN, new Item.Properties().useBlockDescriptionPrefix().setId(key));
+		item.registerBlocks(Item.BY_BLOCK, item);
+		return Registry.register(BuiltInRegistries.ITEM, key, item);
 	}
 
 	private static Item registerBlockItem(ResourceKey<Item> key, Block block) {
@@ -277,6 +480,12 @@ public final class ModContent {
 		DispenserBlock.registerBehavior(REALISTIC_WATER_BUCKET, waterBucketBehavior);
 		DispenserBlock.registerBehavior(SMALL_REALISTIC_WATER_BUCKET, waterBucketBehavior);
 
+		// Realistic campfires reuse the vanilla campfire block entity (cooking, saving, tickers), so it must accept them.
+		BlockEntityTypes.CAMPFIRE.addValidBlock(REALISTIC_CAMPFIRE);
+		BlockEntityTypes.CAMPFIRE.addValidBlock(REALISTIC_SOUL_CAMPFIRE);
+		BlockEntityTypes.FURNACE.addValidBlock(REALISTIC_FURNACE);
+		BlockEntityTypes.BLAST_FURNACE.addValidBlock(REALISTIC_BLAST_FURNACE);
+		BlockEntityTypes.SMOKER.addValidBlock(REALISTIC_SMOKER);
 		CreativeModeTabEvents.modifyOutputEvent(CreativeModeTabs.TOOLS_AND_UTILITIES)
 			.register(output -> {
 				output.insertAfter(Items.WATER_BUCKET, REALISTIC_WATER_BUCKET);
@@ -291,7 +500,24 @@ public final class ModContent {
 			.register(output -> {
 				output.accept(WOBBLY_SLIME_ITEM);
 				output.accept(WOBBLY_HONEY_ITEM);
+				output.insertAfter(Items.FLINT_AND_STEEL, REALISTIC_FLINT_AND_STEEL);
+				output.insertAfter(REALISTIC_FLINT_AND_STEEL, REALISTIC_FIRE_ITEM);
+				output.insertAfter(Items.FIRE_CHARGE, REALISTIC_FIRE_CHARGE);
 			});
+		CreativeModeTabEvents.modifyOutputEvent(CreativeModeTabs.FUNCTIONAL_BLOCKS)
+			.register(output -> {
+				output.insertAfter(Items.TORCH, REALISTIC_TORCH_ITEM);
+				output.insertAfter(Items.SOUL_TORCH, REALISTIC_SOUL_TORCH_ITEM);
+				output.insertAfter(Items.COPPER_TORCH, REALISTIC_COPPER_TORCH_ITEM);
+				output.insertAfter(Items.CAMPFIRE, REALISTIC_CAMPFIRE_ITEM);
+				output.insertAfter(Items.SOUL_CAMPFIRE, REALISTIC_SOUL_CAMPFIRE_ITEM);
+				output.insertAfter(Items.FURNACE, REALISTIC_FURNACE_ITEM);
+				output.insertAfter(Items.BLAST_FURNACE, REALISTIC_BLAST_FURNACE_ITEM);
+				output.insertAfter(Items.SMOKER, REALISTIC_SMOKER_ITEM);
+				REALISTIC_CANDLE_ITEMS.forEach((name, item) -> output.accept(item));
+			});
+		CreativeModeTabEvents.modifyOutputEvent(CreativeModeTabs.REDSTONE_BLOCKS)
+			.register(output -> output.insertAfter(Items.REDSTONE_TORCH, REALISTIC_REDSTONE_TORCH_ITEM));
 		CreativeModeTabEvents.modifyOutputEvent(CreativeModeTabs.NATURAL_BLOCKS)
 			.register(output -> {
 				output.insertAfter(Items.SAND, REALISTIC_SAND_ITEM);

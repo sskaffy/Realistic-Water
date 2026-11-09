@@ -18,6 +18,7 @@ import me.skaffy.realistic.RealisticPhysics;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLevelEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import me.skaffy.block.RealisticFireBlock;
 import me.skaffy.net.LavaSyncPayload;
 import me.skaffy.net.LeavesSyncPayload;
 import me.skaffy.net.RemoveAllWaterPayload;
@@ -54,6 +55,7 @@ public class RealisticWater implements ModInitializer {
 	@Override
 	public void onInitialize() {
 		ModContent.init();
+		ServerLifecycleEvents.SERVER_STARTING.register(server -> RealisticFireBlock.syncFlammability());
 		PayloadTypeRegistry.serverboundPlay().register(WaterSyncPayload.TYPE, WaterSyncPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(SandSyncPayload.TYPE, SandSyncPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(LavaSyncPayload.TYPE, LavaSyncPayload.CODEC);
