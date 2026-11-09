@@ -413,6 +413,21 @@ public final class WaterSettings {
 	public static boolean fireSteam = true;
 	public static boolean fireEmbers = true;
 	public static float fireWind = 1.0F;
+	public static float fireParticleStep = 0.09F;
+	public static float fireFlameSize = 0.14F;
+	public static float fireFlameLife = 0.7F;
+	public static float fireFlameRise = 3.0F;
+	public static float fireFlameBrightness = 1.7F;
+	public static float fireFlameOpacity = 0.6F;
+	public static float fireFlameAmount = 1.0F;
+	public static float fireSmokeSize = 0.2F;
+	public static float fireSmokeLife = 5.0F;
+	public static float fireSmokeRise = 1.1F;
+	public static float fireSmokeOpacity = 0.3F;
+	public static float fireSmokeDark = 0.07F;
+	public static float fireSmokeLight = 0.4F;
+	public static float fireSmokeAmount = 1.0F;
+	public static float fireSparks = 1.0F;
 
 	public static String ffmpeg = "";
 	public static boolean renderFreezeWorld = true;

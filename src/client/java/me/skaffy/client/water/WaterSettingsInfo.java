@@ -903,6 +903,60 @@ public final class WaterSettingsInfo {
 		num("steamLightShade", "Steam light shade", Cost.NONE, LOOK, 0, 1, 0.01,
 			"Brightness of the lightest points.");
 
+		category("Fire");
+		toggle("fire", "Realistic fire", Cost.LOW, "Scans loaded chunks for lit realistic fire sources.",
+			"Turns the whole fire system on or off: finding realistic fire, torches, campfires, furnaces and candles, and drawing their flames and smoke.");
+		toggle("fireVanillaBlocks", "Count vanilla fire blocks", Cost.MEDIUM, "Many more sources to track and draw.",
+			"Also lets vanilla fire, torches, campfires and furnaces give off realistic flames and smoke. Off by default; only the realistic blocks do.");
+		toggle("fireParticles", "Draw fire", Cost.MEDIUM, "Every fire adds particles to the GPU simulation.",
+			"Draws flames, smoke and sparks. Turn it off to keep fire blocks working but invisible.");
+		integer("fireMaxSources", "Max fire sources", Cost.MEDIUM, "Each active source puffs particles every few ticks.", 1, 4096,
+			"The most fires drawn at once, nearest first.");
+		num("fireRange", "Fire search range", Cost.LOW, "How far out fire sources stay tracked.", 8, 256, 1,
+			"Fires further than this many blocks are ignored.");
+		num("fireParticleRange", "Fire draw range", Cost.MEDIUM, "Further fires add particles too.", 8, 128, 1,
+			"Fires further than this many blocks from you do not draw.");
+		integer("fireParticleBudget", "Fire puffs per tick", Cost.MEDIUM, "Caps how many puffs one tick can start.", 10, 2000,
+			"The most flame, smoke and spark puffs the fires may start in one tick; the nearest fires go first.");
+		num("fireParticleDensity", "Fire density", Cost.HIGH, "Doubling it roughly doubles the flame particles.", 0.1, 4, 0.05,
+			"Multiplies how many particles flames are made of. Higher is thicker and smoother.");
+		num("fireParticleStep", "Fire particle spacing", Cost.HIGH, "Halving it makes eight times as many particles per puff.", 0.02, 0.4, 0.005,
+			"Spacing between the particles in each puff of flame, in blocks.");
+		num("fireFlameAmount", "Flame amount", Cost.HIGH, "More flame particles.", 0.1, 4, 0.05,
+			"How many particles each flame puff holds.");
+		num("fireFlameSize", "Flame particle size", Cost.NONE, LOOK, 0.02, 1, 0.005,
+			"Radius of each glowing flame particle, in blocks.");
+		num("fireFlameLife", "Flame lifetime", Cost.LOW, "Longer keeps more particles alive.", 0.1, 5, 0.05,
+			"Seconds a flame particle burns before it fades.");
+		num("fireFlameRise", "Flame rise", Cost.NONE, LOOK, 0, 20, 0.1,
+			"How hard flames lick upward.");
+		num("fireFlameBrightness", "Flame brightness", Cost.NONE, LOOK, 0, 6, 0.05,
+			"How brightly flames glow.");
+		num("fireFlameOpacity", "Flame opacity", Cost.NONE, LOOK, 0, 1, 0.01,
+			"How strongly each flame particle shows.");
+		num("fireSmokeAmount", "Smoke amount", Cost.MEDIUM, "More smoke puffs.", 0, 4, 0.05,
+			"How often fires puff smoke. 0 turns smoke off.");
+		num("fireSmokeSize", "Smoke particle size", Cost.NONE, LOOK, 0.02, 1, 0.005,
+			"Radius of each smoke particle when it starts, in blocks; it grows as it rises.");
+		num("fireSmokeLife", "Smoke lifetime", Cost.LOW, "Longer keeps more particles alive.", 0.5, 30, 0.5,
+			"Seconds smoke lasts before it has thinned away.");
+		num("fireSmokeRise", "Smoke rise", Cost.NONE, LOOK, 0, 10, 0.05,
+			"How hard hot smoke rises.");
+		num("fireSmokeOpacity", "Smoke opacity", Cost.NONE, LOOK, 0, 1, 0.01,
+			"How opaque each smoke particle is at its centre.");
+		num("fireSmokeDark", "Smoke dark shade", Cost.NONE, LOOK, 0, 1, 0.01,
+			"Brightness of the darkest smoke.");
+		num("fireSmokeLight", "Smoke light shade", Cost.NONE, LOOK, 0, 1, 0.01,
+			"Brightness of the lightest, oldest smoke.");
+		num("fireSparks", "Lava sparks", Cost.LOW, "More spark puffs.", 0, 4, 0.05,
+			"How often realistic lava throws glowing sparks. 0 turns sparks off.");
+		toggle("fireEmbers", "Lava embers", Cost.LOW, "A little extra work per lava block.",
+			"Lets realistic lava throw sparks and smoke.");
+		toggle("fireSteam", "Fire steam", Cost.LOW, "Checks the blocks beside every fire.",
+			"Fires next to water, or standing in rain, give off steam.");
+		num("fireWind", "Wind", Cost.NONE, LOOK, 0, 5, 0.05,
+			"How strongly a slowly changing breeze, stronger in storms, pushes flames and smoke sideways.");
+
 		category("Clip recording");
 		integer("renderMaxStepsPerFrame", "Max substeps per clip frame", Cost.HIGH, "Only while /water render records; higher makes recording slower but more accurate.", 1, 256,
 			"Upper limit on substeps per frame while recording a clip with /water render.");

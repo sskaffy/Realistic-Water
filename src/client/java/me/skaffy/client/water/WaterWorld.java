@@ -373,7 +373,7 @@ public final class WaterWorld {
 		if (material == Material.LEAVES) {
 			return Math.max(1, WaterSettings.leafResolution);
 		}
-		if (material == Material.STEAM) {
+		if (material.isGas()) {
 			return Math.max(1, WaterSettings.steamResolution);
 		}
 		return Math.max(1, WaterSettings.resolution);
@@ -484,6 +484,24 @@ public final class WaterWorld {
 		BlockPos at = BlockPos.containing(x, y, z);
 		WaterRegion r = this.regionFor(at, Material.STEAM);
 		r.addEmitter(new WaterRegion.Emitter(x - h, y, z - h, x + h, y + side, z + h, 0.0F, 0.5F * r.res, 0.0F));
+		r.wake(this.frameCounter);
+	}
+
+	/** True once the Vulkan device exists, so fire can draw itself on the GPU. */
+	public boolean gpuReady() {
+		return Vk.tryDevice() != null && !this.failed;
+	}
+
+	/**
+	 * Puffs a small cloud of gas particles (smoke, flame or soul flame) out of a box. Velocities are in blocks per second and
+	 * {@code step} is the spacing of the particles inside the box, so smaller means more, finer particles.
+	 */
+	public void addGasPuff(Material material, double x, double y, double z, double halfWidth, double height, float vx, float vy, float vz, float step) {
+		if (!material.isGas() || !this.vulkanReady()) {
+			return;
+		}
+		WaterRegion r = this.regionFor(BlockPos.containing(x, y, z), material);
+		r.addEmitter(new WaterRegion.Emitter(x - halfWidth, y, z - halfWidth, x + halfWidth, y + height, z + halfWidth, vx, vy, vz, step));
 		r.wake(this.frameCounter);
 	}
 
@@ -2623,7 +2641,18 @@ public final class WaterWorld {
 		if (leaves) {
 			this.writeLeafGlobals(level, b, o, res);
 		}
-		if (r.material.isGas()) {
+		if (r.material == Material.SMOKE) {
+			putFloats(b, o + 3840, Material.SMOKE.shaderId(), Math.max(WaterSettings.fireSmokeLife, 0.1F), WaterSettings.fireSmokeRise,
+				WaterSettings.steamDrag * 0.6F);
+			putFloats(b, o + 3856, WaterSettings.steamSwirl * 1.3F, 0.25F, WaterSettings.steamEntityPush, 0.0F);
+			putFloats(b, o + 3872, Math.max(WaterSettings.fireSmokeSize, 1e-3F), Mth.clamp(WaterSettings.fireSmokeOpacity, 0.0F, 1.0F),
+				WaterSettings.fireSmokeDark, WaterSettings.fireSmokeLight);
+		} else if (r.material == Material.FLAME || r.material == Material.SOUL_FLAME) {
+			putFloats(b, o + 3840, r.material.shaderId(), Math.max(WaterSettings.fireFlameLife, 0.05F), WaterSettings.fireFlameRise, 1.6F);
+			putFloats(b, o + 3856, WaterSettings.steamSwirl * 0.9F, 0.15F, 0.0F, 0.0F);
+			putFloats(b, o + 3872, Math.max(WaterSettings.fireFlameSize, 1e-3F), Mth.clamp(WaterSettings.fireFlameOpacity, 0.0F, 1.0F),
+				WaterSettings.fireFlameBrightness, 0.0F);
+		} else if (r.material.isGas()) {
 			putFloats(b, o + 3840, Material.STEAM.shaderId(), Math.max(WaterSettings.steamLifetime, 0.1F), WaterSettings.steamBuoyancy,
 				WaterSettings.steamDrag);
 			putFloats(b, o + 3856, WaterSettings.steamSwirl, WaterSettings.steamBurst, WaterSettings.steamEntityPush, 0.0F);

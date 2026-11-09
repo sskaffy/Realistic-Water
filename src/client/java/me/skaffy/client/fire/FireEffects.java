@@ -1,6 +1,8 @@
 package me.skaffy.client.fire;
 
+import me.skaffy.client.water.Material;
 import me.skaffy.client.water.WaterSettings;
+import me.skaffy.client.water.WaterWorld;
 import me.skaffy.fluid.RealisticLavaFluid;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -10,18 +12,22 @@ import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.util.RandomSource;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * Draws flames and smoke for every active realistic fire source in {@link FireWorld}, and lets them interact with the world:
- * wind pushes smoke and bends flames, rain weakens flames and turns smoke into steam, water next to a fire makes steam, and
- * realistic lava throws embers. The vanilla blocks' own particles are removed, so this is where realistic fire is seen.
+ * Brings every active realistic fire source in {@link FireWorld} to life. With the Vulkan renderer up, flames, smoke and
+ * sparks are puffed into the same GPU particle simulation that steam uses (flames glow by themselves, smoke is lit by the
+ * world), and fires touching water or standing in rain feed the existing steam. Without Vulkan it falls back to plain
+ * vanilla particles so something is still visible. Wind pushes everything the same way in both.
  */
 public final class FireEffects {
 	private static int spawnedLastTick;
 	private static long totalSpawned;
 	private static long steamSpawned;
 	private static long emberSpawned;
+	private static long gpuPuffs;
 	private static double windX;
 	private static double windZ;
 
@@ -44,6 +50,10 @@ public final class FireEffects {
 		return emberSpawned;
 	}
 
+	public static long gpuPuffs() {
+		return gpuPuffs;
+	}
+
 	/** Current smoke drift in blocks per tick: slowly changing gusts, stronger when it rains or storms. */
 	public static Vec3 wind() {
 		return new Vec3(windX, 0.0, windZ);
@@ -63,10 +73,12 @@ public final class FireEffects {
 			return;
 		}
 		updateWind(level);
+		boolean gpu = WaterWorld.get().gpuReady();
 		RandomSource random = level.getRandom();
 		Vec3 eye = mc.player.getEyePosition();
 		double rangeSq = (double) WaterSettings.fireParticleRange * WaterSettings.fireParticleRange;
 		int budget = WaterSettings.fireParticleBudget;
+		long tick = level.getGameTime();
 		for (FireWorld.Source source : FireWorld.get().activeSources()) {
 			if (spawnedLastTick >= budget) {
 				return;
@@ -78,10 +90,18 @@ public final class FireEffects {
 			FireWorld.Kind kind = source.kind();
 			if (kind == FireWorld.Kind.LAVA) {
 				if (WaterSettings.fireEmbers && RealisticLavaFluid.isRealistic(level.getFluidState(pos))) {
-					embers(level, random, pos);
+					if (gpu) {
+						gpuLava(level, random, pos);
+					} else {
+						embers(level, random, pos);
+					}
 				}
 			} else if (kind.name().startsWith("REALISTIC_")) {
-				emit(level, random, pos, kind);
+				if (gpu) {
+					gpuFire(level, random, pos, kind, tick);
+				} else {
+					emit(level, random, pos, kind);
+				}
 			}
 		}
 	}
@@ -99,6 +119,86 @@ public final class FireEffects {
 		spawnedLastTick++;
 		totalSpawned++;
 	}
+
+	// ---- GPU path -------------------------------------------------------------------------------------------------
+
+	private static void gpuFire(ClientLevel level, RandomSource random, BlockPos pos, FireWorld.Kind kind, long tick) {
+		float i = kind.intensity;
+		if (kind == FireWorld.Kind.REALISTIC_REDSTONE_TORCH) {
+			return;
+		}
+		WaterWorld water = WaterWorld.get();
+		boolean soul = kind.soul();
+		boolean stove = kind == FireWorld.Kind.REALISTIC_FURNACE || kind == FireWorld.Kind.REALISTIC_SMOKER;
+		boolean rained = level.isRainingAt(pos.above());
+		double x = pos.getX() + 0.5;
+		double z = pos.getZ() + 0.5;
+		double baseY = pos.getY() + (i >= 0.8F ? 0.05 : kind == FireWorld.Kind.REALISTIC_CANDLE ? 0.45 : stove ? 0.2 : 0.62);
+		if (stove) {
+			// A lit furnace glows through its front opening.
+			BlockState state = level.getBlockState(pos);
+			Direction facing = state.hasProperty(BlockStateProperties.HORIZONTAL_FACING) ? state.getValue(BlockStateProperties.HORIZONTAL_FACING) : Direction.NORTH;
+			x += facing.getStepX() * 0.55;
+			z += facing.getStepZ() * 0.55;
+		}
+		int stagger = (pos.getX() * 31 + pos.getZ() * 17 + pos.getY()) & 0xFFFF;
+		float wx = (float) windX * 60.0F;
+		float wz = (float) windZ * 60.0F;
+		float step = WaterSettings.fireParticleStep * (0.55F + 0.45F * i) / (float) Math.cbrt(Math.max(WaterSettings.fireFlameAmount * WaterSettings.fireParticleDensity, 0.05F));
+
+		// Flames: a small cloud of glowing particles every tick or two that rises, tapers and cools from white to red.
+		int flameInterval = i >= 0.8F ? 2 : 1;
+		if ((tick + stagger) % flameInterval == 0 && !(rained && random.nextFloat() < 0.5F)) {
+			double half = 0.04 + 0.24 * i;
+			double height = 0.06 + 0.2 * i;
+			water.addGasPuff(soul ? Material.SOUL_FLAME : Material.FLAME, x, baseY, z, half, height,
+				wx * 0.5F, 0.3F + 0.7F * i, wz * 0.5F, step);
+			gpuPuffs++;
+			count();
+		}
+
+		// Smoke: a dark, lit plume that expands as it rises. Soul fire barely smokes.
+		int smokeInterval = i >= 0.8F ? 3 : i >= 0.25F ? 5 : 9;
+		float smokeChance = WaterSettings.fireSmokeAmount * (soul ? 0.3F : 1.0F) * (rained ? 1.5F : 1.0F);
+		if ((tick + stagger) % smokeInterval == 0 && random.nextFloat() < smokeChance && kind != FireWorld.Kind.REALISTIC_CANDLE) {
+			double half = 0.03 + 0.1 * i;
+			water.addGasPuff(Material.SMOKE, x, baseY + 0.25 + 0.45 * i, z, half, 0.1,
+				wx, 0.4F + 0.8F * i, wz, Math.max(step, 0.1F));
+			gpuPuffs++;
+			count();
+		}
+
+		// Steam: a fire touching water, or rain pouring on it, feeds the mod's existing steam.
+		boolean wet = WaterSettings.fireSteam && nextToWater(level, pos);
+		if ((wet || rained) && random.nextFloat() < (wet ? 0.12F : 0.03F)) {
+			water.addSteam(x, pos.getY() + 0.5, z, 0.35F + 0.4F * i);
+			steamSpawned++;
+			count();
+		}
+	}
+
+	private static void gpuLava(ClientLevel level, RandomSource random, BlockPos pos) {
+		WaterWorld water = WaterWorld.get();
+		float sparks = WaterSettings.fireSparks;
+		if (random.nextFloat() < 0.05F * sparks) {
+			double x = pos.getX() + random.nextDouble();
+			double z = pos.getZ() + random.nextDouble();
+			water.addGasPuff(Material.FLAME, x, pos.getY() + 0.95, z, 0.015, 0.02,
+				(float) windX * 60.0F + (random.nextFloat() - 0.5F) * 0.6F, 1.2F + random.nextFloat() * 1.4F, (float) windZ * 60.0F + (random.nextFloat() - 0.5F) * 0.6F,
+				0.03F);
+			emberSpawned++;
+			gpuPuffs++;
+			count();
+		}
+		if (random.nextFloat() < 0.012F * WaterSettings.fireSmokeAmount) {
+			water.addGasPuff(Material.SMOKE, pos.getX() + random.nextDouble(), pos.getY() + 1.0, pos.getZ() + random.nextDouble(), 0.05, 0.1,
+				(float) windX * 80.0F, 0.5F, (float) windZ * 80.0F, 0.1F);
+			gpuPuffs++;
+			count();
+		}
+	}
+
+	// ---- Fallback without Vulkan ----------------------------------------------------------------------------------
 
 	private static void embers(ClientLevel level, RandomSource random, BlockPos pos) {
 		float density = WaterSettings.fireParticleDensity;
@@ -123,7 +223,6 @@ public final class FireEffects {
 		boolean soul = kind.soul();
 		boolean rained = level.isRainingAt(pos.above());
 		boolean wet = WaterSettings.fireSteam && nextToWater(level, pos);
-		// Flames: wide and low for open fire, a thin tip for torches and candles. Rain beats them down.
 		float spread = 0.15F + 0.3F * intensity;
 		double baseY = pos.getY() + (intensity >= 0.8F ? 0.15 : 0.65);
 		float flameChance = Math.min(1.0F, (0.35F + 1.2F * intensity) * density * (rained ? 0.5F : 1.0F));
@@ -136,7 +235,6 @@ public final class FireEffects {
 			level.addParticle(flame, x, y, z, windX * 1.5, 0.01 + 0.03 * intensity, windZ * 1.5);
 			count();
 		}
-		// Smoke: rises faster and farther the bigger the fire, carried by the wind.
 		float smokeChance = (0.1F + 0.5F * intensity) * density * (rained ? 1.5F : 1.0F);
 		if (random.nextFloat() < smokeChance) {
 			double x = pos.getX() + 0.5 + (random.nextDouble() - 0.5) * spread;
@@ -151,7 +249,6 @@ public final class FireEffects {
 			level.addParticle(smoke, x, y, z, windX * 4, rise, windZ * 4);
 			count();
 		}
-		// Steam: a fire touching water (or rain pouring on it) hisses white clouds.
 		if ((wet || rained) && random.nextFloat() < (wet ? 0.5F : 0.15F) * density) {
 			level.addParticle(ParticleTypes.CLOUD, pos.getX() + 0.5 + (random.nextDouble() - 0.5) * 0.6, pos.getY() + 0.5 + random.nextDouble() * 0.5,
 				pos.getZ() + 0.5 + (random.nextDouble() - 0.5) * 0.6, windX * 4, 0.05 + 0.03 * intensity, windZ * 4);
