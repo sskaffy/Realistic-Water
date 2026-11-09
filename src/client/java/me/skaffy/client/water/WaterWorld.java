@@ -767,6 +767,20 @@ public final class WaterWorld {
 		this.sources.entrySet().removeIf(e -> e.getValue() == material);
 	}
 
+	/** Drops every fire flame, smoke and spark particle region right away (local only; nothing is synced for these). */
+	public void removeFire() {
+		for (WaterRegion r : List.copyOf(this.regions)) {
+			if (r.material.isFireGas() && r.ocean == null) {
+				this.regions.remove(r);
+				r.close();
+			}
+		}
+		for (Material m : new Material[]{Material.SMOKE, Material.FLAME, Material.SOUL_FLAME, Material.SPARK}) {
+			this.echoes(m).clear();
+		}
+		this.sources.entrySet().removeIf(e -> e.getValue().isFireGas());
+	}
+
 	public void reload(ClientLevel level) {
 		this.closeRegions();
 		this.chunkScanQueue.clear();
