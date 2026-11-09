@@ -18,6 +18,9 @@ import me.skaffy.client.vk.VkOutOfMemory;
 import me.skaffy.ocean.OceanWaves;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.FluidTags;
@@ -1356,7 +1359,14 @@ public final class WaterRegion implements AutoCloseable {
 				medium |= LIGHT_HOT;
 			}
 		}
-		int thermal = this.material == Material.WATER ? thermalCode(state) << THERMAL_SHIFT : 0;
+		int thermal = 0;
+		if (this.material == Material.WATER) {
+			int code = thermalCode(state);
+			if (code == 0 && conductsHeat(state)) {
+				code = conductedCode(level, pos, CONDUCT_REACH);
+			}
+			thermal = code << THERMAL_SHIFT;
+		}
 		int sea = 0;
 		if (this.ocean != null && OceanWaves.isRestWater(state)) {
 			sea = OCEAN_REST_WATER;
@@ -1371,6 +1381,44 @@ public final class WaterRegion implements AutoCloseable {
 			sink = VANILLA_SINK;
 		}
 		return block | sky << 4 | opaque | medium | shadowCover(state) << LIGHT_COVER_SHIFT | thermal | sea | sink;
+	}
+
+	private static final int CONDUCT_REACH = 3;
+	private static final java.util.Map<Block, Boolean> CONDUCTORS = new java.util.concurrent.ConcurrentHashMap<>();
+
+	/** Iron and copper (every copper variant) carry heat; so does gold. Ores, ingots, torches and the like don't count. */
+	static boolean conductsHeat(BlockState state) {
+		return CONDUCTORS.computeIfAbsent(state.getBlock(), b -> {
+			String path = BuiltInRegistries.BLOCK.getKey(b).getPath();
+			if (path.contains("ore") || path.contains("torch") || path.contains("golem") || path.contains("raw")) {
+				return false;
+			}
+			return path.equals("iron_block") || path.equals("iron_bars") || path.equals("gold_block") || path.endsWith("iron_trapdoor")
+				|| path.contains("copper") || path.equals("heavy_weighted_pressure_plate") || path.equals("light_weighted_pressure_plate");
+		});
+	}
+
+	/** Heat reaching a metal block from a hot block touching it, or from more metal that is itself heated, a few blocks along. */
+	private static int conductedCode(ClientLevel level, BlockPos pos, int depth) {
+		int best = 0;
+		for (Direction d : Direction.values()) {
+			BlockPos n = pos.relative(d);
+			BlockState s = level.getBlockState(n);
+			int c = thermalCode(s);
+			if (c == 1 || c == 2 || c == 3) {
+				return 3;
+			}
+			if (c == 4) {
+				best = 4;
+			} else if (depth > 1 && conductsHeat(s)) {
+				int through = conductedCode(level, n, depth - 1);
+				if (through == 3) {
+					return 3;
+				}
+				best = Math.max(best, through);
+			}
+		}
+		return best;
 	}
 
 	static int thermalCode(BlockState state) {

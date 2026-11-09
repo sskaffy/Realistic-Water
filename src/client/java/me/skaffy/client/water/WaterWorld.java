@@ -895,10 +895,22 @@ public final class WaterWorld {
 		} else if (oldState.is(ModContent.WATER_DRAIN)) {
 			this.waterDrains.remove(key);
 		}
-		if (WaterRegion.thermalCode(oldState) != WaterRegion.thermalCode(newState)) {
+		if (WaterRegion.thermalCode(oldState) != WaterRegion.thermalCode(newState)
+			|| WaterRegion.conductsHeat(oldState) != WaterRegion.conductsHeat(newState)) {
 			for (WaterRegion r : this.regions) {
 				if (r.material == Material.WATER && r.windowContains(pos, 1)) {
 					r.refreshLightAt(level, pos);
+					// Metal nearby may now carry (or stop carrying) the heat.
+					BlockPos.MutableBlockPos near = new BlockPos.MutableBlockPos();
+					for (int dx = -3; dx <= 3; dx++) {
+						for (int dy = -3; dy <= 3; dy++) {
+							for (int dz = -3; dz <= 3; dz++) {
+								if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) <= 3 && WaterRegion.conductsHeat(level.getBlockState(near.set(pos.getX() + dx, pos.getY() + dy, pos.getZ() + dz)))) {
+									r.refreshLightAt(level, near);
+								}
+							}
+						}
+					}
 					r.wake(this.frameCounter);
 				}
 			}
