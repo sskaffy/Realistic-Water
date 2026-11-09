@@ -79,12 +79,33 @@ public class RealisticFireBlock extends FireBlock {
 		};
 	}
 
-	/** A fire that burns itself out leaves the ground beneath it charred. */
-	private static void scorch(ServerLevel level, BlockPos pos, RandomSource random) {
-		BlockPos below = pos.below();
-		BlockState ground = level.getBlockState(below);
-		if ((ground.is(Blocks.GRASS_BLOCK) || ground.is(Blocks.PODZOL) || ground.is(Blocks.MYCELIUM)) && random.nextFloat() < 0.6F) {
-			level.setBlock(below, Blocks.COARSE_DIRT.defaultBlockState(), 3);
+	/**
+	 * A fire that burns itself out chars the ground beneath it and, less and less likely the further away, the ground around
+	 * it, so a dead blaze leaves a ragged scorched patch instead of a neat dot. A hotter blaze (more fire around it) reaches
+	 * further. Only open ground is charred, never grass under a roof or another block.
+	 */
+	private static void scorch(ServerLevel level, BlockPos pos, RandomSource random, int near) {
+		double reach = 1.0 + 0.1 * Math.min(near, 8);
+		for (int dx = -2; dx <= 2; dx++) {
+			for (int dz = -2; dz <= 2; dz++) {
+				double chance = Math.min(0.9, 0.6 * reach / (1.0 + 1.3 * (dx * dx + dz * dz)));
+				if (random.nextDouble() >= chance) {
+					continue;
+				}
+				// Follow the ground up or down a step, so it works on slopes.
+				for (int dy = 0; dy >= -1; dy--) {
+					BlockPos ground = pos.offset(dx, dy - 1, dz);
+					BlockState state = level.getBlockState(ground);
+					if (!state.is(Blocks.GRASS_BLOCK) && !state.is(Blocks.PODZOL) && !state.is(Blocks.MYCELIUM)) {
+						continue;
+					}
+					BlockPos above = ground.above();
+					if (level.getBlockState(above).getCollisionShape(level, above).isEmpty()) {
+						level.setBlock(ground, Blocks.COARSE_DIRT.defaultBlockState(), 3);
+					}
+					break;
+				}
+			}
 		}
 	}
 
@@ -163,7 +184,7 @@ public class RealisticFireBlock extends FireBlock {
 		} else if (!eternal) {
 			int next = age + 1 + random.nextInt(2);
 			if (next >= 15 || age >= 4 && random.nextFloat() < 0.18F) {
-				scorch(level, pos, random);
+				scorch(level, pos, random, near);
 				level.removeBlock(pos, false);
 				return;
 			}
