@@ -85,7 +85,7 @@ Fire in this mod is drawn on the GPU with the same Vulkan particle system the st
 - "/fire rescan" makes the mod look for fire blocks around you again
 - "/water remove fire" (op only) deletes realistic fire blocks around you (up to 400 per run, so run it again for a big one) and clears the flames and smoke
 
-**Settings:** everything is in the "Fire" section of "/water gui", and each one can also be changed with "/water set". You can turn fire off completely, set how many sources are drawn and how far away, and change the flame size, lifetime, rise speed, brightness and opacity. Smoke, sparks and steam each have their own controls too. If fire is costing too many frames, lower the max sources or the particle budget first.
+**Settings:** everything is in the "Fire" section of "/water gui", and each one can also be changed with "/water set". You can turn fire off completely, change how fast it spreads (a server-wide multiplier that only operators can change), set how many sources are drawn and how far away, and change the flame size, lifetime, rise speed, brightness and opacity. Smoke, sparks and steam each have their own controls too. If fire is costing too many frames, lower the max sources or the particle budget first.
 
 **Showcase:** https://www.youtube.com/watch?v=GG2-psEHUI4 (this is the old one, new is coming soon)
 

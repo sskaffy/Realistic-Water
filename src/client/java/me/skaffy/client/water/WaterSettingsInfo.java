@@ -385,6 +385,8 @@ public final class WaterSettingsInfo {
 			"Lets realistic lava throw sparks and smoke.");
 		toggle("fireSteam", "Fire steam", Cost.LOW, "Checks the blocks beside every fire.",
 			"Fires next to water, or standing in rain, give off steam.");
+		num("fireSpreadSpeed", "Spread speed", Cost.NONE, "Changes how fast the server lets fire catch, nothing to render.", 0, 5, 0.05,
+			"Multiplies how fast fire spreads to new blocks: 0 stops it spreading, 1 is normal, higher races through a forest. Only operators can change it, and it applies to everyone on the server.");
 		num("fireWind", "Wind", Cost.NONE, LOOK, 0, 5, 0.05,
 			"How strongly a slowly changing breeze, stronger in storms, pushes flames and smoke sideways.");
 

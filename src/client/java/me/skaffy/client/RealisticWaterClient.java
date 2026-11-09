@@ -76,6 +76,7 @@ public class RealisticWaterClient implements ClientModInitializer {
 		ClientTickEvents.END_CLIENT_TICK.register(me.skaffy.client.jelly.JellyWorld::tick);
 		ClientTickEvents.END_CLIENT_TICK.register(me.skaffy.client.ice.IceWorld::tick);
 		ClientTickEvents.END_CLIENT_TICK.register(me.skaffy.client.trees.LeafSink::tick);
+		ClientTickEvents.END_CLIENT_TICK.register(me.skaffy.client.fire.FireSpeedSync::tick);
 		ClientTickEvents.END_CLIENT_TICK.register(mc -> me.skaffy.client.trees.TreeGrab.get().tick(mc));
 		ClientTickEvents.END_CLIENT_TICK.register(mc -> me.skaffy.client.trees.FallenLeaves.get().tick(mc));
 		me.skaffy.client.trees.FallenLeaves.init();

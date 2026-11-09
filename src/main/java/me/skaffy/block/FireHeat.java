@@ -30,6 +30,9 @@ public final class FireHeat {
 
 	private static final Map<ServerLevel, Long2ObjectOpenHashMap<Cell>> CELLS = new WeakHashMap<>();
 
+	/** Multiplier on how fast fire spreads, set by an operator from the settings menu. */
+	public static volatile float speed = 1.0F;
+
 	private FireHeat() {
 	}
 
@@ -40,7 +43,7 @@ public final class FireHeat {
 	/** Adds heat to a block. Returns true once it has taken enough to catch fire (the progress is then reset). */
 	public static boolean feed(ServerLevel level, BlockPos pos, double amount) {
 		Cell cell = cells(level).computeIfAbsent(pos.asLong(), k -> new Cell());
-		cell.heat += (float) amount;
+		cell.heat += (float) (amount * speed);
 		cell.fed = level.getGameTime();
 		if (cell.heat >= 1.0F) {
 			cell.heat = 0.0F;
