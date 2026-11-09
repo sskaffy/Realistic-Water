@@ -3,6 +3,10 @@ package me.skaffy.block;
 import me.skaffy.ModContent;
 import me.skaffy.mixin.FireBlockAccessor;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.util.Mth;
+import net.minecraft.world.level.block.TntBlock;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.RandomSource;
@@ -59,8 +63,138 @@ public class RealisticFireBlock extends FireBlock {
 		FireBlockAccessor ours = (FireBlockAccessor) ModContent.REALISTIC_FIRE;
 		ours.realisticWater$igniteOdds().clear();
 		ours.realisticWater$igniteOdds().putAll(vanilla.realisticWater$igniteOdds());
+		ours.realisticWater$igniteOdds().put(ModContent.REALISTIC_LEAVES, 30);
 		ours.realisticWater$burnOdds().clear();
 		ours.realisticWater$burnOdds().putAll(vanilla.realisticWater$burnOdds());
+		ours.realisticWater$burnOdds().put(ModContent.REALISTIC_LEAVES, 60);
+	}
+
+	/** Slowly changing breeze, stronger when it rains or storms; x and z are in roughly -1.5 to 1.5. Shared by fire spread. */
+	public static double[] wind(Level level) {
+		double t = level.getGameTime() * 0.01;
+		double strength = 0.6 + 0.6 * level.getRainLevel(1.0F) + 0.5 * level.getThunderLevel(1.0F);
+		return new double[]{
+			(Math.sin(t) + 0.5 * Math.sin(t * 2.3 + 1.0)) * strength,
+			(Math.cos(t * 0.7) + 0.5 * Math.sin(t * 1.9 + 2.0)) * strength
+		};
+	}
+
+	private static BlockState young(BlockState fire, RandomSource random) {
+		return fire.hasProperty(AGE) ? fire.setValue(AGE, random.nextInt(3)) : fire;
+	}
+
+	private int burnOdds(BlockState state) {
+		return ((FireBlockAccessor) this).realisticWater$burnOdds().getInt(state.getBlock());
+	}
+
+	private int igniteOdds(BlockState state) {
+		return ((FireBlockAccessor) this).realisticWater$igniteOdds().getInt(state.getBlock());
+	}
+
+	/**
+	 * Fire that behaves like a real one. It burns the fuel touching it a little at a time, so a log smoulders while dry
+	 * leaves flash over; with nothing to burn it dies down. Heat rises, so it climbs far faster than it spreads sideways or
+	 * down, the wind pushes it downwind, and every flame nearby makes it hotter, so a blaze grows and feeds itself.
+	 */
+	@Override
+	protected void tick(final BlockState state, final ServerLevel level, final BlockPos pos, final RandomSource random) {
+		level.scheduleTick(pos, this, 6 + random.nextInt(8));
+		if (!state.canSurvive(level, pos)) {
+			level.removeBlock(pos, false);
+			return;
+		}
+		int age = state.getValue(AGE);
+		boolean eternal = level.getBlockState(pos.below()).is(level.dimensionType().infiniburn());
+		if (level.isRainingAt(pos) && random.nextFloat() < 0.12F + age * 0.015F) {
+			level.playSound(null, pos, SoundEvents.FIRE_EXTINGUISH, SoundSource.BLOCKS, 0.5F, 2.0F);
+			level.removeBlock(pos, false);
+			return;
+		}
+
+		// Heat from the fires around it, and the fuel it touches.
+		int near = 0;
+		for (int dx = -1; dx <= 1; dx++) {
+			for (int dy = -1; dy <= 1; dy++) {
+				for (int dz = -1; dz <= 1; dz++) {
+					if ((dx != 0 || dy != 0 || dz != 0) && level.getBlockState(pos.offset(dx, dy, dz)).getBlock() instanceof FireBlock) {
+						near++;
+					}
+				}
+			}
+		}
+		double heat = 1.0 + 0.3 * near + 0.08 * age;
+		boolean fuelled = false;
+		double[] wind = wind(level);
+		for (Direction d : Direction.values()) {
+			BlockPos np = pos.relative(d);
+			BlockState ns = level.getBlockState(np);
+			int burn = burnOdds(ns);
+			if (burn <= 0) {
+				continue;
+			}
+			fuelled = true;
+			double bias = d == Direction.UP ? 1.8 : d == Direction.DOWN ? 0.5 : Mth.clamp(1.0 + 0.5 * (wind[0] * d.getStepX() + wind[1] * d.getStepZ()), 0.4, 2.5);
+			double chance = Math.min(0.9, burn / 60.0 * 0.12 * heat * bias);
+			if (random.nextDouble() < chance) {
+				if (ns.is(Blocks.TNT)) {
+					TntBlock.prime(level, np);
+					level.removeBlock(np, false);
+				} else {
+					BlockState fire = placementState(level, np);
+					level.setBlock(np, fire.canSurvive(level, np) ? young(fire, random) : Blocks.AIR.defaultBlockState(), 3);
+				}
+			}
+		}
+
+		// Age and die down: fuelled fire stays lively, fire with nothing to burn burns out.
+		if (fuelled) {
+			if (age < 6 && random.nextFloat() < 0.4F) {
+				level.setBlock(pos, state.setValue(AGE, age + 1), 3);
+			}
+		} else if (!eternal) {
+			int next = age + 1 + random.nextInt(2);
+			if (next >= 15 || age >= 4 && random.nextFloat() < 0.18F) {
+				level.removeBlock(pos, false);
+				return;
+			}
+			level.setBlock(pos, state.setValue(AGE, next), 3);
+		}
+
+		// Spread into air next to fuel: mostly up, some across, a little down, leaning downwind and with more heat more often.
+		if (age < 1 || random.nextFloat() < 0.25F) {
+			return;
+		}
+		for (int dx = -2; dx <= 2; dx++) {
+			for (int dz = -2; dz <= 2; dz++) {
+				for (int dy = -1; dy <= 4; dy++) {
+					if (dx == 0 && dy == 0 && dz == 0) {
+						continue;
+					}
+					BlockPos cell = pos.offset(dx, dy, dz);
+					if (!level.isEmptyBlock(cell)) {
+						continue;
+					}
+					int ignite = 0;
+					for (Direction d : Direction.values()) {
+						ignite = Math.max(ignite, igniteOdds(level.getBlockState(cell.relative(d))));
+					}
+					if (ignite <= 0) {
+						continue;
+					}
+					double distSq = dx * dx + dy * dy + dz * dz;
+					double rise = dy > 0 ? 1.0 + 0.7 * dy : dy < 0 ? 0.3 : 1.0;
+					double len = Math.sqrt(dx * dx + dz * dz);
+					double drift = len < 1.0E-3 ? 1.0 : Mth.clamp(1.0 + 0.6 * (wind[0] * dx + wind[1] * dz) / len, 0.3, 3.0);
+					double chance = ignite / 100.0 * 0.05 / (1.0 + 0.8 * distSq) * rise * drift * heat;
+					if (random.nextDouble() < chance) {
+						BlockState fire = placementState(level, cell);
+						if (fire.canSurvive(level, cell)) {
+							level.setBlock(cell, young(fire, random), 3);
+						}
+					}
+				}
+			}
+		}
 	}
 
 	@Override

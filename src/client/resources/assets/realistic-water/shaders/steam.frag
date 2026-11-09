@@ -10,7 +10,7 @@ void main() {
     if (r2 >= 1.0) {
         discard;
     }
-    float a = vColor.a * exp(-r2 * 3.0) * (1.0 - r2);
+    float a = vColor.a * exp(-r2 * 1.8) * (1.0 - r2);
     if (vFlame > 0.5) {
         // Mostly opaque with a little additive glow: overlapping particles build a body of flame colour instead of burning out to white.
         outColor = vec4(vColor.rgb * a, a * 0.55);

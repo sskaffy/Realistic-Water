@@ -144,26 +144,34 @@ public final class FireEffects {
 		int stagger = (pos.getX() * 31 + pos.getZ() * 17 + pos.getY()) & 0xFFFF;
 		float wx = (float) windX * 60.0F;
 		float wz = (float) windZ * 60.0F;
-		float step = WaterSettings.fireParticleStep * (0.55F + 0.45F * i) / (float) Math.cbrt(Math.max(WaterSettings.fireFlameAmount * WaterSettings.fireParticleDensity, 0.05F));
+		// How big the blaze is: every open flame within two blocks adds to it, so one flame is a flicker, a burning
+		// tree is a roaring column. Level 0 is a lone flame and 6 is a full inferno.
+		int neighbours = i >= 0.8F ? FireWorld.get().neighbourFlames(pos) : 0;
+		int level6 = neighbours == 0 ? 0 : Math.min(6, (int) (Math.log(1 + neighbours) / Math.log(2.0) * 1.4));
+		float blaze = 1.0F + 0.45F * level6;
+		float step = WaterSettings.fireParticleStep * (0.55F + 0.45F * i) * (1.0F + 0.2F * level6)
+			/ (float) Math.cbrt(Math.max(WaterSettings.fireFlameAmount * WaterSettings.fireParticleDensity, 0.05F));
+		step = Math.max(step, 0.04F);
 
-		// Flames: a small cloud of glowing particles every tick or two that rises, tapers and cools from white to red.
-		int flameInterval = i >= 0.8F ? 2 : 1;
-		if ((tick + stagger) % flameInterval == 0 && !(rained && random.nextFloat() < 0.5F)) {
-			double half = 0.03 + 0.15 * i;
-			double height = 0.05 + 0.1 * i;
+		// Flames: a cloud of glowing particles every tick that rises, tapers and cools from yellow to red. Bigger blazes
+		// start wider and taller, with larger and longer-lived particles that reach higher and burn brighter.
+		boolean flameNow = i >= 0.8F ? (tick + stagger) % 2 == 0 || level6 > 0 : true;
+		if (flameNow && !(rained && random.nextFloat() < 0.5F)) {
+			double half = Math.min(0.5, (0.03 + 0.15 * i) * blaze);
+			double height = (0.05 + 0.1 * i) * blaze;
 			water.addGasPuff(soul ? Material.SOUL_FLAME : Material.FLAME, x, baseY, z, half, height,
-				wx * 0.5F, 0.6F + 1.4F * i, wz * 0.5F, step);
+				wx * 0.5F, 0.6F + 1.4F * i + 0.5F * level6, wz * 0.5F, level6 + step);
 			gpuPuffs++;
 			count();
 		}
 
-		// Smoke: a dark, lit plume that expands as it rises. Soul fire barely smokes.
+		// Smoke: a dark, lit plume that expands as it rises; it thickens and climbs with the blaze. Soul fire barely smokes.
 		int smokeInterval = i >= 0.8F ? 3 : i >= 0.25F ? 5 : 9;
-		float smokeChance = WaterSettings.fireSmokeAmount * (soul ? 0.3F : 1.0F) * (rained ? 1.5F : 1.0F);
+		float smokeChance = WaterSettings.fireSmokeAmount * (soul ? 0.3F : 1.0F) * (rained ? 1.5F : 1.0F) * (1.0F + 0.25F * level6);
 		if ((tick + stagger) % smokeInterval == 0 && random.nextFloat() < smokeChance && kind != FireWorld.Kind.REALISTIC_CANDLE) {
-			double half = 0.03 + 0.1 * i;
-			water.addGasPuff(Material.SMOKE, x, baseY + 0.25 + 0.45 * i, z, half, 0.1,
-				wx, 0.4F + 0.8F * i, wz, Math.max(step, 0.1F));
+			double half = Math.min(0.5, (0.03 + 0.1 * i) * blaze);
+			water.addGasPuff(Material.SMOKE, x, baseY + (0.25 + 0.45 * i) * blaze, z, half, 0.1,
+				wx, 0.4F + 0.8F * i + 0.3F * level6, wz, (level6 / 2) + Math.max(step, 0.1F));
 			gpuPuffs++;
 			count();
 		}

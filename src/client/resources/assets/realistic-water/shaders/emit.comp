@@ -55,7 +55,8 @@ void main() {
         }
         tag = float(bits);
     } else if (isSteam()) {
-        tag = rand(seed);
+        // Gas puffs can ask for bigger, longer-lived particles: the whole part of the emitter value is a size level.
+        tag = rand(seed) + floor(e.vel.w) * 0.5;
     } else if (isWater()) {
         tag = e.vel.w != 0.0 ? e.vel.w : G.heatA.y;
     }

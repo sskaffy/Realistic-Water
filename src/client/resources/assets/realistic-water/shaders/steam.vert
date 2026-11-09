@@ -67,9 +67,9 @@ void main() {
         return;
     }
     float fade = smoothstep(0.0, 0.06, t) * (1.0 - smoothstep(0.55, 1.0, t));
-    float shade = mix(DARK, LIGHT, p.vel.w);
+    float shade = mix(DARK, LIGHT, clamp(p.vel.w, 0.0, 1.0));
     if (smoke) {
-        shade = mix(DARK, LIGHT, 0.5 * p.vel.w + 0.6 * t);
+        shade = mix(DARK, LIGHT, clamp(0.5 * fract(p.vel.w) + 0.6 * t, 0.0, 1.0));
     }
     vec2 bs = regionLightAt(p.pos.xyz + vec3(0.0, 0.5 * G.camGrid.w, 0.0));
     vColor = vec4(shade * vanillaLight(bs), OPACITY * fade);

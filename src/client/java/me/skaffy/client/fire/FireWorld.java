@@ -335,6 +335,25 @@ public final class FireWorld {
 	}
 
 	/** Nearest-first sources within range, capped by {@code fireMaxSources}. Valid until the next tick. */
+	/** How many other open flames (fire, campfires) burn within two blocks of {@code pos}: the size of the blaze it belongs to. */
+	public int neighbourFlames(BlockPos pos) {
+		int n = 0;
+		for (int dx = -2; dx <= 2; dx++) {
+			for (int dy = -2; dy <= 2; dy++) {
+				for (int dz = -2; dz <= 2; dz++) {
+					if (dx == 0 && dy == 0 && dz == 0) {
+						continue;
+					}
+					Source s = this.sources.get(pos.offset(dx, dy, dz).asLong());
+					if (s != null && s.kind.intensity >= 0.8F) {
+						n++;
+					}
+				}
+			}
+		}
+		return n;
+	}
+
 	public List<Source> activeSources() {
 		return this.active;
 	}

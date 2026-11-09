@@ -69,7 +69,7 @@ public final class WaterRegion implements AutoCloseable {
 		}
 
 		int[] gasLattice() {
-			double step = Math.max(this.heat > 0.0F ? this.heat : WaterSettings.steamParticleSize, 0.01);
+			double step = Math.max(this.heat > 0.0F ? this.heat - Math.floor(this.heat) : WaterSettings.steamParticleSize, 0.01);
 			return new int[]{
 				Math.max(1, (int) Math.round((this.maxX - this.minX) / step)),
 				Math.max(1, (int) Math.round((this.maxY - this.minY) / step)),
