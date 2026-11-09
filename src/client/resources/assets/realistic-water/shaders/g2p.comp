@@ -380,6 +380,25 @@ bool stepHeat(vec3 x, inout vec3 v, inout float temp, inout uint seed, out bool 
             }
         }
     }
+    // A powered hot plate heats the water above it, fading with height, so the whole column can roll at the boil like over magma.
+    if (G.heatF.z > 0.0) {
+        int plateReach = min(int(ceil(G.heatF.z)), MAX_MAGMA_REACH);
+        for (int d = 1; d <= plateReach; d++) {
+            uint word = lightWordAt(x - vec3(0.0, float(d) * res, 0.0));
+            if (((word >> THERMAL_SHIFT) & 7u) == 7u) {
+                float fade = clamp(1.0 - float(d - 1) / G.heatF.z, 0.0, 1.0);
+                float plateTarget = mix(G.heatA.y, G.heatF.x, fade);
+                if (temp < plateTarget) {
+                    temp += (plateTarget - temp) * (1.0 - exp(-G.heatF.y * DT));
+                }
+                heated = true;
+                break;
+            }
+            if ((word & 0x100u) != 0u) {
+                break;
+            }
+        }
+    }
     if (magmaTarget >= 0.0) {
         if (temp < magmaTarget) {
             temp += (magmaTarget - temp) * (1.0 - exp(-G.heatE.x * DT));

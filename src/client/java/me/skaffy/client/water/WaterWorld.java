@@ -2738,7 +2738,8 @@ public final class WaterWorld {
 			Mth.clamp(WaterSettings.iceCracks, 0.0F, 1.0F), Math.max(WaterSettings.slushGrainSize, 0.05F));
 		putFloats(b, o + 4432, Mth.clamp(WaterSettings.slushSurface, 0.0F, 1.0F), Math.max(WaterSettings.slushCrystalSize, 0.0F),
 			Mth.clamp(WaterSettings.slushCrystalOpacity, 0.0F, 1.0F), 0.0F);
-		putFloats(b, o + 4448, WaterSettings.hotPlateWaterTemperature, 1.0F / Math.max(WaterSettings.hotPlateHeatTime, 0.01F), 0.0F, 0.0F);
+		putFloats(b, o + 4448, WaterSettings.hotPlateWaterTemperature, 1.0F / Math.max(WaterSettings.hotPlateHeatTime, 0.01F),
+			Math.max(WaterSettings.hotPlateHeatReach, 0.0F), 0.0F);
 		putFloats(b, o + 4128, Math.max(WaterSettings.boilBubbleSize, 0.0F), WaterSettings.boilBubbleRise, Math.max(WaterSettings.boilBubbleRate, 0.0F),
 			WaterSettings.boilClingTemperature);
 		writeSea(b, o, level, levelState.worldPartialTicks, r.ox, r.oz, r);

@@ -900,6 +900,8 @@ public final class WaterSettingsInfo {
 			"Degrees a powered hot plate heats the water touching it toward. Above 100 it boils, and the higher it is the faster.");
 		num("hotPlateHeatTime", "Hot plate heating time", Cost.NONE, LOOK, 1, 600, 1,
 			"Seconds for water touching a powered hot plate to get most of the way to its temperature.");
+		num("hotPlateHeatReach", "Hot plate heat reach", Cost.NONE, LOOK, 0, 8, 0.5,
+			"How many blocks up a powered hot plate heats the water above it, fading with height, like magma. Longer reach heats a deeper pool, so the whole body can roll at the boil.");
 		num("boilChurn", "Boiling churn", Cost.NONE, LOOK, 0, 40, 0.5,
 			"How hard boiling stirs the water at the hot spot, in blocks per second squared.");
 		num("boilSteam", "Boiling steam", Cost.MEDIUM, "More steam means more steam points.", 0, 5, 0.05,
