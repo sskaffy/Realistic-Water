@@ -86,6 +86,11 @@ public class RealisticWaterClient implements ClientModInitializer {
 		me.skaffy.client.trees.RealisticTrees.init();
 		RealisticKelp.init();
 		me.skaffy.client.realistic.ModelShapes.install();
+		ClientPlayNetworking.registerGlobalReceiver(me.skaffy.net.FireHeatPayload.TYPE, (payload, context) -> context.client().execute(() -> {
+			if (context.client().level != null) {
+				me.skaffy.client.fire.FireHeatClient.receive(context.client().level, payload);
+			}
+		}));
 		ClientPlayNetworking.registerGlobalReceiver(SteamPayload.TYPE, (payload, context) -> context.client().execute(
 			() -> WaterWorld.get().addSteam(payload.x(), payload.y(), payload.z(), payload.eighths())));
 		ClientPlayNetworking.registerGlobalReceiver(BodyPushPayload.TYPE, (payload, context) -> context.client().execute(() -> ClientBodies.receive(payload)));
@@ -128,6 +133,7 @@ public class RealisticWaterClient implements ClientModInitializer {
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
 			water.clear();
 			fire.clear();
+			me.skaffy.client.fire.FireHeatClient.clear();
 		});
 		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> water.shutdown());
 	}

@@ -83,6 +83,9 @@ public class RealisticWater implements ModInitializer {
 		PayloadTypeRegistry.clientboundPlay().register(GridSoundPayload.TYPE, GridSoundPayload.CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(GridLevelEventPayload.TYPE, GridLevelEventPayload.CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(SteamPayload.TYPE, SteamPayload.CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(me.skaffy.net.FireHeatPayload.TYPE, me.skaffy.net.FireHeatPayload.CODEC);
+		ServerTickEvents.END_LEVEL_TICK.register(me.skaffy.block.FireHeat::tick);
+		ServerLifecycleEvents.SERVER_STOPPED.register(server -> me.skaffy.block.FireHeat.forgetAll());
 		ServerPlayNetworking.registerGlobalReceiver(BodyStatePayload.TYPE, (payload, context) -> context.server().execute(() -> payload.apply(context.player())));
 		ServerPlayNetworking.registerGlobalReceiver(BodyPushPayload.TYPE, (payload, context) -> context.server().execute(() -> payload.apply(context.player())));
 		ServerPlayNetworking.registerGlobalReceiver(FlowPayload.TYPE, (payload, context) -> {

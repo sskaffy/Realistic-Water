@@ -179,7 +179,8 @@ public class RealisticFireBlock extends FireBlock {
 			fuelled = true;
 			double bias = d == Direction.UP ? 1.8 : d == Direction.DOWN ? 0.5 : Mth.clamp(1.0 + 0.5 * (wind[0] * d.getStepX() + wind[1] * d.getStepZ()), 0.4, 2.5);
 			double chance = Math.min(0.9, burn / 60.0 * 0.12 * heat * bias);
-			if (random.nextDouble() < chance) {
+			// Heat soaks into the fuel a bit each tick; it only catches once it has soaked up enough, so the fire creeps.
+			if (FireHeat.feed(level, np, chance * (0.5 + random.nextDouble()))) {
 				if (ns.is(Blocks.TNT)) {
 					TntBlock.prime(level, np);
 					level.removeBlock(np, false);
@@ -231,11 +232,9 @@ public class RealisticFireBlock extends FireBlock {
 					double len = Math.sqrt(dx * dx + dz * dz);
 					double drift = len < 1.0E-3 ? 1.0 : Mth.clamp(1.0 + 0.6 * (wind[0] * dx + wind[1] * dz) / len, 0.3, 3.0);
 					double chance = ignite / 100.0 * 0.05 / (1.0 + 0.8 * distSq) * rise * drift * heat;
-					if (random.nextDouble() < chance) {
-						BlockState fire = placementState(level, cell);
-						if (fire.canSurvive(level, cell)) {
-							level.setBlock(cell, young(fire, random), 3);
-						}
+					BlockState fire = placementState(level, cell);
+					if (fire.canSurvive(level, cell) && FireHeat.feed(level, cell, chance * (0.5 + random.nextDouble()))) {
+						level.setBlock(cell, young(fire, random), 3);
 					}
 				}
 			}

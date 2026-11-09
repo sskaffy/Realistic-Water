@@ -82,6 +82,10 @@ public final class FireEffects {
 		double rangeSq = (double) WaterSettings.fireParticleRange * WaterSettings.fireParticleRange;
 		int budget = WaterSettings.fireParticleBudget;
 		long tick = level.getGameTime();
+		FireHeatClient.prune(level);
+		if (gpu) {
+			catching(level, random, eye, rangeSq, budget, tick);
+		}
 		for (FireWorld.Source source : FireWorld.get().activeSources()) {
 			if (spawnedLastTick >= budget) {
 				return;
@@ -229,6 +233,113 @@ public final class FireEffects {
 			water.addSteam(x, pos.getY() + 0.5, z, 0.35F + 0.4F * i);
 			steamSpawned++;
 			count();
+		}
+	}
+
+	/**
+	 * Blocks the server says are heating up but haven't caught yet: small flames start on the side nearest the fire and
+	 * spread across the face as the block takes in more heat, so a fire creeps over a wall instead of jumping to it.
+	 */
+	private static void catching(ClientLevel level, RandomSource random, Vec3 eye, double rangeSq, int budget, long tick) {
+		WaterWorld water = WaterWorld.get();
+		int handled = 0;
+		BlockPos.MutableBlockPos probe = new BlockPos.MutableBlockPos();
+		for (var entry : FireHeatClient.levels().long2ObjectEntrySet()) {
+			if (spawnedLastTick >= budget || handled >= 250) {
+				return;
+			}
+			long key = entry.getLongKey();
+			if (((tick + (key ^ key >>> 21)) & 1) != 0) {
+				continue;
+			}
+			BlockPos pos = BlockPos.of(key);
+			if (eye.distanceToSqr(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5) > rangeSq) {
+				continue;
+			}
+			BlockState state = level.getBlockState(pos);
+			if (state.getBlock() instanceof net.minecraft.world.level.block.FireBlock) {
+				continue;
+			}
+			// Which way the heat is coming from: the average direction to the realistic fires touching this block.
+			double fx = 0;
+			double fy = 0;
+			double fz = 0;
+			boolean soul = false;
+			int fires = 0;
+			for (int dx = -1; dx <= 1; dx++) {
+				for (int dy = -1; dy <= 1; dy++) {
+					for (int dz = -1; dz <= 1; dz++) {
+						BlockState n = level.getBlockState(probe.set(pos.getX() + dx, pos.getY() + dy, pos.getZ() + dz));
+						if (me.skaffy.block.RealisticFireBlock.isRealistic(n)) {
+							fx += dx;
+							fy += dy;
+							fz += dz;
+							fires++;
+							soul |= n.is(ModContent.REALISTIC_SOUL_FIRE);
+						}
+					}
+				}
+			}
+			if (fires == 0) {
+				continue;
+			}
+			handled++;
+			double len = Math.sqrt(fx * fx + fz * fz);
+			double dirX = len < 1.0E-3 ? 0.0 : fx / len;
+			double dirZ = len < 1.0E-3 ? 0.0 : fz / len;
+			float lv = Math.min(1.0F, entry.getValue()[0]);
+			Material flame = soul ? Material.SOUL_FLAME : Material.FLAME;
+			boolean solid = !state.isAir() && state.canOcclude();
+			double span = Math.max(0.08, 0.46 * lv);
+			double height = 0.12 + 0.8 * lv;
+			double baseY = pos.getY() + (fy > 0.5 ? Math.max(0.02, 1.0 - height) : 0.02);
+			float rise = 0.4F + 1.0F * lv;
+			float wx = (float) windX * 40.0F;
+			float wz = (float) windZ * 40.0F;
+			double cx = pos.getX() + 0.5;
+			double cz = pos.getZ() + 0.5;
+			int faces = solid ? 0 : burningFaces(level, pos);
+			boolean any = false;
+			for (Direction d : Direction.Plane.HORIZONTAL) {
+				boolean show;
+				double face;
+				if (solid) {
+					show = !level.getBlockState(pos.relative(d)).canOcclude();
+					face = 0.5 + 0.05;
+				} else {
+					show = (faces & (1 << d.get2DDataValue())) != 0;
+					face = 0.5 - 0.06;
+				}
+				if (!show) {
+					continue;
+				}
+				any = true;
+				double ox = d.getStepX() != 0 ? 0.0 : Math.signum(dirX) * (0.46 - span);
+				double oz = d.getStepZ() != 0 ? 0.0 : Math.signum(dirZ) * (0.46 - span);
+				water.addGasPuff(flame, cx + d.getStepX() * face + ox, baseY, cz + d.getStepZ() * face + oz,
+					d.getStepX() != 0 ? 0.05 : span, d.getStepZ() != 0 ? 0.05 : span, height,
+					wx * 0.2F, rise, wz * 0.2F, 0.1F);
+				gpuPuffs++;
+				count();
+			}
+			if (solid ? !level.getBlockState(pos.above()).canOcclude() : (faces & 16) != 0) {
+				double y = pos.getY() + (solid ? 1.02 : 0.02);
+				water.addGasPuff(flame, cx + Math.signum(dirX) * (0.46 - span), y, cz + Math.signum(dirZ) * (0.46 - span),
+					span, span, 0.1 + 0.1 * lv, wx * 0.3F, rise * 0.6F, wz * 0.3F, 0.1F);
+				gpuPuffs++;
+				count();
+				any = true;
+			}
+			if (!any && !solid) {
+				water.addGasPuff(flame, cx, pos.getY() + 0.02, cz, 0.03 + 0.12 * lv, 0.05 + 0.25 * lv, wx * 0.3F, rise * 0.7F, wz * 0.3F, 0.1F);
+				gpuPuffs++;
+				count();
+			}
+			if (lv > 0.5F && !soul && random.nextFloat() < 0.15F * WaterSettings.fireSmokeAmount) {
+				water.addGasPuff(Material.SMOKE, cx, pos.getY() + (solid ? 1.0 : 0.3), cz, 0.06, 0.1, wx, 0.5F + 0.5F * lv, wz, 0.1F);
+				gpuPuffs++;
+				count();
+			}
 		}
 	}
 
