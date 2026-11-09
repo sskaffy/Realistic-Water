@@ -135,6 +135,20 @@ public class RealisticFireBlock extends FireBlock {
 		}
 		int age = state.getValue(AGE);
 		boolean eternal = level.getBlockState(pos.below()).is(level.dimensionType().infiniburn());
+		// Water touching the fire (any side, edge or corner, or the cell itself) puts it out, except fire fed by netherrack and the like.
+		if (!eternal) {
+			for (int dx = -1; dx <= 1; dx++) {
+				for (int dy = -1; dy <= 1; dy++) {
+					for (int dz = -1; dz <= 1; dz++) {
+						if (level.getFluidState(pos.offset(dx, dy, dz)).is(net.minecraft.tags.FluidTags.WATER)) {
+							level.playSound(null, pos, SoundEvents.FIRE_EXTINGUISH, SoundSource.BLOCKS, 0.5F, 2.0F);
+							level.removeBlock(pos, false);
+							return;
+						}
+					}
+				}
+			}
+		}
 		if (level.isRainingAt(pos) && random.nextFloat() < 0.12F + age * 0.015F) {
 			level.playSound(null, pos, SoundEvents.FIRE_EXTINGUISH, SoundSource.BLOCKS, 0.5F, 2.0F);
 			level.removeBlock(pos, false);

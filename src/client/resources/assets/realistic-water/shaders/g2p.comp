@@ -352,6 +352,20 @@ bool stepHeat(vec3 x, inout vec3 v, inout float temp, inout uint seed, out bool 
             temp = max(temp - G.heatB.y * temp * perFlux, 0.0);
         }
     }
+    // Fire radiates: flames on an edge or corner of the particle's block heat it too, not just ones on a face.
+    for (int k = 0; k < 27; k++) {
+        ivec3 d3 = ivec3(k % 3, (k / 3) % 3, k / 9) - 1;
+        if (abs(d3.x) + abs(d3.y) + abs(d3.z) < 2) {
+            continue;
+        }
+        if (thermalAt(x + vec3(d3)) == 3u) {
+            float target = G.heatC.z;
+            if (temp < target) {
+                temp += (target - temp) * (1.0 - exp(-G.heatE.z * 0.6 * DT));
+            }
+            heated = true;
+        }
+    }
     if (magmaTarget < 0.0 && G.heatC.y > 0.0) {
         int reach = min(int(ceil(G.heatC.y)), MAX_MAGMA_REACH);
         for (int d = 1; d <= reach; d++) {
