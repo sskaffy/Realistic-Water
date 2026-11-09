@@ -136,7 +136,9 @@ public final class FireEffects {
 		boolean rained = level.isRainingAt(pos.above());
 		double x = pos.getX() + 0.5;
 		double z = pos.getZ() + 0.5;
-		double baseY = pos.getY() + (i >= 0.8F ? 0.05 : kind == FireWorld.Kind.REALISTIC_CANDLE ? 0.45 : stove ? 0.2 : 0.62);
+		boolean campfire = kind == FireWorld.Kind.REALISTIC_CAMPFIRE || kind == FireWorld.Kind.REALISTIC_SOUL_CAMPFIRE;
+		// A campfire burns on top of its logs, so its flames start above them or the logs would hide them.
+		double baseY = pos.getY() + (campfire ? 0.32 : i >= 0.8F ? 0.05 : kind == FireWorld.Kind.REALISTIC_CANDLE ? 0.45 : stove ? 0.2 : 0.62);
 		if (stove) {
 			// A lit furnace glows through its front opening.
 			BlockState state = level.getBlockState(pos);
@@ -165,8 +167,8 @@ public final class FireEffects {
 			int faces = kind == FireWorld.Kind.REALISTIC_FIRE ? burningFaces(level, pos) : 0;
 			if (faces == 0) {
 				// Nothing to cling to: a flame standing on its own.
-				double half = Math.min(0.5, (0.03 + 0.15 * i) * blaze);
-				double height = (0.05 + 0.1 * i) * blaze;
+				double half = campfire ? 0.17 : Math.min(0.5, (0.03 + 0.15 * i) * blaze);
+				double height = campfire ? 0.22 : (0.05 + 0.1 * i) * blaze;
 				water.addGasPuff(flameMaterial, x, baseY, z, half, height, wx * 0.5F, rise, wz * 0.5F, level6 + step);
 				gpuPuffs++;
 				count();
@@ -204,9 +206,9 @@ public final class FireEffects {
 		int smokeInterval = i >= 0.8F ? 3 : i >= 0.25F ? 5 : 9;
 		float smokeChance = WaterSettings.fireSmokeAmount * (soul ? 0.3F : 1.0F) * (rained ? 1.5F : 1.0F) * (1.0F + 0.25F * level6);
 		if ((tick + stagger) % smokeInterval == 0 && random.nextFloat() < smokeChance && kind != FireWorld.Kind.REALISTIC_CANDLE) {
-			double half = Math.min(0.5, (0.03 + 0.1 * i) * blaze);
+			double half = campfire ? 0.07 : Math.min(0.5, (0.03 + 0.1 * i) * blaze);
 			water.addGasPuff(Material.SMOKE, x, baseY + (0.25 + 0.45 * i) * blaze, z, half, 0.1,
-				wx, 0.4F + 0.8F * i + 0.3F * level6, wz, (level6 / 2) + Math.max(step, 0.1F));
+				wx, (campfire ? 1.3F : 0.4F + 0.8F * i + 0.3F * level6), wz, (level6 / 2) + Math.max(step, 0.1F));
 			gpuPuffs++;
 			count();
 		}
