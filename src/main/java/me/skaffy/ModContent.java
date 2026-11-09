@@ -474,11 +474,41 @@ public final class ModContent {
 		return Registry.register(BuiltInRegistries.ITEM, key, item);
 	}
 
+	/** Dispensers light realistic fire in front of them; anything else (campfires, TNT, fireballs) falls back to the vanilla behaviour. */
+	private static void registerFireDispensers() {
+		var vanillaSteel = DispenserBlock.DISPENSER_REGISTRY.get(Items.FLINT_AND_STEEL);
+		var vanillaCharge = DispenserBlock.DISPENSER_REGISTRY.get(Items.FIRE_CHARGE);
+		DispenserBlock.registerBehavior(REALISTIC_FLINT_AND_STEEL, (source, stack) -> {
+			var level = source.level();
+			var target = source.pos().relative(source.state().getValue(DispenserBlock.FACING));
+			if (level.isEmptyBlock(target) && net.minecraft.world.level.block.BaseFireBlock.canBePlacedAt(level, target, net.minecraft.core.Direction.NORTH)) {
+				level.playSound(null, target, net.minecraft.sounds.SoundEvents.FLINTANDSTEEL_USE, net.minecraft.sounds.SoundSource.BLOCKS, 1.0F, 1.0F);
+				level.setBlockAndUpdate(target, me.skaffy.block.RealisticFireBlock.placementState(level, target));
+				stack.hurtAndBreak(1, level, null, item -> { });
+				return stack;
+			}
+			return vanillaSteel.dispense(source, stack);
+		});
+		DispenserBlock.registerBehavior(REALISTIC_FIRE_CHARGE, (source, stack) -> {
+			var level = source.level();
+			var target = source.pos().relative(source.state().getValue(DispenserBlock.FACING));
+			if (level.isEmptyBlock(target) && net.minecraft.world.level.block.BaseFireBlock.canBePlacedAt(level, target, net.minecraft.core.Direction.NORTH)) {
+				level.playSound(null, target, net.minecraft.sounds.SoundEvents.FIRECHARGE_USE, net.minecraft.sounds.SoundSource.BLOCKS, 1.0F, 1.0F);
+				level.setBlockAndUpdate(target, me.skaffy.block.RealisticFireBlock.placementState(level, target));
+				stack.shrink(1);
+				return stack;
+			}
+			return vanillaCharge.dispense(source, stack);
+		});
+	}
+
 	static void init() {
 		var waterBucketBehavior = java.util.Objects.requireNonNull(
 			DispenserBlock.DISPENSER_REGISTRY.get(Items.WATER_BUCKET), "Water bucket dispenser behavior");
 		DispenserBlock.registerBehavior(REALISTIC_WATER_BUCKET, waterBucketBehavior);
 		DispenserBlock.registerBehavior(SMALL_REALISTIC_WATER_BUCKET, waterBucketBehavior);
+
+		registerFireDispensers();
 
 		// Realistic campfires reuse the vanilla campfire block entity (cooking, saving, tickers), so it must accept them.
 		BlockEntityTypes.CAMPFIRE.addValidBlock(REALISTIC_CAMPFIRE);
