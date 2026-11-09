@@ -497,11 +497,17 @@ public final class WaterWorld {
 	 * {@code step} is the spacing of the particles inside the box, so smaller means more, finer particles.
 	 */
 	public void addGasPuff(Material material, double x, double y, double z, double halfWidth, double height, float vx, float vy, float vz, float step) {
+		this.addGasPuff(material, x, y, z, halfWidth, halfWidth, height, vx, vy, vz, step);
+	}
+
+	/** Same, from a box that can be wide along one axis and thin along the other: a sheet of flame lying against a wall. */
+	public void addGasPuff(Material material, double x, double y, double z, double halfX, double halfZ, double height, float vx, float vy, float vz,
+		float step) {
 		if (!material.isGas() || !this.vulkanReady()) {
 			return;
 		}
 		WaterRegion r = this.regionFor(BlockPos.containing(x, y, z), material);
-		r.addEmitter(new WaterRegion.Emitter(x - halfWidth, y, z - halfWidth, x + halfWidth, y + height, z + halfWidth, vx, vy, vz, step));
+		r.addEmitter(new WaterRegion.Emitter(x - halfX, y, z - halfZ, x + halfX, y + height, z + halfZ, vx, vy, vz, step));
 		r.wake(this.frameCounter);
 	}
 
@@ -2325,8 +2331,22 @@ public final class WaterWorld {
 		}
 		Vk.barrier(cb);
 		if (!target.layer() && !steamBodies.isEmpty()) {
-			this.steamRenderer.record(cb, steamBodies, width, height, colorFormat, target.colorView(), depthView, lightmap);
-			Vk.barrier(cb);
+			List<WaterRenderer.Body> drawNow = new ArrayList<>();
+			for (WaterRenderer.Body body : steamBodies) {
+				if (body.region().material.isFireGas()) {
+					// Flames and smoke wait for the late pass so translucent mobs and blocks cannot draw over them.
+					this.lateSteam.add(body);
+				} else {
+					drawNow.add(body);
+				}
+			}
+			if (!this.lateSteam.isEmpty()) {
+				this.lateLightmap = lightmap;
+			}
+			if (!drawNow.isEmpty()) {
+				this.steamRenderer.record(cb, drawNow, width, height, colorFormat, target.colorView(), depthView, lightmap);
+				Vk.barrier(cb);
+			}
 		}
 		Vk.endRecording();
 		Vk.check(VK10.vkEndCommandBuffer(cb), "vkEndCommandBuffer");

@@ -45,6 +45,11 @@ public enum Material {
 		return this == STEAM || this == SMOKE || this == FLAME || this == SOUL_FLAME || this == SPARK;
 	}
 
+	/** Fire gases are drawn after everything translucent, so mobs, slime and glass behind a flame are covered by it. */
+	boolean isFireGas() {
+		return this == SMOKE || this == FLAME || this == SOUL_FLAME || this == SPARK;
+	}
+
 	boolean isParticleOnly() {
 		return this == LEAVES || this.isGas();
 	}

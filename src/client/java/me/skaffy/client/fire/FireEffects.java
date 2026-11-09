@@ -1,9 +1,11 @@
 package me.skaffy.client.fire;
 
+import me.skaffy.ModContent;
 import me.skaffy.client.water.Material;
 import me.skaffy.client.water.WaterSettings;
 import me.skaffy.client.water.WaterWorld;
 import me.skaffy.fluid.RealisticLavaFluid;
+import me.skaffy.mixin.FireBlockAccessor;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
@@ -12,6 +14,7 @@ import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.util.RandomSource;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.Vec3;
@@ -157,12 +160,44 @@ public final class FireEffects {
 		// start wider and taller, with larger and longer-lived particles that reach higher and burn brighter.
 		boolean flameNow = i >= 0.8F ? (tick + stagger) % 2 == 0 || level6 > 0 : true;
 		if (flameNow && !(rained && random.nextFloat() < 0.5F)) {
-			double half = Math.min(0.5, (0.03 + 0.15 * i) * blaze);
-			double height = (0.05 + 0.1 * i) * blaze;
-			water.addGasPuff(soul ? Material.SOUL_FLAME : Material.FLAME, x, baseY, z, half, height,
-				wx * 0.5F, 0.6F + 1.4F * i + 0.5F * level6, wz * 0.5F, level6 + step);
-			gpuPuffs++;
-			count();
+			Material flameMaterial = soul ? Material.SOUL_FLAME : Material.FLAME;
+			float rise = 0.6F + 1.4F * i + 0.5F * level6;
+			int faces = kind == FireWorld.Kind.REALISTIC_FIRE ? burningFaces(level, pos) : 0;
+			if (faces == 0) {
+				// Nothing to cling to: a flame standing on its own.
+				double half = Math.min(0.5, (0.03 + 0.15 * i) * blaze);
+				double height = (0.05 + 0.1 * i) * blaze;
+				water.addGasPuff(flameMaterial, x, baseY, z, half, height, wx * 0.5F, rise, wz * 0.5F, level6 + step);
+				gpuPuffs++;
+				count();
+			} else {
+				// Fire clings to the faces of the blocks it is eating: a sheet of flame against each burning wall, and a
+				// low carpet over a burning floor, instead of a column hanging in the air.
+				double wall = 0.06;
+				double span = 0.46;
+				double height = Math.min(1.0, 0.35 + 0.12 * level6);
+				float wallStep = level6 + Math.max(step * 1.1F, 0.05F);
+				double cx = pos.getX() + 0.5;
+				double cz = pos.getZ() + 0.5;
+				for (Direction d : Direction.Plane.HORIZONTAL) {
+					if ((faces & (1 << d.get2DDataValue())) == 0) {
+						continue;
+					}
+					double fx = cx + d.getStepX() * (0.5 - wall);
+					double fz = cz + d.getStepZ() * (0.5 - wall);
+					double halfX = d.getStepX() != 0 ? wall : span;
+					double halfZ = d.getStepZ() != 0 ? wall : span;
+					water.addGasPuff(flameMaterial, fx, pos.getY() + 0.02, fz, halfX, halfZ, height,
+						-d.getStepX() * 0.12F + wx * 0.2F, rise, -d.getStepZ() * 0.12F + wz * 0.2F, wallStep);
+					gpuPuffs++;
+					count();
+				}
+				if ((faces & 16) != 0) {
+					water.addGasPuff(flameMaterial, cx, pos.getY() + 0.02, cz, span, span, 0.12 + 0.05 * level6, wx * 0.3F, rise * 0.6F, wz * 0.3F, wallStep);
+					gpuPuffs++;
+					count();
+				}
+			}
 		}
 
 		// Smoke: a dark, lit plume that expands as it rises; it thickens and climbs with the blaze. Soul fire barely smokes.
@@ -193,6 +228,26 @@ public final class FireEffects {
 			steamSpawned++;
 			count();
 		}
+	}
+
+	/**
+	 * Which faces of the cell hold something that burns: bits 0-3 are the horizontal sides (by their 2D data value) and bit 4
+	 * is the floor. Fire clings to those, so a burning wall gets a sheet of flame up it and a burning floor a low carpet.
+	 */
+	private static int burningFaces(ClientLevel level, BlockPos pos) {
+		var burn = ((FireBlockAccessor) Blocks.FIRE).realisticWater$burnOdds();
+		int mask = 0;
+		for (Direction d : Direction.Plane.HORIZONTAL) {
+			BlockState n = level.getBlockState(pos.relative(d));
+			if (burn.getInt(n.getBlock()) > 0 || n.is(ModContent.REALISTIC_LEAVES)) {
+				mask |= 1 << d.get2DDataValue();
+			}
+		}
+		BlockState below = level.getBlockState(pos.below());
+		if (burn.getInt(below.getBlock()) > 0 || below.is(ModContent.REALISTIC_LEAVES)) {
+			mask |= 16;
+		}
+		return mask;
 	}
 
 	private static void gpuLava(ClientLevel level, RandomSource random, BlockPos pos) {
