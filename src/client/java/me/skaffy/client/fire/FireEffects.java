@@ -149,10 +149,10 @@ public final class FireEffects {
 		// Flames: a small cloud of glowing particles every tick or two that rises, tapers and cools from white to red.
 		int flameInterval = i >= 0.8F ? 2 : 1;
 		if ((tick + stagger) % flameInterval == 0 && !(rained && random.nextFloat() < 0.5F)) {
-			double half = 0.04 + 0.24 * i;
-			double height = 0.06 + 0.2 * i;
+			double half = 0.03 + 0.15 * i;
+			double height = 0.05 + 0.1 * i;
 			water.addGasPuff(soul ? Material.SOUL_FLAME : Material.FLAME, x, baseY, z, half, height,
-				wx * 0.5F, 0.3F + 0.7F * i, wz * 0.5F, step);
+				wx * 0.5F, 0.6F + 1.4F * i, wz * 0.5F, step);
 			gpuPuffs++;
 			count();
 		}

@@ -12,8 +12,8 @@ void main() {
     }
     float a = vColor.a * exp(-r2 * 3.0) * (1.0 - r2);
     if (vFlame > 0.5) {
-        // Zero alpha under premultiplied blending adds the colour onto the scene: a glowing, light-emitting flame.
-        outColor = vec4(vColor.rgb * a, 0.0);
+        // Mostly opaque with a little additive glow: overlapping particles build a body of flame colour instead of burning out to white.
+        outColor = vec4(vColor.rgb * a, a * 0.55);
     } else {
         outColor = vec4(vColor.rgb * a, a);
     }

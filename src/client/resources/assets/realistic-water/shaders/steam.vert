@@ -24,9 +24,9 @@ void hide() {
 
 // Blackbody-like flame colours: white-yellow core, orange body, deep red tips. Soul fire is the same ramp in blue.
 vec3 flameRamp(float t, bool soul) {
-    vec3 hot = soul ? vec3(0.65, 0.9, 1.0) : vec3(1.0, 0.93, 0.62);
-    vec3 mid = soul ? vec3(0.12, 0.5, 1.0) : vec3(1.0, 0.46, 0.07);
-    vec3 cool = soul ? vec3(0.015, 0.1, 0.55) : vec3(0.5, 0.07, 0.0);
+    vec3 hot = soul ? vec3(0.65, 0.9, 1.0) : vec3(1.0, 0.78, 0.3);
+    vec3 mid = soul ? vec3(0.12, 0.5, 1.0) : vec3(1.0, 0.38, 0.04);
+    vec3 cool = soul ? vec3(0.015, 0.1, 0.55) : vec3(0.55, 0.06, 0.0);
     return t < 0.35 ? mix(hot, mid, t / 0.35) : mix(mid, cool, (t - 0.35) / 0.65);
 }
 
