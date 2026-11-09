@@ -76,6 +76,8 @@ Fire in this mod is drawn on the GPU with the same Vulkan particle system the st
 
 **Water and fire:** realistic water next to realistic fire puts it out. It doesn't have to touch a face, a flame on a corner of the water counts as well. The same goes the other way: fire on any edge or corner of a water block heats it, so a pool surrounded by flames will boil. Heat also travels through metal: iron, copper (every variant) and gold blocks next to fire, lava, magma or a lit furnace pass the heat on to water touching them, and through a few blocks of connected metal, so a line of copper blocks over a campfire can boil a pot of water.
 
+**Hot plate:** a metal block (in the creative inventory next to the Realistic Water Drain) that glows and heats whatever touches it while it gets a redstone signal, and cools off when the signal stops. Water touching it heats up towards 140 degrees, which is well past boiling, so a pot of water on a powered hot plate boils away into steam. Like fire, the heat also carries through iron and copper blocks. How hot it gets and how fast are both in the "Water temperature" section of the settings ("Hot plate heats water to" and "Hot plate heating time").
+
 **Lighting it:** use the realistic flint and steel or realistic fire charge, either by hand or from a dispenser. A dispenser puts fire in the block in front of it. If it can't, it does what a vanilla dispenser would (lights a campfire, candle or TNT, or shoots a fireball).
 
 **Commands:**

@@ -1405,6 +1405,9 @@ public final class WaterRegion implements AutoCloseable {
 			BlockPos n = pos.relative(d);
 			BlockState s = level.getBlockState(n);
 			int c = thermalCode(s);
+			if (c == 7) {
+				return 7;
+			}
 			if (c == 1 || c == 2 || c == 3) {
 				return 3;
 			}
@@ -1412,8 +1415,8 @@ public final class WaterRegion implements AutoCloseable {
 				best = 4;
 			} else if (depth > 1 && conductsHeat(s)) {
 				int through = conductedCode(level, n, depth - 1);
-				if (through == 3) {
-					return 3;
+				if (through == 3 || through == 7) {
+					return through;
 				}
 				best = Math.max(best, through);
 			}
@@ -1433,6 +1436,9 @@ public final class WaterRegion implements AutoCloseable {
 		}
 		if (state.getBlock() instanceof AbstractFurnaceBlock && state.getValue(AbstractFurnaceBlock.LIT)) {
 			return 4;
+		}
+		if (me.skaffy.block.HotPlateBlock.isHot(state)) {
+			return 7;
 		}
 		if (state.is(BlockTags.ICE)) {
 			return 5;

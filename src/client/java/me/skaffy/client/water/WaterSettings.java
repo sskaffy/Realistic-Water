@@ -368,6 +368,8 @@ public final class WaterSettings {
 	public static float fireHeatTime = 12.0F;
 	public static float furnaceWaterTemperature = 80.0F;
 	public static float furnaceHeatTime = 120.0F;
+	public static float hotPlateWaterTemperature = 140.0F;
+	public static float hotPlateHeatTime = 20.0F;
 	public static float boilChurn = 6.0F;
 	public static float boilSteam = 1.0F;
 	public static float steamWispTemperature = 60.0F;

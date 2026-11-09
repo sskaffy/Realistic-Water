@@ -896,6 +896,10 @@ public final class WaterSettingsInfo {
 			"Degrees a lit furnace, smoker or blast furnace heats the water touching it toward.");
 		num("furnaceHeatTime", "Furnace heating time", Cost.NONE, LOOK, 1, 1200, 1,
 			"Seconds for water touching a lit furnace to get most of the way to its temperature.");
+		num("hotPlateWaterTemperature", "Hot plate heats water to", Cost.NONE, LOOK, 0, 250, 1,
+			"Degrees a powered hot plate heats the water touching it toward. Above 100 it boils, and the higher it is the faster.");
+		num("hotPlateHeatTime", "Hot plate heating time", Cost.NONE, LOOK, 1, 600, 1,
+			"Seconds for water touching a powered hot plate to get most of the way to its temperature.");
 		num("boilChurn", "Boiling churn", Cost.NONE, LOOK, 0, 40, 0.5,
 			"How hard boiling stirs the water at the hot spot, in blocks per second squared.");
 		num("boilSteam", "Boiling steam", Cost.MEDIUM, "More steam means more steam points.", 0, 5, 0.05,

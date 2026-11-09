@@ -113,7 +113,7 @@ import org.lwjgl.vulkan.VkCommandBuffer;
 public final class WaterWorld {
 	private static final WaterWorld INSTANCE = new WaterWorld();
 	static final int UBO_SLOT = 8192;
-	static final int UBO_SIZE = 4448;
+	static final int UBO_SIZE = 4464;
 	static final float LATENT_FREEZE = 79.8F;
 	static final float PARTICLES_PER_CELL = 8.0F;
 	static final float SAND_POISSON = 0.3F;
@@ -2738,6 +2738,7 @@ public final class WaterWorld {
 			Mth.clamp(WaterSettings.iceCracks, 0.0F, 1.0F), Math.max(WaterSettings.slushGrainSize, 0.05F));
 		putFloats(b, o + 4432, Mth.clamp(WaterSettings.slushSurface, 0.0F, 1.0F), Math.max(WaterSettings.slushCrystalSize, 0.0F),
 			Mth.clamp(WaterSettings.slushCrystalOpacity, 0.0F, 1.0F), 0.0F);
+		putFloats(b, o + 4448, WaterSettings.hotPlateWaterTemperature, 1.0F / Math.max(WaterSettings.hotPlateHeatTime, 0.01F), 0.0F, 0.0F);
 		putFloats(b, o + 4128, Math.max(WaterSettings.boilBubbleSize, 0.0F), WaterSettings.boilBubbleRise, Math.max(WaterSettings.boilBubbleRate, 0.0F),
 			WaterSettings.boilClingTemperature);
 		writeSea(b, o, level, levelState.worldPartialTicks, r.ox, r.oz, r);
@@ -2899,6 +2900,7 @@ public final class WaterWorld {
 		putFloats(b, o + 4400, 0.0F, 0.0F, 0.0F, 0.0F);
 		putFloats(b, o + 4416, 0.0F, 0.0F, 0.0F, 0.0F);
 		putFloats(b, o + 4432, 0.0F, 0.0F, 0.0F, 0.0F);
+		putFloats(b, o + 4448, 0.0F, 1.0F, 0.0F, 0.0F);
 		writeSea(b, o, level, levelState.worldPartialTicks, bx, bz, null);
 		this.uboRing.flush(o, UBO_SIZE);
 	}

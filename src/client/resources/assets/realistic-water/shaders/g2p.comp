@@ -341,9 +341,9 @@ bool stepHeat(vec3 x, inout vec3 v, inout float temp, inout uint seed, out bool 
             magmaTarget = G.heatC.x;
         } else if (code == 2u) {
             lava = true;
-        } else if (code == 3u || code == 4u) {
-            float target = code == 3u ? G.heatC.z : G.heatC.w;
-            float rate = code == 3u ? G.heatE.z : G.heatE.w;
+        } else if (code == 3u || code == 4u || code == 7u) {
+            float target = code == 3u ? G.heatC.z : code == 4u ? G.heatC.w : G.heatF.x;
+            float rate = code == 3u ? G.heatE.z : code == 4u ? G.heatE.w : G.heatF.y;
             if (temp < target) {
                 temp += (target - temp) * (1.0 - exp(-rate * DT));
             }

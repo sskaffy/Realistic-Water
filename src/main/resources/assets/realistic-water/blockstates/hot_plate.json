@@ -1,0 +1,6 @@
+{
+  "variants": {
+    "lit=false": { "model": "realistic-water:block/hot_plate" },
+    "lit=true": { "model": "realistic-water:block/hot_plate_on" }
+  }
+}

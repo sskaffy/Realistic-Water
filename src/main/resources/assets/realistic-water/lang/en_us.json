@@ -54,6 +54,7 @@
   "item.realistic-water.realistic_boat": "Realistic Boat",
   "block.realistic-water.wave_maker": "Water Pump",
   "block.realistic-water.water_drain": "Realistic Water Drain",
+  "block.realistic-water.hot_plate": "Hot Plate",
   "block.realistic-water.wave_maker.speed": "Pump speed: %s",
   "block.realistic-water.wave_maker.speed.slow": "slow",
   "block.realistic-water.wave_maker.speed.medium": "medium",

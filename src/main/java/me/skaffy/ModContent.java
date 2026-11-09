@@ -219,6 +219,17 @@ public final class ModContent {
 	));
 	public static final ResourceKey<Item> WATER_DRAIN_ITEM_KEY = ResourceKey.create(Registries.ITEM, RealisticWater.id("water_drain"));
 	public static final Item WATER_DRAIN_ITEM = registerBlockItem(WATER_DRAIN_ITEM_KEY, WATER_DRAIN);
+	public static final ResourceKey<Block> HOT_PLATE_KEY = ResourceKey.create(Registries.BLOCK, RealisticWater.id("hot_plate"));
+	public static final Block HOT_PLATE = Registry.register(BuiltInRegistries.BLOCK, HOT_PLATE_KEY, new me.skaffy.block.HotPlateBlock(
+		BlockBehaviour.Properties.of()
+			.mapColor(MapColor.METAL)
+			.strength(3.0F, 6.0F)
+			.sound(SoundType.METAL)
+			.lightLevel(state -> state.getValue(me.skaffy.block.HotPlateBlock.LIT) ? 7 : 0)
+			.setId(HOT_PLATE_KEY)
+	));
+	public static final ResourceKey<Item> HOT_PLATE_ITEM_KEY = ResourceKey.create(Registries.ITEM, RealisticWater.id("hot_plate"));
+	public static final Item HOT_PLATE_ITEM = registerBlockItem(HOT_PLATE_ITEM_KEY, HOT_PLATE);
 	public static final ResourceKey<Block> WOBBLY_SLIME_BLOCK_KEY = ResourceKey.create(Registries.BLOCK, RealisticWater.id("wobbly_slime_block"));
 	public static final Block WOBBLY_SLIME_BLOCK = Registry.register(BuiltInRegistries.BLOCK, WOBBLY_SLIME_BLOCK_KEY, new me.skaffy.block.WobblySlimeBlock(
 		BlockBehaviour.Properties.of().mapColor(MapColor.GRASS).friction(0.8F).bounceRestitution(1.0F).sound(SoundType.SLIME_BLOCK).noOcclusion()
@@ -525,6 +536,7 @@ public final class ModContent {
 				output.insertAfter(REALISTIC_SLIME_BUCKET, CONVERTER);
 				output.insertAfter(CONVERTER, WAVE_MAKER_ITEM);
 				output.insertAfter(WAVE_MAKER_ITEM, WATER_DRAIN_ITEM);
+				output.insertAfter(WATER_DRAIN_ITEM, HOT_PLATE_ITEM);
 			});
 		CreativeModeTabEvents.modifyOutputEvent(CreativeModeTabs.FUNCTIONAL_BLOCKS)
 			.register(output -> {
