@@ -2359,12 +2359,8 @@ public final class WaterWorld {
 		if (!target.layer() && !steamBodies.isEmpty()) {
 			List<WaterRenderer.Body> drawNow = new ArrayList<>();
 			for (WaterRenderer.Body body : steamBodies) {
-				if (body.region().material.isFireGas()) {
-					// Flames and smoke wait for the late pass so translucent mobs and blocks cannot draw over them.
-					this.lateSteam.add(body);
-				} else {
-					drawNow.add(body);
-				}
+				// Steam, flames and smoke all wait for the late pass, so translucent mobs (slimes) and blocks cannot draw over them.
+				this.lateSteam.add(body);
 			}
 			if (!this.lateSteam.isEmpty()) {
 				this.lateLightmap = lightmap;
