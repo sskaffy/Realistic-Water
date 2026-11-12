@@ -113,7 +113,7 @@ import org.lwjgl.vulkan.VkCommandBuffer;
 public final class WaterWorld {
 	private static final WaterWorld INSTANCE = new WaterWorld();
 	static final int UBO_SLOT = 8192;
-	static final int UBO_SIZE = 4448;
+	static final int UBO_SIZE = 4464;
 	static final float LATENT_FREEZE = 79.8F;
 	static final float PARTICLES_PER_CELL = 8.0F;
 	static final float SAND_POISSON = 0.3F;
@@ -337,6 +337,12 @@ public final class WaterWorld {
 
 	public boolean togglePause() {
 		this.paused = !this.paused;
+		// Fire is ticked by the (integrated) server, so freeze it too; it would otherwise keep burning foliage while paused.
+		me.skaffy.block.RealisticFireBlock.simulationPaused = this.paused;
+		return this.paused;
+	}
+
+	public boolean isPaused() {
 		return this.paused;
 	}
 
@@ -373,7 +379,7 @@ public final class WaterWorld {
 		if (material == Material.LEAVES) {
 			return Math.max(1, WaterSettings.leafResolution);
 		}
-		if (material == Material.STEAM) {
+		if (material.isGas()) {
 			return Math.max(1, WaterSettings.steamResolution);
 		}
 		return Math.max(1, WaterSettings.resolution);
@@ -484,6 +490,30 @@ public final class WaterWorld {
 		BlockPos at = BlockPos.containing(x, y, z);
 		WaterRegion r = this.regionFor(at, Material.STEAM);
 		r.addEmitter(new WaterRegion.Emitter(x - h, y, z - h, x + h, y + side, z + h, 0.0F, 0.5F * r.res, 0.0F));
+		r.wake(this.frameCounter);
+	}
+
+	/** True once the Vulkan device exists, so fire can draw itself on the GPU. */
+	public boolean gpuReady() {
+		return Vk.tryDevice() != null && !this.failed;
+	}
+
+	/**
+	 * Puffs a small cloud of gas particles (smoke, flame or soul flame) out of a box. Velocities are in blocks per second and
+	 * {@code step} is the spacing of the particles inside the box, so smaller means more, finer particles.
+	 */
+	public void addGasPuff(Material material, double x, double y, double z, double halfWidth, double height, float vx, float vy, float vz, float step) {
+		this.addGasPuff(material, x, y, z, halfWidth, halfWidth, height, vx, vy, vz, step);
+	}
+
+	/** Same, from a box that can be wide along one axis and thin along the other: a sheet of flame lying against a wall. */
+	public void addGasPuff(Material material, double x, double y, double z, double halfX, double halfZ, double height, float vx, float vy, float vz,
+		float step) {
+		if (!material.isGas() || !this.vulkanReady()) {
+			return;
+		}
+		WaterRegion r = this.regionFor(BlockPos.containing(x, y, z), material);
+		r.addEmitter(new WaterRegion.Emitter(x - halfX, y, z - halfZ, x + halfX, y + height, z + halfZ, vx, vy, vz, step));
 		r.wake(this.frameCounter);
 	}
 
@@ -743,6 +773,20 @@ public final class WaterWorld {
 		this.sources.entrySet().removeIf(e -> e.getValue() == material);
 	}
 
+	/** Drops every fire flame, smoke and spark particle region right away (local only; nothing is synced for these). */
+	public void removeFire() {
+		for (WaterRegion r : List.copyOf(this.regions)) {
+			if (r.material.isFireGas() && r.ocean == null) {
+				this.regions.remove(r);
+				r.close();
+			}
+		}
+		for (Material m : new Material[]{Material.SMOKE, Material.FLAME, Material.SOUL_FLAME, Material.SPARK}) {
+			this.echoes(m).clear();
+		}
+		this.sources.entrySet().removeIf(e -> e.getValue().isFireGas());
+	}
+
 	public void reload(ClientLevel level) {
 		this.closeRegions();
 		this.chunkScanQueue.clear();
@@ -857,10 +901,22 @@ public final class WaterWorld {
 		} else if (oldState.is(ModContent.WATER_DRAIN)) {
 			this.waterDrains.remove(key);
 		}
-		if (WaterRegion.thermalCode(oldState) != WaterRegion.thermalCode(newState)) {
+		if (WaterRegion.thermalCode(oldState) != WaterRegion.thermalCode(newState)
+			|| WaterRegion.conductsHeat(oldState) != WaterRegion.conductsHeat(newState)) {
 			for (WaterRegion r : this.regions) {
 				if (r.material == Material.WATER && r.windowContains(pos, 1)) {
 					r.refreshLightAt(level, pos);
+					// Metal nearby may now carry (or stop carrying) the heat.
+					BlockPos.MutableBlockPos near = new BlockPos.MutableBlockPos();
+					for (int dx = -3; dx <= 3; dx++) {
+						for (int dy = -3; dy <= 3; dy++) {
+							for (int dz = -3; dz <= 3; dz++) {
+								if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) <= 3 && WaterRegion.conductsHeat(level.getBlockState(near.set(pos.getX() + dx, pos.getY() + dy, pos.getZ() + dz)))) {
+									r.refreshLightAt(level, near);
+								}
+							}
+						}
+					}
 					r.wake(this.frameCounter);
 				}
 			}
@@ -2307,8 +2363,18 @@ public final class WaterWorld {
 		}
 		Vk.barrier(cb);
 		if (!target.layer() && !steamBodies.isEmpty()) {
-			this.steamRenderer.record(cb, steamBodies, width, height, colorFormat, target.colorView(), depthView, lightmap);
-			Vk.barrier(cb);
+			List<WaterRenderer.Body> drawNow = new ArrayList<>();
+			for (WaterRenderer.Body body : steamBodies) {
+				// Steam, flames and smoke all wait for the late pass, so translucent mobs (slimes) and blocks cannot draw over them.
+				this.lateSteam.add(body);
+			}
+			if (!this.lateSteam.isEmpty()) {
+				this.lateLightmap = lightmap;
+			}
+			if (!drawNow.isEmpty()) {
+				this.steamRenderer.record(cb, drawNow, width, height, colorFormat, target.colorView(), depthView, lightmap);
+				Vk.barrier(cb);
+			}
 		}
 		Vk.endRecording();
 		Vk.check(VK10.vkEndCommandBuffer(cb), "vkEndCommandBuffer");
@@ -2623,7 +2689,22 @@ public final class WaterWorld {
 		if (leaves) {
 			this.writeLeafGlobals(level, b, o, res);
 		}
-		if (r.material.isGas()) {
+		if (r.material == Material.SPARK) {
+			putFloats(b, o + 3840, Material.SPARK.shaderId(), Math.max(WaterSettings.fireSparkLife, 0.1F), 0.9F, 0.25F);
+			putFloats(b, o + 3856, 1.6F, 0.5F, 0.0F, 0.0F);
+			putFloats(b, o + 3872, Math.max(WaterSettings.fireSparkSize, 1e-3F), 1.0F, WaterSettings.fireSparkBrightness, 0.0F);
+		} else if (r.material == Material.SMOKE) {
+			putFloats(b, o + 3840, Material.SMOKE.shaderId(), Math.max(WaterSettings.fireSmokeLife, 0.1F), WaterSettings.fireSmokeRise,
+				WaterSettings.steamDrag * 0.6F);
+			putFloats(b, o + 3856, WaterSettings.steamSwirl * 1.3F, 0.25F, WaterSettings.steamEntityPush, 0.0F);
+			putFloats(b, o + 3872, Math.max(WaterSettings.fireSmokeSize, 1e-3F), Mth.clamp(WaterSettings.fireSmokeOpacity, 0.0F, 1.0F),
+				WaterSettings.fireSmokeDark, WaterSettings.fireSmokeLight);
+		} else if (r.material == Material.FLAME || r.material == Material.SOUL_FLAME) {
+			putFloats(b, o + 3840, r.material.shaderId(), Math.max(WaterSettings.fireFlameLife, 0.05F), WaterSettings.fireFlameRise, 1.6F);
+			putFloats(b, o + 3856, WaterSettings.steamSwirl * 0.9F, 0.15F, 0.0F, 0.0F);
+			putFloats(b, o + 3872, Math.max(WaterSettings.fireFlameSize, 1e-3F), Mth.clamp(WaterSettings.fireFlameOpacity, 0.0F, 1.0F),
+				WaterSettings.fireFlameBrightness, 0.0F);
+		} else if (r.material.isGas()) {
 			putFloats(b, o + 3840, Material.STEAM.shaderId(), Math.max(WaterSettings.steamLifetime, 0.1F), WaterSettings.steamBuoyancy,
 				WaterSettings.steamDrag);
 			putFloats(b, o + 3856, WaterSettings.steamSwirl, WaterSettings.steamBurst, WaterSettings.steamEntityPush, 0.0F);
@@ -2659,6 +2740,8 @@ public final class WaterWorld {
 			Mth.clamp(WaterSettings.iceCracks, 0.0F, 1.0F), Math.max(WaterSettings.slushGrainSize, 0.05F));
 		putFloats(b, o + 4432, Mth.clamp(WaterSettings.slushSurface, 0.0F, 1.0F), Math.max(WaterSettings.slushCrystalSize, 0.0F),
 			Mth.clamp(WaterSettings.slushCrystalOpacity, 0.0F, 1.0F), 0.0F);
+		putFloats(b, o + 4448, WaterSettings.hotPlateWaterTemperature, 1.0F / Math.max(WaterSettings.hotPlateHeatTime, 0.01F),
+			Math.max(WaterSettings.hotPlateHeatReach, 0.0F), 0.0F);
 		putFloats(b, o + 4128, Math.max(WaterSettings.boilBubbleSize, 0.0F), WaterSettings.boilBubbleRise, Math.max(WaterSettings.boilBubbleRate, 0.0F),
 			WaterSettings.boilClingTemperature);
 		writeSea(b, o, level, levelState.worldPartialTicks, r.ox, r.oz, r);
@@ -2820,6 +2903,7 @@ public final class WaterWorld {
 		putFloats(b, o + 4400, 0.0F, 0.0F, 0.0F, 0.0F);
 		putFloats(b, o + 4416, 0.0F, 0.0F, 0.0F, 0.0F);
 		putFloats(b, o + 4432, 0.0F, 0.0F, 0.0F, 0.0F);
+		putFloats(b, o + 4448, 0.0F, 1.0F, 0.0F, 0.0F);
 		writeSea(b, o, level, levelState.worldPartialTicks, bx, bz, null);
 		this.uboRing.flush(o, UBO_SIZE);
 	}
@@ -3408,6 +3492,7 @@ public final class WaterWorld {
 		}
 		this.lastFrameNanos = 0L;
 		this.paused = false;
+		me.skaffy.block.RealisticFireBlock.simulationPaused = false;
 		if (this.rain != null) {
 			this.rain.reset();
 		}

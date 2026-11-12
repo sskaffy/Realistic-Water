@@ -4,6 +4,7 @@ import me.skaffy.block.RealisticSandBlock;
 import me.skaffy.block.RealisticWaterBlock;
 import me.skaffy.client.water.OceanMode;
 import me.skaffy.client.water.WaterSettings;
+import me.skaffy.client.fire.FireWorld;
 import me.skaffy.client.water.WaterWorld;
 import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.core.particles.ParticleTypes;
@@ -54,6 +55,7 @@ public class ClientLevelMixin {
 	private void realisticWater$onBlockUpdated(BlockPos pos, BlockState oldState, BlockState newState, int flags, CallbackInfo ci) {
 		WaterWorld.get().onBlockChanged((ClientLevel) (Object) this, pos, oldState, newState);
 		me.skaffy.client.kelp.RealisticKelp.get().onBlockChanged((ClientLevel) (Object) this, pos, oldState, newState);
+		FireWorld.get().onBlockChanged((ClientLevel) (Object) this, pos, oldState, newState);
 		if (realisticWater$invisibleSwap(oldState, newState)) {
 			ci.cancel();
 		}

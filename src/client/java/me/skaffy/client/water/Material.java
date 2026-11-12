@@ -8,7 +8,11 @@ public enum Material {
 	LAVA,
 	SLIME,
 	LEAVES,
-	STEAM;
+	STEAM,
+	SMOKE,
+	FLAME,
+	SOUL_FLAME,
+	SPARK;
 
 	float shaderId() {
 		return switch (this) {
@@ -17,6 +21,10 @@ public enum Material {
 			case SLIME -> 3.0F;
 			case LEAVES -> 4.0F;
 			case STEAM -> 5.0F;
+			case SMOKE -> 6.0F;
+			case FLAME -> 7.0F;
+			case SOUL_FLAME -> 8.0F;
+			case SPARK -> 9.0F;
 			default -> 0.0F;
 		};
 	}
@@ -34,15 +42,20 @@ public enum Material {
 	}
 
 	boolean isGas() {
-		return this == STEAM;
+		return this == STEAM || this == SMOKE || this == FLAME || this == SOUL_FLAME || this == SPARK;
+	}
+
+	/** Fire gases are drawn after everything translucent, so mobs, slime and glass behind a flame are covered by it. */
+	boolean isFireGas() {
+		return this == SMOKE || this == FLAME || this == SOUL_FLAME || this == SPARK;
 	}
 
 	boolean isParticleOnly() {
-		return this == LEAVES || this == STEAM;
+		return this == LEAVES || this.isGas();
 	}
 
 	boolean syncs() {
-		return this != STEAM;
+		return !this.isGas();
 	}
 
 	boolean usesLayers() {
@@ -70,6 +83,10 @@ public enum Material {
 			case SLIME -> "slime";
 			case LEAVES -> "leaves";
 			case STEAM -> "steam";
+			case SMOKE -> "smoke";
+			case FLAME -> "flame";
+			case SOUL_FLAME -> "soul flame";
+			case SPARK -> "spark";
 			default -> "water";
 		};
 	}

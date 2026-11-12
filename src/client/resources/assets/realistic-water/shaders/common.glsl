@@ -89,6 +89,7 @@ layout(std140, set = 0, binding = 0) uniform Globals {
     vec4 freezeA;
     vec4 freezeB;
     vec4 freezeC;
+    vec4 heatF;
 } G;
 
 float latentFreeze() {

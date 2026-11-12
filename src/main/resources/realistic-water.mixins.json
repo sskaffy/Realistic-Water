@@ -13,6 +13,8 @@
 		"LevelBlockEntityGridMixin",
 		"LivingEntityBodyFrictionMixin",
 		"NaturalSpawnerMixin",
+		"FireBlockAccessor",
+		"FireBlockMixin",
 		"PistonBaseBlockMixin",
 		"PistonStructureResolverMixin",
 		"PlayerEdgeMixin",

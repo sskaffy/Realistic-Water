@@ -1,0 +1,15 @@
+{
+	"schemaVersion": 1,
+	"id": "realistic-water-test",
+	"version": "1.0.0",
+	"name": "Realistic Water Tests",
+	"environment": "client",
+	"entrypoints": {
+		"fabric-client-gametest": [
+			"me.skaffy.test.FireClientGameTest"
+		]
+	},
+	"depends": {
+		"realistic-water": "*"
+	}
+}

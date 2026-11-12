@@ -368,6 +368,9 @@ public final class WaterSettings {
 	public static float fireHeatTime = 12.0F;
 	public static float furnaceWaterTemperature = 80.0F;
 	public static float furnaceHeatTime = 120.0F;
+	public static float hotPlateWaterTemperature = 140.0F;
+	public static float hotPlateHeatTime = 3.0F;
+	public static float hotPlateHeatReach = 3.0F;
 	public static float boilChurn = 6.0F;
 	public static float boilSteam = 1.0F;
 	public static float steamWispTemperature = 60.0F;
@@ -401,6 +404,37 @@ public final class WaterSettings {
 	public static float steamOpacity = 0.35F;
 	public static float steamDarkShade = 0.45F;
 	public static float steamLightShade = 0.95F;
+
+	public static boolean fire = true;
+	public static boolean fireVanillaBlocks = false;
+	public static int fireMaxSources = 256;
+	public static float fireRange = 64.0F;
+	public static boolean fireParticles = true;
+	public static float fireParticleDensity = 1.0F;
+	public static float fireParticleRange = 32.0F;
+	public static int fireParticleBudget = 200;
+	public static boolean fireSteam = true;
+	public static boolean fireEmbers = true;
+	public static float fireWind = 1.0F;
+	public static float fireSpreadSpeed = 1.0F;
+	public static float fireParticleStep = 0.1F;
+	public static float fireFlameSize = 0.15F;
+	public static float fireFlameLife = 0.6F;
+	public static float fireFlameRise = 6.0F;
+	public static float fireFlameBrightness = 1.0F;
+	public static float fireFlameOpacity = 0.55F;
+	public static float fireFlameAmount = 1.0F;
+	public static float fireSmokeSize = 0.2F;
+	public static float fireSmokeLife = 5.0F;
+	public static float fireSmokeRise = 1.1F;
+	public static float fireSmokeOpacity = 0.3F;
+	public static float fireSmokeDark = 0.07F;
+	public static float fireSmokeLight = 0.4F;
+	public static float fireSmokeAmount = 1.0F;
+	public static float fireSparks = 1.0F;
+	public static float fireSparkSize = 0.03F;
+	public static float fireSparkLife = 3.5F;
+	public static float fireSparkBrightness = 2.2F;
 
 	public static String ffmpeg = "";
 	public static boolean renderFreezeWorld = true;

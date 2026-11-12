@@ -18,6 +18,7 @@ import me.skaffy.realistic.RealisticPhysics;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLevelEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import me.skaffy.block.RealisticFireBlock;
 import me.skaffy.net.LavaSyncPayload;
 import me.skaffy.net.LeavesSyncPayload;
 import me.skaffy.net.RemoveAllWaterPayload;
@@ -54,6 +55,7 @@ public class RealisticWater implements ModInitializer {
 	@Override
 	public void onInitialize() {
 		ModContent.init();
+		ServerLifecycleEvents.SERVER_STARTING.register(server -> RealisticFireBlock.syncFlammability());
 		PayloadTypeRegistry.serverboundPlay().register(WaterSyncPayload.TYPE, WaterSyncPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(SandSyncPayload.TYPE, SandSyncPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(LavaSyncPayload.TYPE, LavaSyncPayload.CODEC);
@@ -81,6 +83,15 @@ public class RealisticWater implements ModInitializer {
 		PayloadTypeRegistry.clientboundPlay().register(GridSoundPayload.TYPE, GridSoundPayload.CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(GridLevelEventPayload.TYPE, GridLevelEventPayload.CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(SteamPayload.TYPE, SteamPayload.CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(me.skaffy.net.FireHeatPayload.TYPE, me.skaffy.net.FireHeatPayload.CODEC);
+		ServerTickEvents.END_LEVEL_TICK.register(me.skaffy.block.FireHeat::tick);
+		PayloadTypeRegistry.serverboundPlay().register(me.skaffy.net.FireSpeedPayload.TYPE, me.skaffy.net.FireSpeedPayload.CODEC);
+		ServerPlayNetworking.registerGlobalReceiver(me.skaffy.net.FireSpeedPayload.TYPE, (payload, context) -> {
+			if (isAuthority(context.server(), context.player())) {
+				context.server().execute(payload::apply);
+			}
+		});
+		ServerLifecycleEvents.SERVER_STOPPED.register(server -> me.skaffy.block.FireHeat.forgetAll());
 		ServerPlayNetworking.registerGlobalReceiver(BodyStatePayload.TYPE, (payload, context) -> context.server().execute(() -> payload.apply(context.player())));
 		ServerPlayNetworking.registerGlobalReceiver(BodyPushPayload.TYPE, (payload, context) -> context.server().execute(() -> payload.apply(context.player())));
 		ServerPlayNetworking.registerGlobalReceiver(FlowPayload.TYPE, (payload, context) -> {

@@ -13,6 +13,8 @@ import me.skaffy.client.water.OceanMode;
 import me.skaffy.client.water.SlimeFogEnvironment;
 import me.skaffy.client.water.SteamParticle;
 import net.fabricmc.fabric.api.client.particle.v1.ParticleProviderRegistry;
+import me.skaffy.client.fire.FireCommands;
+import me.skaffy.client.fire.FireWorld;
 import me.skaffy.client.water.WaterCommands;
 import me.skaffy.client.water.WaterSettings;
 import me.skaffy.client.water.WaterSettingsScreen;
@@ -59,6 +61,7 @@ public class RealisticWaterClient implements ClientModInitializer {
 		EntityRendererRegistry.register(ModContent.REALISTIC_BOAT, RealisticBoatRenderer::new);
 		MenuScreens.register(ModContent.CONVERTER_MENU, ConverterScreen::new);
 		WaterWorld water = WaterWorld.get();
+		FireWorld fire = FireWorld.get();
 		ClientCommandRegistrationCallback.EVENT.register(WaterCommands::register);
 		ClientTickEvents.START_CLIENT_TICK.register(OceanMode::tick);
 		ClientTickEvents.END_CLIENT_TICK.register(water::tick);
@@ -73,6 +76,7 @@ public class RealisticWaterClient implements ClientModInitializer {
 		ClientTickEvents.END_CLIENT_TICK.register(me.skaffy.client.jelly.JellyWorld::tick);
 		ClientTickEvents.END_CLIENT_TICK.register(me.skaffy.client.ice.IceWorld::tick);
 		ClientTickEvents.END_CLIENT_TICK.register(me.skaffy.client.trees.LeafSink::tick);
+		ClientTickEvents.END_CLIENT_TICK.register(me.skaffy.client.fire.FireSpeedSync::tick);
 		ClientTickEvents.END_CLIENT_TICK.register(mc -> me.skaffy.client.trees.TreeGrab.get().tick(mc));
 		ClientTickEvents.END_CLIENT_TICK.register(mc -> me.skaffy.client.trees.FallenLeaves.get().tick(mc));
 		me.skaffy.client.trees.FallenLeaves.init();
@@ -83,6 +87,11 @@ public class RealisticWaterClient implements ClientModInitializer {
 		me.skaffy.client.trees.RealisticTrees.init();
 		RealisticKelp.init();
 		me.skaffy.client.realistic.ModelShapes.install();
+		ClientPlayNetworking.registerGlobalReceiver(me.skaffy.net.FireHeatPayload.TYPE, (payload, context) -> context.client().execute(() -> {
+			if (context.client().level != null) {
+				me.skaffy.client.fire.FireHeatClient.receive(context.client().level, payload);
+			}
+		}));
 		ClientPlayNetworking.registerGlobalReceiver(SteamPayload.TYPE, (payload, context) -> context.client().execute(
 			() -> WaterWorld.get().addSteam(payload.x(), payload.y(), payload.z(), payload.eighths())));
 		ClientPlayNetworking.registerGlobalReceiver(BodyPushPayload.TYPE, (payload, context) -> context.client().execute(() -> ClientBodies.receive(payload)));
@@ -117,7 +126,16 @@ public class RealisticWaterClient implements ClientModInitializer {
 		ClientChunkEvents.CHUNK_UNLOAD.register(me.skaffy.client.jelly.JellyWorld::onChunkUnload);
 		ClientChunkEvents.CHUNK_LOAD.register(me.skaffy.client.ice.IceWorld::onChunkLoad);
 		ClientChunkEvents.CHUNK_UNLOAD.register(me.skaffy.client.ice.IceWorld::onChunkUnload);
-		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> water.clear());
+		ClientCommandRegistrationCallback.EVENT.register(FireCommands::register);
+		ClientTickEvents.END_CLIENT_TICK.register(fire::tick);
+		ClientTickEvents.END_CLIENT_TICK.register(me.skaffy.client.fire.FireEffects::tick);
+		ClientChunkEvents.CHUNK_LOAD.register(fire::onChunkLoad);
+		ClientChunkEvents.CHUNK_UNLOAD.register(fire::onChunkUnload);
+		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
+			water.clear();
+			fire.clear();
+			me.skaffy.client.fire.FireHeatClient.clear();
+		});
 		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> water.shutdown());
 	}
 
