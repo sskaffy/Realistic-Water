@@ -72,7 +72,7 @@ public final class FireEffects {
 	public static void tick(Minecraft mc) {
 		spawnedLastTick = 0;
 		ClientLevel level = mc.level;
-		if (level == null || mc.player == null || mc.isPaused() || !WaterSettings.fire || !WaterSettings.fireParticles) {
+		if (level == null || mc.player == null || mc.isPaused() || WaterWorld.get().isPaused() || !WaterSettings.fire || !WaterSettings.fireParticles) {
 			return;
 		}
 		updateWind(level);

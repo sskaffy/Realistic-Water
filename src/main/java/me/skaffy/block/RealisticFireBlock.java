@@ -24,6 +24,9 @@ import net.minecraft.world.level.block.state.properties.BooleanProperty;
  * model or particles. The client fire renderer draws it instead.
  */
 public class RealisticFireBlock extends FireBlock {
+	/** Set by /water pause: fire stops burning and spreading until resumed. */
+	public static volatile boolean simulationPaused;
+
 	public RealisticFireBlock(Properties properties) {
 		super(properties);
 	}
@@ -129,6 +132,9 @@ public class RealisticFireBlock extends FireBlock {
 	@Override
 	protected void tick(final BlockState state, final ServerLevel level, final BlockPos pos, final RandomSource random) {
 		level.scheduleTick(pos, this, 6 + random.nextInt(8));
+		if (simulationPaused) {
+			return;
+		}
 		if (!state.canSurvive(level, pos)) {
 			level.removeBlock(pos, false);
 			return;

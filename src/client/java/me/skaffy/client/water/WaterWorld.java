@@ -337,6 +337,12 @@ public final class WaterWorld {
 
 	public boolean togglePause() {
 		this.paused = !this.paused;
+		// Fire is ticked by the (integrated) server, so freeze it too; it would otherwise keep burning foliage while paused.
+		me.skaffy.block.RealisticFireBlock.simulationPaused = this.paused;
+		return this.paused;
+	}
+
+	public boolean isPaused() {
 		return this.paused;
 	}
 
@@ -3486,6 +3492,7 @@ public final class WaterWorld {
 		}
 		this.lastFrameNanos = 0L;
 		this.paused = false;
+		me.skaffy.block.RealisticFireBlock.simulationPaused = false;
 		if (this.rain != null) {
 			this.rain.reset();
 		}
