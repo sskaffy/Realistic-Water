@@ -55,6 +55,9 @@ public final class WaterCommands {
 			.then(op("sand")
 				.executes(c -> ball(c, 2, Material.SAND))
 				.then(argument("size", IntegerArgumentType.integer(1, 64)).executes(c -> ball(c, IntegerArgumentType.getInteger(c, "size"), Material.SAND))))
+			.then(op("gravel")
+				.executes(c -> ball(c, 2, Material.GRAVEL))
+				.then(argument("size", IntegerArgumentType.integer(1, 64)).executes(c -> ball(c, IntegerArgumentType.getInteger(c, "size"), Material.GRAVEL))))
 			.then(op("lava")
 				.executes(c -> ball(c, 3, Material.LAVA))
 				.then(argument("size", IntegerArgumentType.integer(1, 64)).executes(c -> ball(c, IntegerArgumentType.getInteger(c, "size"), Material.LAVA))))
@@ -79,6 +82,11 @@ public final class WaterCommands {
 					c.getSource().sendFeedback(Component.literal("Removing all realistic sand around you"));
 					return 1;
 				}))
+				.then(op("gravel").executes(c -> {
+					WaterWorld.get().removeAll(Minecraft.getInstance().options.renderDistance().get() + 2, Material.GRAVEL);
+					c.getSource().sendFeedback(Component.literal("Removing all realistic gravel around you"));
+					return 1;
+				}))
 				.then(op("lava").executes(c -> {
 					WaterWorld.get().removeAll(Minecraft.getInstance().options.renderDistance().get() + 2, Material.LAVA);
 					c.getSource().sendFeedback(Component.literal("Removing all realistic lava around you (springs included)"));
@@ -92,6 +100,24 @@ public final class WaterCommands {
 				.then(op("leaves").executes(c -> {
 					WaterWorld.get().removeAll(Minecraft.getInstance().options.renderDistance().get() + 2, Material.LEAVES);
 					c.getSource().sendFeedback(Component.literal("Removing all realistic leaves around you"));
+					return 1;
+				}))
+				.then(op("fire").executes(c -> {
+					int removed = 0;
+					var connection = c.getSource().getPlayer().connection;
+					for (var source : java.util.List.copyOf(me.skaffy.client.fire.FireWorld.get().activeSources())) {
+						var kind = source.kind();
+						if (kind == me.skaffy.client.fire.FireWorld.Kind.REALISTIC_FIRE || kind == me.skaffy.client.fire.FireWorld.Kind.REALISTIC_SOUL_FIRE) {
+							var p = source.blockPos();
+							connection.sendCommand("setblock " + p.getX() + " " + p.getY() + " " + p.getZ() + " air");
+							if (++removed >= 400) {
+								break;
+							}
+						}
+					}
+					WaterWorld.get().removeFire();
+					c.getSource().sendFeedback(Component.literal("Removing realistic fire around you (" + removed + " blocks"
+						+ (removed >= 400 ? ", run it again for more" : "") + ") and clearing flames and smoke"));
 					return 1;
 				})))
 			.then(op("set")

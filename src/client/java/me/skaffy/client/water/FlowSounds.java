@@ -63,7 +63,7 @@ final class FlowSounds {
 			return;
 		}
 		float volumeScale = WaterSettings.flowSoundVolume;
-		SoundType pile = leaves ? SoundType.AZALEA_LEAVES : SoundType.SAND;
+		SoundType pile = leaves ? SoundType.AZALEA_LEAVES : material == Material.GRAVEL ? SoundType.GRAVEL : SoundType.SAND;
 		float rate = water ? 0.012F : lava ? 0.011F : 0.01F;
 		float cap = water ? 3.0F : lava ? 2.5F : 2.0F;
 		int count = this.roll(Math.min(weight * rate, cap));

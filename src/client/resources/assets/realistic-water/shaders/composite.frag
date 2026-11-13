@@ -112,9 +112,11 @@ vec3 traceReflection(vec3 origin, vec3 R, out float hit) {
     }
     vec3 pos = origin;
     float stepLen = 0.15;
-    for (int i = 0; i < 48; i++) {
+    int steps = int(G.perfA.x + 0.5);
+    float growth = G.perfA.y > 1.0 ? G.perfA.y : 1.1;
+    for (int i = 0; i < steps; i++) {
         pos += R * stepLen;
-        stepLen *= 1.1;
+        stepLen *= growth;
         vec4 clip = G.proj * vec4(pos, 1.0);
         if (clip.w <= 0.0) {
             break;

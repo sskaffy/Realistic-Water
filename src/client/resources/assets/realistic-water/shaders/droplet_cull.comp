@@ -2,7 +2,11 @@
 #include "common.glsl"
 layout(local_size_x = 256) in;
 layout(std430, binding = 1) readonly buffer Parts { Particle parts[]; };
+layout(std430, binding = 8) readonly buffer PartsHi { Particle partsHi[]; };
+#define PARTS_AT(i) (uint(i) < SPLIT_PART ? parts[uint(i)] : partsHi[uint(i) - SPLIT_PART])
 layout(std430, binding = 2) readonly buffer Dens { float dens[]; };
+layout(std430, binding = 7) readonly buffer DensHi { float densHi[]; };
+#define DENS_AT(i) (uint(i) < SPLIT_FINE ? dens[uint(i)] : densHi[uint(i) - SPLIT_FINE])
 layout(std430, binding = 3) readonly buffer ViewState { vec4 viewState; };
 layout(std430, binding = 4) buffer Args { uint args[]; };
 layout(std430, binding = 5) readonly buffer Counters { uint counters[]; };
@@ -16,14 +20,14 @@ void main() {
     if (i >= counters[pc.a.x] || viewState.x > 0.5) {
         return;
     }
-    Particle p = parts[i];
+    Particle p = PARTS_AT(i);
     if (p.pos.w < 0.0) {
         return;
     }
     ivec3 fp = ivec3(floor(p.pos.xyz * float(G.fine.w)));
     for (int k = 0; k < 27; k++) {
         ivec3 q = fp + ivec3(k % 3, (k / 3) % 3, k / 9) - 1;
-        if (inFine(q) && dens[fineIndex(q)] > G.surf.w) {
+        if (inFine(q) && DENS_AT(fineIndex(q)) > G.surf.w) {
             return;
         }
     }

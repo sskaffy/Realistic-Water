@@ -2,10 +2,15 @@
 #include "common.glsl"
 layout(local_size_x = 256) in;
 layout(std430, binding = 1) readonly buffer Sorted { Particle sorted[]; };
+layout(std430, binding = 8) readonly buffer SortedHi { Particle sortedHi[]; };
+#define SORTED_AT(i) (uint(i) < SPLIT_PART ? sorted[uint(i)] : sortedHi[uint(i) - SPLIT_PART])
 layout(std430, binding = 2) readonly buffer Start { uint start[]; };
 layout(std430, binding = 3) readonly buffer Occupancy { uint occupancy[]; };
 layout(std430, binding = 4) readonly buffer Depth { uint depth[]; };
 layout(std430, binding = 5) writeonly buffer Field { float field[]; };
+layout(std430, binding = 7) writeonly buffer FieldHi { float fieldHi[]; };
+#define FIELD_AT(i) (uint(i) < SPLIT_FINE ? field[uint(i)] : fieldHi[uint(i) - SPLIT_FINE])
+#define FIELD_SET(i, v) { uint s_field = uint(i); if (s_field < SPLIT_FINE) { field[s_field] = (v); } else { fieldHi[s_field - SPLIT_FINE] = (v); } }
 layout(std430, binding = 6) writeonly buffer BlockMask { uint blockMask[]; };
 layout(push_constant) uniform PC { ivec4 a; vec4 b; ivec4 c; } pc;
 
@@ -35,7 +40,7 @@ void main() {
     barrier();
     uint found = 0u;
     for (int k = lid; k < nCells && found == 0u; k += 256) {
-        found = occupancy[boxIndex(cLo + ivec3(k % cDim.x, (k / cDim.x) % cDim.y, k / (cDim.x * cDim.y)))];
+        found = occupancy[sortKey(cLo + ivec3(k % cDim.x, (k / cDim.x) % cDim.y, k / (cDim.x * cDim.y)))];
     }
     if (found != 0u) {
         blockParticles = 1u;
@@ -49,11 +54,11 @@ void main() {
     }
     int i = fineIndex(v);
     if (pc.a.z > 0 && depth[boxIndex(v / sub)] >= uint(pc.a.z)) {
-        field[i] = 1.0;
+        FIELD_SET(i, 1.0);
         return;
     }
     if (blockParticles == 0u) {
-        field[i] = 0.0;
+        FIELD_SET(i, 0.0);
         return;
     }
     float invR2 = 1.0 / (R * R);
@@ -64,15 +69,16 @@ void main() {
     ivec3 sd = ivec3(0);
     for (int z = lo.z; z <= hi.z; z++) {
         for (int y = lo.y; y <= hi.y; y++) {
-            int row = boxIndex(ivec3(lo.x, y, z));
-            for (int x = 0; x <= hi.x - lo.x; x++) {
-                uint n = occupancy[row + x];
+            int key = sortKey(ivec3(lo.x, y, z));
+            int lx = lo.x - G.boxMin.x;
+            for (int x = lo.x; x <= hi.x; x++, key += ((++lx) & 3) == 0 ? 61 : 1) {
+                uint n = occupancy[key];
                 if (n == 0u) {
                     continue;
                 }
-                uint s = start[row + x];
+                uint s = start[key];
                 for (uint j = 0u; j < n; j++) {
-                    vec3 d = sorted[s + j].pos.xyz * float(sub) - centre;
+                    vec3 d = SORTED_AT(s + j).pos.xyz * float(sub) - centre;
                     float s2 = dot(d, d) * invR2;
                     if (s2 >= 1.0) {
                         continue;
@@ -86,10 +92,10 @@ void main() {
         }
     }
     if (float(sw) < 1.0) {
-        field[i] = 0.0;
+        FIELD_SET(i, 0.0);
         return;
     }
     vec3 c = vec3(sd) / float(sw);
     float phi = length(c) - pc.b.y;
-    field[i] = clamp(0.5 - 0.5 * phi, 0.0, 1.0) * smoothstep(pc.b.z, pc.b.w, float(sw) / ZB_SCALE);
+    FIELD_SET(i, clamp(0.5 - 0.5 * phi, 0.0, 1.0) * smoothstep(pc.b.z, pc.b.w, float(sw) / ZB_SCALE));
 }

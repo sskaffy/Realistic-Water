@@ -26,7 +26,7 @@ final class SteamRenderer implements AutoCloseable {
 		GraphicsProgram.begin(cb, width, height, mainColorView, null, mainDepthView);
 		for (WaterRenderer.Body body : bodies) {
 			WaterRegion r = body.region();
-			steam.bind(cb, body.ubo(), Desc.ssbo(r.currentParticles()), Desc.ssbo(r.light()), Desc.tex(lightmap, this.linear.handle));
+			steam.bind(cb, body.ubo(), r.currentParticles().part0(), Desc.ssbo(r.light()), Desc.tex(lightmap, this.linear.handle));
 			steam.drawIndirect(cb, r.args, WaterRegion.ARGS_FLUID_DRAW);
 		}
 		GraphicsProgram.end(cb);

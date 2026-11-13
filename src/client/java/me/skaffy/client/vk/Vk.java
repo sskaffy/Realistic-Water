@@ -69,6 +69,40 @@ public final class Vk {
 		return device().vma();
 	}
 
+	private static long maxBufferBytes = -1L;
+
+	public static long maxBufferBytes() {
+		if (maxBufferBytes > 0L) {
+			return maxBufferBytes;
+		}
+		long max = Long.MAX_VALUE;
+		try (MemoryStack stack = MemoryStack.stackPush()) {
+			org.lwjgl.vulkan.VkPhysicalDevice phys = vk().getPhysicalDevice();
+			org.lwjgl.vulkan.VkPhysicalDeviceProperties basic = org.lwjgl.vulkan.VkPhysicalDeviceProperties.calloc(stack);
+			VK10.vkGetPhysicalDeviceProperties(phys, basic);
+			int api = basic.apiVersion();
+			org.lwjgl.vulkan.VkPhysicalDeviceMaintenance3Properties m3 = org.lwjgl.vulkan.VkPhysicalDeviceMaintenance3Properties.calloc(stack).sType$Default();
+			org.lwjgl.vulkan.VkPhysicalDeviceMaintenance4Properties m4 = org.lwjgl.vulkan.VkPhysicalDeviceMaintenance4Properties.calloc(stack).sType$Default();
+			boolean v13 = VK10.VK_API_VERSION_MAJOR(api) > 1 || VK10.VK_API_VERSION_MINOR(api) >= 3;
+			if (v13) {
+				m3.pNext(m4.address());
+			}
+			org.lwjgl.vulkan.VkPhysicalDeviceProperties2 props = org.lwjgl.vulkan.VkPhysicalDeviceProperties2.calloc(stack).sType$Default().pNext(m3.address());
+			org.lwjgl.vulkan.VK11.vkGetPhysicalDeviceProperties2(phys, props);
+			if (m3.maxMemoryAllocationSize() > 0L) {
+				max = Math.min(max, m3.maxMemoryAllocationSize());
+			}
+			if (v13 && m4.maxBufferSize() > 0L) {
+				max = Math.min(max, m4.maxBufferSize());
+			}
+		} catch (RuntimeException e) {
+			max = 1L << 31;
+		}
+		maxBufferBytes = max;
+		me.skaffy.RealisticWater.LOGGER.info("Realistic Water: the graphics driver allows at most {} MiB in one GPU buffer", max / (1024L * 1024L));
+		return max;
+	}
+
 	public static VulkanCommandEncoder encoder() {
 		return device().createCommandEncoder();
 	}

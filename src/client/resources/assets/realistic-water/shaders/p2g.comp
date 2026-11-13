@@ -4,7 +4,12 @@
 #include "common.glsl"
 layout(local_size_x = 256) in;
 layout(std430, binding = 1) readonly buffer Src { Particle src[]; };
+layout(std430, binding = 8) readonly buffer SrcHi { Particle srcHi[]; };
+#define SRC_AT(i) (uint(i) < SPLIT_PART ? src[uint(i)] : srcHi[uint(i) - SPLIT_PART])
 layout(std430, binding = 2) buffer Accum { int accum[]; };
+layout(std430, binding = 7) buffer AccumHi { int accumHi[]; };
+#define ACCUM_AT(i) (uint(i) < SPLIT_ACCUM ? accum[uint(i)] : accumHi[uint(i) - SPLIT_ACCUM])
+#define ACCUM_ADD(i, v) { uint s_accum = uint(i); if (s_accum < SPLIT_ACCUM) { atomicAdd(accum[s_accum], (v)); } else { atomicAdd(accumHi[s_accum - SPLIT_ACCUM], (v)); } }
 layout(std430, binding = 3) buffer Count { int cellCount[]; };
 layout(std430, binding = 4) buffer Dens { int cellDens[]; };
 layout(std430, binding = 5) readonly buffer Counters { uint counters[]; };
@@ -30,8 +35,8 @@ void addFace(int comp, int idx, ivec3 c, int m, int w) {
         atomicAdd(tile[t], m);
         atomicAdd(tile[t + 1], w);
     } else {
-        atomicAdd(accum[2 * idx], m);
-        atomicAdd(accum[2 * idx + 1], w);
+        ACCUM_ADD(2 * idx, m);
+        ACCUM_ADD(2 * idx + 1, w);
     }
 }
 
@@ -62,7 +67,7 @@ void main() {
     bool live = i < counters[pc.a.x];
     Particle p;
     if (live) {
-        p = src[i];
+        p = SRC_AT(i);
         live = p.pos.w >= 0.0 && inInnerBox(p.pos.xyz);
     }
     vec3 x = live ? p.pos.xyz : vec3(0.0);
@@ -152,10 +157,10 @@ void main() {
             if (m != 0 || w != 0) {
                 int idx = faceIndex(comp, c);
                 if (m != 0) {
-                    atomicAdd(accum[2 * idx], m);
+                    ACCUM_ADD(2 * idx, m);
                 }
                 if (w != 0) {
-                    atomicAdd(accum[2 * idx + 1], w);
+                    ACCUM_ADD(2 * idx + 1, w);
                 }
             }
         }

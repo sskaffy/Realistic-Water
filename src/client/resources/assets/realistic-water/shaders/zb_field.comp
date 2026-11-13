@@ -3,6 +3,9 @@
 layout(local_size_x = 256) in;
 layout(std430, binding = 1) readonly buffer Zb { int zb[]; };
 layout(std430, binding = 2) writeonly buffer Field { float field[]; };
+layout(std430, binding = 4) writeonly buffer FieldHi { float fieldHi[]; };
+#define FIELD_AT(i) (uint(i) < SPLIT_FINE ? field[uint(i)] : fieldHi[uint(i) - SPLIT_FINE])
+#define FIELD_SET(i, v) { uint s_field = uint(i); if (s_field < SPLIT_FINE) { field[s_field] = (v); } else { fieldHi[s_field - SPLIT_FINE] = (v); } }
 layout(std430, binding = 3) readonly buffer Depth { uint depth[]; };
 layout(push_constant) uniform PC { ivec4 a; vec4 b; } pc;
 
@@ -15,16 +18,16 @@ void main() {
     ivec3 p = G.fineBoxMin.xyz + ivec3(t % bd.x, (t / bd.x) % bd.y, t / (bd.x * bd.y));
     int i = fineIndex(p);
     if (pc.a.y > 0 && depth[boxIndex(p / G.fine.w)] >= uint(pc.a.y)) {
-        field[i] = 1.0;
+        FIELD_SET(i, 1.0);
         return;
     }
     float sw = float(zb[4 * i]);
     if (sw < 1.0) {
-        field[i] = 0.0;
+        FIELD_SET(i, 0.0);
         return;
     }
     vec3 c = vec3(float(zb[4 * i + 1]), float(zb[4 * i + 2]), float(zb[4 * i + 3])) / sw;
     float phi = length(c) - pc.b.x;
     float w = sw / 16384.0;
-    field[i] = clamp(0.5 - 0.5 * phi, 0.0, 1.0) * smoothstep(pc.b.y, pc.b.z, w);
+    FIELD_SET(i, clamp(0.5 - 0.5 * phi, 0.0, 1.0) * smoothstep(pc.b.y, pc.b.z, w));
 }

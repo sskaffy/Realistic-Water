@@ -1,0 +1,62 @@
+#version 450
+
+#define SNOW_PARAMS_BINDING 0
+#define SNOW_COLUMNS_BINDING 1
+#define SNOW_DETAIL_BINDING 2
+#include "common.glsl"
+#include "snow_common.glsl"
+layout(std430, binding = 3) buffer Deposit { int deposit[]; };
+layout(std430, binding = 4) buffer Spray { uint sprayCursor; uint sprayPad0; uint sprayPad1; uint sprayPad2; SnowSpray spray[]; };
+layout(std430, binding = 5) readonly buffer Spawn { SnowSpray spawn[]; };
+layout(std430, binding = 6) buffer Landed { uint landedCount; uint landedPad0; uint landedPad1; uint landedPad2; vec4 landed[]; };
+layout(push_constant) uniform PC { ivec4 a; ivec4 b; } pc;
+layout(local_size_x = 256) in;
+
+#define MAX_LANDED 4096
+#define MAX_AGE 8.0
+
+void main() {
+    int i = int(gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * gl_NumWorkGroups.x * 256u);
+    int cap = SP.extra.w;
+    if (cap <= 0) {
+        return;
+    }
+    if (pc.a.x == 0) {
+        if (i < SP.extra.y) {
+            uint slot = atomicAdd(sprayCursor, 1u) % uint(cap);
+            spray[slot] = spawn[i];
+        }
+        return;
+    }
+    if (i >= cap) {
+        return;
+    }
+    SnowSpray p = spray[i];
+    if (p.vel.w < 0.0) {
+        return;
+    }
+    float dt = SP.motion.x;
+    p.vel.y -= SP.motion.y * dt;
+    p.vel.xyz *= exp(-0.6 * dt);
+    vec3 next = p.pos.xyz + p.vel.xyz * dt;
+    p.vel.w += dt;
+    vec3 local = sprayToLocal(next);
+    SnowSurface s = snowSurface(local.xz);
+    float ground = s.y;
+    if (local.y <= ground || p.vel.w > MAX_AGE) {
+        if (p.vel.w <= MAX_AGE) {
+            int j;
+            if (s.edge > 0.5 && snowPointSlot(snowPointAt(local.xz), j)) {
+                atomicAdd(deposit[j], int(p.pos.w * SNOW_DEP_FP));
+            } else {
+                uint o = atomicAdd(landedCount, 1u);
+                if (o < uint(MAX_LANDED)) {
+                    landed[o] = vec4(local.x, max(local.y, ground), local.z, p.pos.w);
+                }
+            }
+        }
+        spray[i].vel.w = -1.0;
+        return;
+    }
+    spray[i] = SnowSpray(vec4(next, p.pos.w), p.vel);
+}

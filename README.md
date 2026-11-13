@@ -1,8 +1,7 @@
 # Realistic Water
 A Minecraft mod that adds a lot of cool, realistic stuff from Minecraft Blender animations.
 
-![Project Screenshot](images/2.png)
-![Project Screenshot](images/1.png)
+![Project Screenshot](images/4.png)
 
 #
 
@@ -44,6 +43,8 @@ How to use:
 - Wobbly slime and honey
 - Wobbly slime and honey react to realistic blocks, players, entities
 - Wobbly slime and honey can be converted into realistic blocks
+- Realistic Fire
+- Realistic fire for furnace, torch, campfire, candle
 - Realistic ice toggle for vanilla ice
 - Realistic ice for realistic water (can be obtained if the water is freezing)
 - Realistic slush for realistic water (can be obtained if the water is almost freezing)
@@ -71,9 +72,9 @@ How to use:
 
 ![Project Screenshot](images/3.png)
 
-**Realistic Water flowing:**
+**Realistic Fire:**
 
-![Project Screenshot](images/4.png)
+![Project Screenshot](images/1.png)
 
 **Wobbly Slime and Honey:**
 

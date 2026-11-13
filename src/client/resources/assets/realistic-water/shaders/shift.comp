@@ -2,6 +2,9 @@
 #include "common.glsl"
 layout(local_size_x = 256) in;
 layout(std430, binding = 1) buffer Parts { Particle parts[]; };
+layout(std430, binding = 3) buffer PartsHi { Particle partsHi[]; };
+#define PARTS_AT(i) (uint(i) < SPLIT_PART ? parts[uint(i)] : partsHi[uint(i) - SPLIT_PART])
+#define PARTS_DO(i, member, op, v) { uint s_parts = uint(i); if (s_parts < SPLIT_PART) { parts[s_parts]member op (v); } else { partsHi[s_parts - SPLIT_PART]member op (v); } }
 layout(std430, binding = 2) readonly buffer Counters { uint counters[]; };
 layout(push_constant) uniform PC { ivec4 a; vec4 b; } pc;
 
@@ -10,5 +13,5 @@ void main() {
     if (i >= min(counters[pc.a.x], uint(pc.a.y))) {
         return;
     }
-    parts[i].pos.xyz += pc.b.xyz;
+    PARTS_DO(i, .pos.xyz, +=, pc.b.xyz);
 }

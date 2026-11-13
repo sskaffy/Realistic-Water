@@ -27,7 +27,14 @@ public final class WaterSettingsInfo {
 		NUMBER,
 		INTEGER,
 		SWITCH,
-		TEXT
+		TEXT,
+		CHOICE
+	}
+
+	private static final Map<String, List<String>> CHOICES = new LinkedHashMap<>();
+
+	public static List<String> choices(String name) {
+		return CHOICES.getOrDefault(name, List.of());
 	}
 
 	public record Info(String name, String category, String label, Kind kind, Cost cost, String costNote, String description, double min, double max,
@@ -86,6 +93,11 @@ public final class WaterSettingsInfo {
 		add(new Info(name, category, label, Kind.SWITCH, cost, costNote, description, 0, 1, 1));
 	}
 
+	private static void choice(String name, String label, Cost cost, String costNote, List<String> options, String description) {
+		CHOICES.put(name, List.copyOf(options));
+		add(new Info(name, category, label, Kind.CHOICE, cost, costNote, description, 0, options.size() - 1, 1));
+	}
+
 	private static void text(String name, String label, Cost cost, String costNote, String description) {
 		add(new Info(name, category, label, Kind.TEXT, cost, costNote, description, 0, 0, 0));
 	}
@@ -94,6 +106,15 @@ public final class WaterSettingsInfo {
 	private static final String ONE_PASS = "Changes how much one compute pass does, not how many there are.";
 
 	static {
+		category("Performance mode");
+		choice("performanceMode", "Performance mode", Cost.EXTREME,
+			"Off is the full look. High, Medium and Low trade more and more look and physics detail for speed; Low is for flooding whole villages.",
+			PerformanceMode.LABELS,
+			"Makes realistic water, lava, slime, sand and leaves much cheaper so far more of them fit on your PC. High is a bit faster, "
+				+ "Medium is several times faster, Low is the fastest (coarser water, no whitewater, blobbier surface). While a mode is on it "
+				+ "locks the settings it changes; your own values are kept and come back when you switch to Off. Changing it rebuilds the "
+				+ "simulation from the blocks, so moving water snaps to its block shape once.");
+
 		category("Water simulation");
 		toggle("vanillaWaterExchange", "Mix with vanilla water", Cost.LOW, "Checks blocks where flowing vanilla water appears.",
 			"Realistic water that runs into still vanilla water (lakes, the sea) joins it, and flowing vanilla water that reaches "
@@ -130,6 +151,11 @@ public final class WaterSettingsInfo {
 			"Below this speed (blocks per second) a body of water, lava or slime counts as calm.");
 		num("fluidRestTime", "Rest time", Cost.MEDIUM, "Shorter puts calm bodies to sleep sooner. 0 never sleeps, so everything is simulated every frame.", 0, 10, 0.1,
 			"Seconds a body must stay calm before it stops simulating until something disturbs it.");
+		integer("lightRefreshBlocks", "Light refresh per frame", Cost.MEDIUM, "Main-thread light lookups per frame for each body; lower is cheaper on big bodies.", 256, 65536,
+			"How many blocks of a body's light (block light, sky light, heat sources) are re-read every frame. Lower spreads a big flood's "
+				+ "light update over more frames.");
+		integer("blockSyncInterval", "Block sync interval", Cost.LOW, "Frames between turning the simulation back into blocks; higher is cheaper on huge floods.", 5, 600,
+			"How many frames pass between saving where the water is as blocks on the server (only the host does this).");
 		integer("fluidRestWhitewater", "Rest foam limit", Cost.LOW, "Lets bodies with leftover foam sleep sooner.", 0, 2000,
 			"A body only goes to sleep when it has at most this many foam and spray particles left.");
 		num("sourceFill", "Spring fill", Cost.LOW, "Fuller springs add particles faster.", 0, 1, 0.01,
@@ -240,6 +266,9 @@ public final class WaterSettingsInfo {
 			"Multiplies how deep the water looks for colour and light absorption.");
 		num("refraction", "Refraction", Cost.NONE, LOOK, 0, 1, 0.01,
 			"How much the world behind water is bent.");
+		integer("reflectionSteps", "Reflection steps", Cost.MEDIUM, "Screen-space reflection samples per water pixel; 0 reflects only the sky.", 0, 96,
+			"How far and how carefully reflections of the world are searched for on water, lava and the sea. Fewer steps miss more "
+				+ "reflections; 0 shows only the sky in reflections.");
 		num("absorbR", "Absorption red", Cost.NONE, LOOK, 0, 5, 0.01,
 			"How quickly red light fades through water. Higher red absorption makes deep water bluer.");
 		num("absorbG", "Absorption green", Cost.NONE, LOOK, 0, 5, 0.01,
@@ -327,6 +356,68 @@ public final class WaterSettingsInfo {
 			"How full of lava a block must be before touching water turns it to cobblestone. Lower reacts to thin lava.");
 		num("lavaMixWaterMin", "Mix: water needed", Cost.NONE, "Doesn't change the cost.", 0.01, 1, 0.01,
 			"How full of water a block must be to cool the lava next to it. Lower lets a few drops make stone.");
+
+		category("Fire");
+		toggle("fire", "Realistic fire", Cost.LOW, "Scans loaded chunks for lit realistic fire sources.",
+			"Turns the whole fire system on or off: finding realistic fire, torches, campfires, furnaces and candles, and drawing their flames and smoke.");
+		toggle("fireVanillaBlocks", "Count vanilla fire blocks", Cost.MEDIUM, "Many more sources to track and draw.",
+			"Also lets vanilla fire, torches, campfires and furnaces give off realistic flames and smoke. Off by default; only the realistic blocks do.");
+		toggle("fireParticles", "Draw fire", Cost.MEDIUM, "Every fire adds particles to the GPU simulation.",
+			"Draws flames, smoke and sparks. Turn it off to keep fire blocks working but invisible.");
+		integer("fireMaxSources", "Max fire sources", Cost.MEDIUM, "Each active source puffs particles every few ticks.", 1, 4096,
+			"The most fires drawn at once, nearest first.");
+		num("fireRange", "Fire search range", Cost.LOW, "How far out fire sources stay tracked.", 8, 256, 1,
+			"Fires further than this many blocks are ignored.");
+		num("fireParticleRange", "Fire draw range", Cost.MEDIUM, "Further fires add particles too.", 8, 128, 1,
+			"Fires further than this many blocks from you do not draw.");
+		integer("fireParticleBudget", "Fire puffs per tick", Cost.MEDIUM, "Caps how many puffs one tick can start.", 10, 2000,
+			"The most flame, smoke and spark puffs the fires may start in one tick; the nearest fires go first.");
+		num("fireParticleDensity", "Fire density", Cost.HIGH, "Doubling it roughly doubles the flame particles.", 0.1, 4, 0.05,
+			"Multiplies how many particles flames are made of. Higher is thicker and smoother.");
+		num("fireParticleStep", "Fire particle spacing", Cost.HIGH, "Halving it makes eight times as many particles per puff.", 0.02, 0.4, 0.005,
+			"Spacing between the particles in each puff of flame, in blocks.");
+		num("fireFlameAmount", "Flame amount", Cost.HIGH, "More flame particles.", 0.1, 4, 0.05,
+			"How many particles each flame puff holds.");
+		num("fireFlameSize", "Flame particle size", Cost.NONE, LOOK, 0.02, 1, 0.005,
+			"Radius of each glowing flame particle, in blocks.");
+		num("fireFlameLife", "Flame lifetime", Cost.LOW, "Longer keeps more particles alive.", 0.1, 5, 0.05,
+			"Seconds a flame particle burns before it fades.");
+		num("fireFlameRise", "Flame rise", Cost.NONE, LOOK, 0, 20, 0.1,
+			"How hard flames lick upward.");
+		num("fireFlameBrightness", "Flame brightness", Cost.NONE, LOOK, 0, 6, 0.05,
+			"How brightly flames glow.");
+		num("fireFlameOpacity", "Flame opacity", Cost.NONE, LOOK, 0, 1, 0.01,
+			"How strongly each flame particle shows.");
+		num("fireSmokeAmount", "Smoke amount", Cost.MEDIUM, "More smoke puffs.", 0, 4, 0.05,
+			"How often fires puff smoke. 0 turns smoke off.");
+		num("fireSmokeSize", "Smoke particle size", Cost.NONE, LOOK, 0.02, 1, 0.005,
+			"Radius of each smoke particle when it starts, in blocks; it grows as it rises.");
+		num("fireSmokeLife", "Smoke lifetime", Cost.LOW, "Longer keeps more particles alive.", 0.5, 30, 0.5,
+			"Seconds smoke lasts before it has thinned away.");
+		num("fireSmokeRise", "Smoke rise", Cost.NONE, LOOK, 0, 10, 0.05,
+			"How hard hot smoke rises.");
+		num("fireSmokeOpacity", "Smoke opacity", Cost.NONE, LOOK, 0, 1, 0.01,
+			"How opaque each smoke particle is at its centre.");
+		num("fireSmokeDark", "Smoke dark shade", Cost.NONE, LOOK, 0, 1, 0.01,
+			"Brightness of the darkest smoke.");
+		num("fireSmokeLight", "Smoke light shade", Cost.NONE, LOOK, 0, 1, 0.01,
+			"Brightness of the lightest, oldest smoke.");
+		num("fireSparks", "Ember amount", Cost.LOW, "More ember puffs.", 0, 4, 0.05,
+			"How many glowing embers fires and realistic lava throw up. 0 turns embers off.");
+		num("fireSparkSize", "Ember size", Cost.NONE, LOOK, 0.005, 0.2, 0.0025,
+			"Radius of each glowing ember in blocks.");
+		num("fireSparkLife", "Ember lifetime", Cost.LOW, "Longer keeps more embers alive.", 0.5, 20, 0.25,
+			"Seconds a glowing ember drifts before it goes out.");
+		num("fireSparkBrightness", "Ember brightness", Cost.NONE, LOOK, 0, 8, 0.05,
+			"How brightly embers glow.");
+		toggle("fireEmbers", "Lava embers", Cost.LOW, "A little extra work per lava block.",
+			"Lets realistic lava throw sparks and smoke.");
+		toggle("fireSteam", "Fire steam", Cost.LOW, "Checks the blocks beside every fire.",
+			"Fires next to water, or standing in rain, give off steam.");
+		num("fireSpreadSpeed", "Spread speed", Cost.NONE, "Changes how fast the server lets fire catch, nothing to render.", 0, 5, 0.05,
+			"Multiplies how fast fire spreads to new blocks: 0 stops it spreading, 1 is normal, higher races through a forest. Only operators can change it, and it applies to everyone on the server.");
+		num("fireWind", "Wind", Cost.NONE, LOOK, 0, 5, 0.05,
+			"How strongly a slowly changing breeze, stronger in storms, pushes flames and smoke sideways.");
 
 		category("Slime");
 		integer("slimeResolution", "Resolution", Cost.EXTREME, "Same as water: doubling it is roughly 8x the cost.", 1, 16,
@@ -432,6 +523,76 @@ public final class WaterSettingsInfo {
 			"Overall brightness of the sand.");
 		toggle("sandSounds", "Sand sounds", Cost.LOW, "Plays a few sounds per second near moving sand.",
 			"Sliding and impact sounds from moving sand.");
+		toggle("grainViewCulling", "Grain view culling and detail levels", Cost.NONE, "Saves work: off is slower.",
+			"Sand, gravel and snow only draw the grains you can see, and grains too far away to cover a pixel are merged into fewer, bigger ones. Turn off only to compare.");
+
+		category("Realistic snow");
+		toggle("realisticSnow", "Realistic snow", Cost.MEDIUM, "One extra pass draws the snow near you; footprints are a small GPU step.",
+			"Turns vanilla snow layers and snow blocks into Realistic Snow (the host does this, a few chunks at a time), and snowfall builds up Realistic Snow. Switching it off turns snow nobody changed back into vanilla snow; snow that was changed stays realistic. Realistic Snow layers and snowballs work either way.");
+		integer("snowRadius", "Radius", Cost.MEDIUM, "Snow drawn grows with the square of it; far snow is drawn coarser.", 8, 256,
+			"How far around you, in blocks, snow is drawn as realistic snow. Snow beyond it looks vanilla.");
+		integer("snowDetail", "Detail", Cost.HIGH, "Doubling it is 4x the footprint grid and up to 4x the nearby triangles.", 2, 16,
+			"Height points per block near you. Higher gives sharper footprints and edges.");
+		integer("snowTrackRadius", "Footprint radius", Cost.MEDIUM, "The footprint grid grows with the square of it.", 4, 128,
+			"How far around you, in blocks, footprints and trails are kept. Tracks further away fade back to fresh snow.");
+		toggle("snowTracks", "Tracks", Cost.LOW, "One small GPU pass while something moves through snow.",
+			"Players, mobs, items, boats, minecarts and realistic blocks press tracks into the snow.");
+		toggle("snowFootprints", "Leg tracks", Cost.NONE, LOOK,
+			"Players and mobs press the snow with their legs, which swing like the model's: a leg leaves a track wherever it reaches into the snow. Off presses their whole body shape.");
+		integer("snowTrackEntities", "Track makers", Cost.LOW, "Each one is tested against every nearby snow point.", 1, 96,
+			"How many of the closest entities can leave tracks at the same time.");
+		num("snowFluff", "Fresh snow loft", Cost.NONE, LOOK, 0, 0.5, 0.005,
+			"How far fresh snow sits above where you actually stand, in blocks: how deep a footprint in fresh snow is.");
+		num("snowDrift", "Drifts", Cost.NONE, LOOK, 0, 0.3, 0.005,
+			"Height of the gentle waves and drifts on the snow, in blocks.");
+		num("snowCompress", "Packing", Cost.NONE, LOOK, 0, 1, 0.01,
+			"Share of the snow under a foot or body that is packed down instead of shoved aside. Moving fast shoves more, like a plow.");
+		num("snowRepose", "Steepest loose snow", Cost.NONE, LOOK, 5, 80, 0.5,
+			"Angle in degrees that shoved and thrown snow can pile up to before it slumps down. Packed snow and the snow blocks themselves hold their shape.");
+		toggle("snowSaveTracks", "Save moved snow", Cost.LOW, "Reads the footprint grid back twice a second.",
+			"Paths pressed down by a whole layer or more, and snow pushed or thrown into piles of a layer or more, change the Realistic Snow blocks, so they stay after reloading and other players see them. Trodden paths become packed: you walk on top at full speed. Only the host does this.");
+		num("snowEdgeRounding", "Edge rounding", Cost.NONE, LOOK, 0, 1, 0.01,
+			"How round the edge of a snow patch is where it ends on open ground, in blocks.");
+		num("snowRefill", "Track refill", Cost.LOW, "Keeps the footprint pass running while it snows.", 0, 0.5, 0.001,
+			"How fast falling snow fills tracks back in, in blocks per second.");
+		num("snowBrightness", "Brightness", Cost.NONE, LOOK, 0, 3, 0.01,
+			"Overall brightness of the snow.");
+		num("snowSparkle", "Sparkle", Cost.NONE, LOOK, 0, 8, 0.05,
+			"How strongly snow crystals facing the sun glint. 0 turns the glitter off.");
+		num("snowShadowTint", "Blue shadows", Cost.NONE, LOOK, 0, 1, 0.01,
+			"How blue snow looks where it is shaded.");
+		num("snowPackedTint", "Packed snow look", Cost.NONE, LOOK, 0, 1, 0.01,
+			"How much darker, bluer and smoother trodden snow looks.");
+		toggle("snowMelting", "Melting", Cost.LOW, "Checks the blocks around snow near you a few hundred at a time.",
+			"Snow melts next to lava, fire, magma and lit furnaces, under water and realistic water, and in bright block light. Melted snow lowers the snow blocks (the host does this).");
+		num("snowMeltHeat", "Melt speed near heat", Cost.NONE, LOOK, 0, 20, 0.05,
+			"Layers of snow next to lava or fire that melt per second. Magma and furnaces melt a third as fast.");
+		num("snowMeltLight", "Melt speed in light", Cost.NONE, LOOK, 0, 5, 0.005,
+			"Layers that melt per second at the melting light level; brighter light melts faster.");
+		integer("snowMeltLightLevel", "Melting light level", Cost.NONE, LOOK, 1, 16,
+			"Block light at which snow starts to melt. 12 is the vanilla rule; 16 means light never melts it.");
+		num("snowMeltWater", "Melt speed in water", Cost.NONE, LOOK, 0, 20, 0.05,
+			"Layers of snow under or next to water that melt per second.");
+		num("snowMeltWaterYield", "Meltwater", Cost.LOW, "Meltwater is realistic water and is simulated.", 0, 1, 0.01,
+			"Eighths of a block of realistic water each melted layer leaves (the host makes it). Snow melted by lava or fire turns to steam instead.");
+		toggle("snowDebugLog", "Debug log", Cost.NONE, LOOK,
+			"Writes realistic snow events (columns found, melting, snowballs, tracks) to the game log with a [snow] tag, for bug reports.");
+
+		category("Snowfall");
+		toggle("realisticSnowfall", "Realistic snowfall", Cost.LOW, "Draws every flake on the GPU; flakes are not simulated.",
+			"Replaces vanilla snowfall with single drifting flakes.");
+		integer("snowfallRadius", "Flake radius", Cost.MEDIUM, "The number of flakes grows with the square of it.", 4, 256,
+			"How far around you, in blocks, flakes are drawn.");
+		num("snowfallDensity", "Flake density", Cost.MEDIUM, "More flakes to draw.", 0, 4, 0.01,
+			"Flakes per cubic block of air in full snowfall.");
+		num("snowfallSpeed", "Fall speed", Cost.NONE, LOOK, 0.1, 10, 0.05,
+			"How fast flakes fall, in blocks per second.");
+		num("snowfallFlakeSize", "Flake size", Cost.NONE, LOOK, 0.005, 0.2, 0.001,
+			"Radius of a flake, in blocks.");
+		num("snowfallOpacity", "Flake opacity", Cost.NONE, LOOK, 0, 1, 0.01,
+			"How solid flakes look.");
+		num("snowfallWind", "Wind", Cost.NONE, LOOK, 0, 8, 0.05,
+			"How fast flakes drift sideways; thunderstorms push harder.");
 
 		category("Leaves");
 		integer("leafResolution", "Resolution", Cost.MEDIUM, "Cells per block for stacking; more cells means a finer pile shape but a bigger grid.", 2, 16,
@@ -834,6 +995,12 @@ public final class WaterSettingsInfo {
 			"Degrees a lit furnace, smoker or blast furnace heats the water touching it toward.");
 		num("furnaceHeatTime", "Furnace heating time", Cost.NONE, LOOK, 1, 1200, 1,
 			"Seconds for water touching a lit furnace to get most of the way to its temperature.");
+		num("hotPlateWaterTemperature", "Hot plate heats water to", Cost.NONE, LOOK, 0, 250, 1,
+			"Degrees a powered hot plate heats the water touching it toward. Above 100 it boils, and the higher it is the faster.");
+		num("hotPlateHeatTime", "Hot plate heating time", Cost.NONE, LOOK, 1, 600, 1,
+			"Seconds for water touching a powered hot plate to get most of the way to its temperature.");
+		num("hotPlateHeatReach", "Hot plate heat reach", Cost.NONE, LOOK, 0, 8, 0.5,
+			"How many blocks up a powered hot plate heats the water above it, fading with height, like magma. Longer reach heats a deeper pool, so the whole body can roll at the boil.");
 		num("boilChurn", "Boiling churn", Cost.NONE, LOOK, 0, 40, 0.5,
 			"How hard boiling stirs the water at the hot spot, in blocks per second squared.");
 		num("boilSteam", "Boiling steam", Cost.MEDIUM, "More steam means more steam points.", 0, 5, 0.05,

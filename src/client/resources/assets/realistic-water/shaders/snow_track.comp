@@ -1,0 +1,159 @@
+#version 450
+
+#define SNOW_PARAMS_BINDING 0
+#define SNOW_COLUMNS_BINDING 1
+#define SNOW_DETAIL_BINDING 2
+#define SNOW_DETAIL_ACCESS
+#include "common.glsl"
+#include "snow_common.glsl"
+layout(std430, binding = 3) buffer Deposit { int deposit[]; };
+layout(std430, binding = 4) writeonly buffer Rest { float restHeight[]; };
+layout(std430, binding = 5) buffer Spray { uint sprayCursor; uint sprayPad0; uint sprayPad1; uint sprayPad2; SnowSpray spray[]; };
+layout(local_size_x = 256) in;
+
+float roundBox(vec2 p, vec2 h, float r) {
+    vec2 q = abs(p) - h + r;
+    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+}
+
+void addDeposit(vec2 xz, float amount) {
+    if (amount <= 0.0) {
+        return;
+    }
+    vec2 f = xz * float(SP.grid.w) - 0.5;
+    vec2 cell = floor(f);
+    vec2 t = f - cell;
+    ivec2 base = ivec2(cell) + snowOrigin() * SP.grid.w;
+    for (int k = 0; k < 4; k++) {
+        float w = ((k & 1) != 0 ? t.x : 1.0 - t.x) * ((k >> 1) != 0 ? t.y : 1.0 - t.y);
+        int j;
+        if (w > 0.0 && snowPointSlot(base + ivec2(k & 1, k >> 1), j)) {
+            atomicAdd(deposit[j], int(amount * w * SNOW_DEP_FP));
+        }
+    }
+}
+
+float columnExit(vec2 p, vec2 dir, vec2 lo) {
+    vec2 tx = vec2(dir.x > 1e-5 ? (lo.x + 1.0 - p.x) / dir.x : dir.x < -1e-5 ? (lo.x - p.x) / dir.x : 1e9,
+        dir.y > 1e-5 ? (lo.y + 1.0 - p.y) / dir.y : dir.y < -1e-5 ? (lo.y - p.y) / dir.y : 1e9);
+    return max(min(tx.x, tx.y), 0.0);
+}
+
+void main() {
+    int n = SP.track.x;
+    int i = int(gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * gl_NumWorkGroups.x * 256u);
+    if (n <= 0 || i >= n * n) {
+        return;
+    }
+    int q = SP.grid.w;
+    ivec2 idx = ivec2(i % n, i / n);
+    ivec2 lo = SP.track.yz;
+    ivec2 world = lo + ivec2(snowMod(idx.x - lo.x, n), snowMod(idx.y - lo.y, n));
+    uint raw = detail[i];
+    if (SP.trackOld.z == 0 || any(lessThan(world, SP.trackOld.xy)) || any(greaterThanEqual(world, SP.trackOld.xy + n))) {
+        raw = 0u;
+    }
+    vec2 v = unpackHalf2x16(raw);
+    float d = v.x;
+    float pack = v.y;
+    vec2 xz = (vec2(world - snowOrigin() * q) + 0.5) / float(q);
+    ivec2 column = ivec2(snowFloorDiv(world.x, q), snowFloorDiv(world.y, q));
+    SnowShape shape = snowColumnLoad(column);
+    SnowSurface rest = snowColumnEval(shape, xz, 0.0);
+    if (rest.edge < 0.5) {
+        detail[i] = 0u;
+        restHeight[i] = -1.0e9;
+        return;
+    }
+    for (int k = 0; k < SP.extra.x && k < SNOW_MAX_ADJUST; k++) {
+        if (SP.adjust[k].xy == column) {
+            d -= intBitsToFloat(SP.adjust[k].z);
+        }
+    }
+    restHeight[i] = rest.y;
+    float refill = SP.track2.y;
+    if (refill > 0.0) {
+        d = d < 0.0 ? min(0.0, d + refill) : max(0.0, d - refill);
+        pack = max(0.0, pack - refill * 3.0);
+    }
+    float s = rest.y + d;
+    uint seed = hash(uint(i) * 747796405u + uint(SP.extra.z));
+    float compress = SP.motion.w;
+    bool narrowX = (shape.open & 3) == 3;
+    bool narrowZ = (shape.open & 12) == 12;
+    bool narrow = narrowX || narrowZ;
+    vec2 centre = shape.lo + 0.5;
+    vec2 at = vec2(narrowX ? centre.x : xz.x, narrowZ ? centre.y : xz.y);
+    float reachBonus = narrow ? 0.3 : 0.0;
+    for (int k = 0; k < SP.track.w && k < SNOW_MAX_SHAPES; k++) {
+        vec4 a = SP.shapes[k * 3];
+        vec4 b = SP.shapes[k * 3 + 1];
+        vec4 c = SP.shapes[k * 3 + 2];
+        float dist;
+        float shapeBottom;
+        vec2 outward;
+        bool leg = c.x > 1.5;
+        if (leg) {
+            vec2 seg = a.zw - a.xy;
+            float len2 = dot(seg, seg);
+            float t = len2 > 1e-8 ? clamp(dot(at - a.xy, seg) / len2, 0.0, 1.0) : 1.0;
+            vec2 closest = a.xy + seg * t;
+            float across = length(at - closest);
+            dist = across - b.x;
+            shapeBottom = mix(b.y, b.z, t) - sqrt(max(b.x * b.x - across * across, 0.0));
+            outward = across > 1e-4 ? (at - closest) / across : vec2(0.0);
+        } else {
+            vec2 rel = at - a.xy;
+            vec2 fwd = a.zw;
+            vec2 side = vec2(fwd.y, -fwd.x);
+            vec2 lp = vec2(dot(rel, side), dot(rel, fwd));
+            dist = roundBox(lp, b.xy, b.z);
+            shapeBottom = b.w;
+            vec2 ex = abs(lp) / max(b.xy, vec2(1e-3));
+            outward = ex.x > ex.y ? side * sign(lp.x) : fwd * sign(lp.y);
+        }
+        float bottom = max(shapeBottom, rest.firm);
+        float target;
+        if (narrow) {
+            if (dist >= reachBonus) {
+                continue;
+            }
+            target = rest.y - max(shape.refTop - bottom, 0.0);
+            vec2 off = xz - centre;
+            outward = dot(off, off) > 1e-8 ? normalize(off) : outward;
+        } else {
+            target = bottom + max(dist, 0.0) * 1.5;
+        }
+        if (s <= target) {
+            continue;
+        }
+        float moved = s - target;
+        float depth = max(rest.y - rest.firm, 0.04);
+        pack = max(pack, clamp((rest.y - target) / depth, dist > 0.0 ? 0.0 : 0.35, 1.0));
+        s = target;
+        vec2 velocity = c.zw;
+        float speed = length(velocity);
+        float impact = clamp((c.y - 4.0) / 10.0, 0.0, 1.0);
+        float shove = (1.0 - compress) * (1.0 + clamp(speed / 5.0, 0.0, 1.0) + 1.5 * impact) * (1.0 - 0.8 * v.y);
+        float pushed = moved * clamp(shove, 0.0, 0.9);
+        vec2 dir = speed > 0.3 ? outward * (0.45 + 0.4 * impact) + velocity / speed * (0.55 - 0.4 * impact) : outward;
+        if (dot(dir, dir) < 1e-6) {
+            dir = vec2(rand(seed) - 0.5, rand(seed) - 0.5) + vec2(1e-3, 0.0);
+        }
+        dir = normalize(dir);
+        float kickChance = max(leg && speed > 2.5 ? 0.08 : 0.0, 0.5 * impact);
+        if (kickChance > 0.0 && SP.extra.w > 0 && rand(seed) < kickChance) {
+            float kicked = pushed * 0.3;
+            pushed -= kicked;
+            uint slot = atomicAdd(sprayCursor, 1u) % uint(SP.extra.w);
+            vec3 up = vec3(velocity.x * 0.45, (1.6 + 1.6 * rand(seed)) * (1.0 + 0.6 * impact), velocity.y * 0.45)
+                + vec3(rand(seed) - 0.5, 0.0, rand(seed) - 0.5) * 1.2 + vec3(dir.x, 0.0, dir.y) * (2.5 * impact);
+            spray[slot].pos = vec4(localToSpray(vec3(xz.x, s + 0.03, xz.y)), kicked);
+            spray[slot].vel = vec4(up, 0.0);
+        }
+        float away = narrow ? columnExit(xz, dir, shape.lo) + 0.06 : max(-dist, 0.0) + max(moved / 1.5 - max(dist, 0.0), 0.0) + 0.06 + 1.0 / float(q);
+        addDeposit(xz + dir * away, pushed);
+    }
+    d = clamp(s - rest.y, -8.0, 1.0);
+    detail[i] = packHalf2x16(vec2(d, pack));
+}

@@ -11,6 +11,9 @@ struct Emitter {
 
 layout(std430, binding = 1) readonly buffer Emitters { Emitter em[]; };
 layout(std430, binding = 2) writeonly buffer Dst { Particle dst[]; };
+layout(std430, binding = 5) writeonly buffer DstHi { Particle dstHi[]; };
+#define DST_AT(i) (uint(i) < SPLIT_PART ? dst[uint(i)] : dstHi[uint(i) - SPLIT_PART])
+#define DST_SET(i, v) { uint s_dst = uint(i); if (s_dst < SPLIT_PART) { dst[s_dst] = (v); } else { dstHi[s_dst - SPLIT_PART] = (v); } }
 layout(std430, binding = 3) buffer Counters { uint counters[]; };
 layout(std430, binding = 4) readonly buffer Static { uint staticSolid[]; };
 layout(push_constant) uniform PC { ivec4 a; ivec4 b; } pc;
@@ -55,9 +58,9 @@ void main() {
         }
         tag = float(bits);
     } else if (isSteam()) {
-        tag = rand(seed);
+        tag = rand(seed) + floor(e.vel.w) * 0.5;
     } else if (isWater()) {
         tag = e.vel.w != 0.0 ? e.vel.w : G.heatA.y;
     }
-    dst[o] = Particle(vec4(p, 0.0), vec4(e.vel.xyz, tag));
+    DST_SET(o, Particle(vec4(p, 0.0), vec4(e.vel.xyz, tag)));
 }

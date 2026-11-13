@@ -4,7 +4,15 @@
 #include "mpm.glsl"
 #endif
 layout(local_size_x = 256) in;
+#ifdef MPM
+#define PARTS_HI_BINDING 4
+#else
+#define PARTS_HI_BINDING 3
+#endif
 layout(std430, binding = 1) buffer Parts { Particle parts[]; };
+layout(std430, binding = PARTS_HI_BINDING) buffer PartsHi { Particle partsHi[]; };
+#define PARTS_AT(i) (uint(i) < SPLIT_PART ? parts[uint(i)] : partsHi[uint(i) - SPLIT_PART])
+#define PARTS_DO(i, member, op, v) { uint s_parts = uint(i); if (s_parts < SPLIT_PART) { parts[s_parts]member op (v); } else { partsHi[s_parts - SPLIT_PART]member op (v); } }
 layout(std430, binding = 2) readonly buffer Counters { uint counters[]; };
 #ifdef MPM
 layout(std430, binding = 3) buffer State { float state[]; };
@@ -16,7 +24,7 @@ void main() {
     if (i >= counters[pc.a.x]) {
         return;
     }
-    Particle p = parts[i];
+    Particle p = PARTS_AT(i);
     if (p.pos.w < 0.0) {
         return;
     }
@@ -30,7 +38,7 @@ void main() {
     dir = normalize(dir + randInSphere(seed) * pc.c.z + vec3(0.0, pc.c.y, 0.0));
     float falloff = 1.0 - dist / pc.b.w;
     float kick = pc.c.x * falloff * mix(0.7, 1.0, rand(seed));
-    parts[i].vel.xyz = p.vel.xyz + dir * kick;
+    PARTS_DO(i, .vel.xyz, =, p.vel.xyz + dir * kick);
 #ifdef MPM
     if (p.pos.w >= 0.5) {
         state[int(i) * STATE_STRIDE + STATE_REST] = 0.0;

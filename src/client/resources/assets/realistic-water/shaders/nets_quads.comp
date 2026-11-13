@@ -2,13 +2,17 @@
 #include "common.glsl"
 layout(local_size_x = 256) in;
 layout(std430, binding = 1) readonly buffer Dens { float dens[]; };
+layout(std430, binding = 5) readonly buffer DensHi { float densHi[]; };
+#define DENS_AT(i) (uint(i) < SPLIT_FINE ? dens[uint(i)] : densHi[uint(i) - SPLIT_FINE])
 layout(std430, binding = 2) readonly buffer VertexId { uint vertexId[]; };
+layout(std430, binding = 6) readonly buffer VertexIdHi { uint vertexIdHi[]; };
+#define VERTEXID_AT(i) (uint(i) < SPLIT_VERTEX ? vertexId[uint(i)] : vertexIdHi[uint(i) - SPLIT_VERTEX])
 layout(std430, binding = 3) writeonly buffer Quads { uvec4 quads[]; };
 layout(std430, binding = 4) buffer MeshCounters { uint meshCounters[]; };
 layout(push_constant) uniform PC { ivec4 a; ivec4 b; } pc;
 
 float densAt(ivec3 p) {
-    return inFine(p) ? dens[fineIndex(p)] : 0.0;
+    return inFine(p) ? DENS_AT(fineIndex(p)) : 0.0;
 }
 
 uint cubeVertex(ivec3 c, ivec3 dim) {
@@ -16,7 +20,7 @@ uint cubeVertex(ivec3 c, ivec3 dim) {
         return 0xFFFFFFFFu;
     }
     ivec3 q = c + 1;
-    return vertexId[q.x + dim.x * (q.y + dim.y * q.z)];
+    return VERTEXID_AT(q.x + dim.x * (q.y + dim.y * q.z));
 }
 
 void main() {

@@ -1,6 +1,8 @@
 #version 450
 #include "common.glsl"
 layout(std430, binding = 1) readonly buffer Parts { Particle parts[]; };
+layout(std430, binding = 5) readonly buffer PartsHi { Particle partsHi[]; };
+#define PARTS_AT(i) (uint(i) < SPLIT_PART ? parts[uint(i)] : partsHi[uint(i) - SPLIT_PART])
 #ifdef DROPLETS
 layout(std430, binding = 2) readonly buffer Ids { uint ids[]; };
 #endif
@@ -16,9 +18,9 @@ const vec2 CORNERS[6] = vec2[](vec2(-1, -1), vec2(1, -1), vec2(1, 1), vec2(-1, -
 
 void main() {
 #ifdef DROPLETS
-    Particle p = parts[ids[gl_InstanceIndex]];
+    Particle p = PARTS_AT(ids[gl_InstanceIndex]);
 #else
-    Particle p = parts[uint(gl_InstanceIndex)];
+    Particle p = PARTS_AT(uint(gl_InstanceIndex));
 #endif
     vec3 rel = G.domainOrigin.xyz + p.pos.xyz * G.domainOrigin.w;
     vec3 center = (G.view * vec4(rel, 1.0)).xyz;

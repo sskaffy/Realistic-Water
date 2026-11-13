@@ -106,7 +106,7 @@ public final class ShaderCompat {
 	}
 
 	private static void rain(@Nullable FrameTarget target) {
-		if (target != null && WaterSettings.realisticRain) {
+		if (target != null && (WaterSettings.realisticRain || WaterSettings.realisticSnowfall)) {
 			outsidePasses(() -> WaterWorld.get().renderRain(target));
 		}
 	}

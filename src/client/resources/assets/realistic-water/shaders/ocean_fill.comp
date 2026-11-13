@@ -2,6 +2,9 @@
 #include "common.glsl"
 layout(local_size_x = 64) in;
 layout(std430, binding = 1) writeonly buffer Dst { Particle dst[]; };
+layout(std430, binding = 6) writeonly buffer DstHi { Particle dstHi[]; };
+#define DST_AT(i) (uint(i) < SPLIT_PART ? dst[uint(i)] : dstHi[uint(i) - SPLIT_PART])
+#define DST_SET(i, v) { uint s_dst = uint(i); if (s_dst < SPLIT_PART) { dst[s_dst] = (v); } else { dstHi[s_dst - SPLIT_PART] = (v); } }
 layout(std430, binding = 2) buffer Counters { uint counters[]; };
 layout(std430, binding = 3) readonly buffer Count { int cellCount[]; };
 layout(std430, binding = 4) readonly buffer Static { uint staticSolid[]; };
@@ -49,6 +52,6 @@ void main() {
             return;
         }
         vec3 p = vec3(float(c.x) + rand(seed), float(c.y) + rand(seed) * frac, float(c.z) + rand(seed));
-        dst[o] = Particle(vec4(p, 0.0), vec4(velocity, G.heatA.y));
+        DST_SET(o, Particle(vec4(p, 0.0), vec4(velocity, G.heatA.y)));
     }
 }

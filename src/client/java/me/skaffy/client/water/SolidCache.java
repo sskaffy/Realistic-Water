@@ -117,7 +117,7 @@ final class SolidCache {
 
 	private void voxelizeBlock(ClientLevel level, BlockPos pos, BlockState state, Section s, int i) {
 		s.partial[i] = null;
-		boolean skip = state.isAir() || (this.ignoreSand && state.getBlock() instanceof RealisticSandBlock)
+		boolean skip = state.isAir() || (this.ignoreSand && state.getBlock() instanceof me.skaffy.block.LooseLayerBlock)
 			|| (this.ignoreIce && me.skaffy.block.RealisticWaterBlock.isFrozen(state));
 		VoxelShape shape = skip ? null : state.getCollisionShape(level, pos);
 		if (shape == null || shape.isEmpty()) {

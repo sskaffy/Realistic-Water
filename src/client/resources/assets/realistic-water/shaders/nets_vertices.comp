@@ -2,14 +2,19 @@
 #include "common.glsl"
 layout(local_size_x = 256) in;
 layout(std430, binding = 1) readonly buffer Dens { float dens[]; };
+layout(std430, binding = 6) readonly buffer DensHi { float densHi[]; };
+#define DENS_AT(i) (uint(i) < SPLIT_FINE ? dens[uint(i)] : densHi[uint(i) - SPLIT_FINE])
 layout(std430, binding = 2) writeonly buffer VertexId { uint vertexId[]; };
+layout(std430, binding = 7) writeonly buffer VertexIdHi { uint vertexIdHi[]; };
+#define VERTEXID_AT(i) (uint(i) < SPLIT_VERTEX ? vertexId[uint(i)] : vertexIdHi[uint(i) - SPLIT_VERTEX])
+#define VERTEXID_SET(i, v) { uint s_vertexId = uint(i); if (s_vertexId < SPLIT_VERTEX) { vertexId[s_vertexId] = (v); } else { vertexIdHi[s_vertexId - SPLIT_VERTEX] = (v); } }
 layout(std430, binding = 3) writeonly buffer Verts { vec4 verts[]; };
 layout(std430, binding = 4) buffer MeshCounters { uint meshCounters[]; };
 layout(std430, binding = 5) readonly buffer Static { uint staticSolid[]; };
 layout(push_constant) uniform PC { ivec4 a; ivec4 b; } pc;
 
 float densAt(ivec3 p) {
-    return inFine(p) ? dens[fineIndex(p)] : 0.0;
+    return inFine(p) ? DENS_AT(fineIndex(p)) : 0.0;
 }
 
 float densTri(vec3 p) {
@@ -57,7 +62,7 @@ void main() {
         }
     }
     if (mask == 0u || mask == 255u) {
-        vertexId[id] = 0xFFFFFFFFu;
+        VERTEXID_SET(id, 0xFFFFFFFFu);
         return;
     }
     vec3 sum = vec3(0.0);
@@ -90,10 +95,10 @@ void main() {
 
     uint vi = atomicAdd(meshCounters[0], 1u);
     if (vi >= uint(pc.a.x)) {
-        vertexId[id] = 0xFFFFFFFFu;
+        VERTEXID_SET(id, 0xFFFFFFFFu);
         return;
     }
     vec3 simPos = (vec3(c) + local + 0.5) / float(G.fine.w);
     verts[vi] = vec4(simPos, uintBitsToFloat(packNormal(normal, solidNear(simPos))));
-    vertexId[id] = vi;
+    VERTEXID_SET(id, vi);
 }

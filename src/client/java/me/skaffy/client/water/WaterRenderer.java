@@ -57,14 +57,14 @@ public final class WaterRenderer implements AutoCloseable {
 			GraphicsProgram.Blend.ADD);
 		Map<String, String> droplets = Map.of("DROPLETS", "1", "VIEW_BINDING", "3");
 		this.meshFront = new GraphicsProgram("mesh.vert", "mesh_front.frag", Map.of(), front, U, S, S, S, S, T, S, S);
-		this.dropletFront = new GraphicsProgram("particle.vert", "droplet_front.frag", droplets, front, U, S, S, S, S);
+		this.dropletFront = new GraphicsProgram("particle.vert", "droplet_front.frag", droplets, front, U, S, S, S, S, S);
 		this.meshThickness = new GraphicsProgram("mesh.vert", "mesh_thickness.frag", Map.of(), add, U, S, S, S, T);
-		this.dropletThickness = new GraphicsProgram("particle.vert", "droplet_thickness.frag", droplets, add, U, S, S, S, T);
+		this.dropletThickness = new GraphicsProgram("particle.vert", "droplet_thickness.frag", droplets, add, U, S, S, S, T, S);
 		this.whitewaterProgram = new GraphicsProgram("particle.vert", "whitewater.frag", Map.of("VIEW_BINDING", "4"),
 			new GraphicsProgram.State(VkTex.RGBA16F, VK10.VK_FORMAT_UNDEFINED, false, false, VK10.VK_COMPARE_OP_ALWAYS, GraphicsProgram.Blend.ADD,
 				VkTex.RGBA16F),
-			U, S, T, T, S);
-		this.dropletCull = new ComputeProgram("droplet_cull.comp", U, S, S, S, S, S, S);
+			U, S, T, T, S, S);
+		this.dropletCull = new ComputeProgram("droplet_cull.comp", U, S, S, S, S, S, S, S, S);
 	}
 
 	private GraphicsProgram composite(int colorFormat, boolean layer) {
@@ -144,8 +144,8 @@ public final class WaterRenderer implements AutoCloseable {
 		Vk.barrier(cb);
 		for (Body body : bodies) {
 			WaterRegion r = body.region();
-			this.dropletCull.bind(cb, body.ubo(), Desc.ssbo(r.currentParticles()), Desc.ssbo(r.mesher.densA), view, Desc.ssbo(r.args), Desc.ssbo(r.counters),
-				Desc.ssbo(r.dropletIds));
+			this.dropletCull.bind(cb, body.ubo(), r.currentParticles().part0(), r.mesher.densA.part0(), view, Desc.ssbo(r.args), Desc.ssbo(r.counters),
+				Desc.ssbo(r.dropletIds), r.mesher.densA.part1(), r.currentParticles().part1());
 			this.dropletCull.push(cb, WaterRegion.C_FLUID + r.cur);
 			this.dropletCull.dispatchIndirect(cb, r.args, WaterRegion.ARGS_FLUID_DISPATCH);
 		}
@@ -167,7 +167,7 @@ public final class WaterRenderer implements AutoCloseable {
 					Desc.ssbo(r.cellHeat != null ? r.cellHeat : r.cellCount), Desc.ssbo(r.cellCount));
 				this.meshFront.drawIndirect(cb, r.mesher.meshCounters, SurfaceMesher.DRAW_ARGS_OFFSET);
 			}
-			this.dropletFront.bind(cb, body.ubo(), Desc.ssbo(r.currentParticles()), Desc.ssbo(r.dropletIds), view, Desc.ssbo(r.light()));
+			this.dropletFront.bind(cb, body.ubo(), r.currentParticles().part0(), Desc.ssbo(r.dropletIds), view, Desc.ssbo(r.light()), r.currentParticles().part1());
 			this.dropletFront.push(cb, Program.f(radius), Program.f(0.0F), Program.f(0.15F));
 			this.dropletFront.drawIndirect(cb, r.args, WaterRegion.ARGS_DROPLET_DRAW);
 		}
@@ -184,7 +184,7 @@ public final class WaterRenderer implements AutoCloseable {
 				this.meshThickness.bind(cb, body.ubo(), Desc.ssbo(r.mesher.verts), Desc.ssbo(r.mesher.quads), view, depthTex);
 				this.meshThickness.drawIndirect(cb, r.mesher.meshCounters, SurfaceMesher.DRAW_ARGS_OFFSET);
 			}
-			this.dropletThickness.bind(cb, body.ubo(), Desc.ssbo(r.currentParticles()), Desc.ssbo(r.dropletIds), view, depthTex);
+			this.dropletThickness.bind(cb, body.ubo(), r.currentParticles().part0(), Desc.ssbo(r.dropletIds), view, depthTex, r.currentParticles().part1());
 			this.dropletThickness.push(cb, Program.f(radius), Program.f(0.0F), Program.f(0.15F));
 			this.dropletThickness.drawIndirect(cb, r.args, WaterRegion.ARGS_DROPLET_DRAW);
 		}
@@ -200,7 +200,8 @@ public final class WaterRenderer implements AutoCloseable {
 			if (!r.whitewaterOn() || r.ocean != null && PackFoam.active()) {
 				continue;
 			}
-			this.whitewaterProgram.bind(cb, body.ubo(), Desc.ssbo(r.currentWhitewater()), depthTex, Desc.tex(this.gbuffer, this.nearest.handle), view);
+			this.whitewaterProgram.bind(cb, body.ubo(), r.currentWhitewater().part0(), depthTex, Desc.tex(this.gbuffer, this.nearest.handle), view,
+				r.currentWhitewater().part1());
 			this.whitewaterProgram.push(cb, Program.f(WaterSettings.wwRadius), Program.f(0.5F), Program.f(0.3F), Program.f(WaterSettings.wwMaxPixels),
 				Program.f(WaterSettings.foamSize));
 			this.whitewaterProgram.drawIndirect(cb, r.args, WaterRegion.ARGS_WW_DRAW);

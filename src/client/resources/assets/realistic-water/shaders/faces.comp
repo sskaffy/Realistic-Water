@@ -2,6 +2,8 @@
 #include "common.glsl"
 layout(local_size_x = 256) in;
 layout(std430, binding = 1) readonly buffer Accum { int accum[]; };
+layout(std430, binding = 6) readonly buffer AccumHi { int accumHi[]; };
+#define ACCUM_AT(i) (uint(i) < SPLIT_ACCUM ? accum[uint(i)] : accumHi[uint(i) - SPLIT_ACCUM])
 layout(std430, binding = 2) writeonly buffer Vel { float vel[]; };
 layout(std430, binding = 3) writeonly buffer VelOld { float velOld[]; };
 layout(std430, binding = 4) writeonly buffer Valid { uint valid[]; };
@@ -19,8 +21,8 @@ void main() {
     }
     int i = faceIndex(comp, f);
 
-    int m = accum[2 * i];
-    int w = accum[2 * i + 1];
+    int m = ACCUM_AT(2 * i);
+    int w = ACCUM_AT(2 * i + 1);
     float u = w > 0 ? float(m) / float(w) : 0.0;
     velOld[i] = u;
     u += G.gravityDt[comp] * DT;

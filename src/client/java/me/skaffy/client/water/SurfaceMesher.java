@@ -6,6 +6,7 @@ import me.skaffy.client.vk.ComputeProgram;
 import me.skaffy.client.vk.Desc;
 import me.skaffy.client.vk.Program;
 import me.skaffy.client.vk.Vk;
+import me.skaffy.client.vk.SplitBuf;
 import me.skaffy.client.vk.VkBuf;
 import me.skaffy.client.vk.VkOutOfMemory;
 import org.jspecify.annotations.Nullable;
@@ -25,11 +26,11 @@ final class SurfaceMesher implements AutoCloseable {
 	final int vertexCapacity;
 	final int quadCapacity;
 
-	private final VkBuf accum;
-	final VkBuf densA;
-	private final VkBuf densB;
+	private final SplitBuf accum;
+	final SplitBuf densA;
+	private final SplitBuf densB;
 	private @Nullable VkBuf zb;
-	private final VkBuf vertexId;
+	private final SplitBuf vertexId;
 	final VkBuf verts;
 	final VkBuf quads;
 	final VkBuf meshCounters;
@@ -39,7 +40,7 @@ final class SurfaceMesher implements AutoCloseable {
 	private final VkBuf start;
 	private final VkBuf cursor;
 	private final VkBuf scanSums;
-	private @Nullable VkBuf sorted;
+	private @Nullable SplitBuf sorted;
 	private final VkBuf blockMask;
 	private final VkBuf nearMask;
 	private boolean maskValid;
@@ -66,7 +67,7 @@ final class SurfaceMesher implements AutoCloseable {
 		this.subdivision = subdivision;
 		long fine = (long) nx * subdivision * ny * subdivision * nz * subdivision;
 		if (fine > Integer.MAX_VALUE - 1_000_000L) {
-			throw new VkOutOfMemory("surface grid of " + fine + " voxels is too large");
+			throw new VkOutOfMemory("surface grid of " + fine + " voxels is too large", true);
 		}
 		this.fx = nx * subdivision;
 		this.fy = ny * subdivision;
@@ -76,20 +77,21 @@ final class SurfaceMesher implements AutoCloseable {
 		this.vertexCapacity = Math.clamp(this.fineCount / 6, 200_000, 3_000_000);
 		this.quadCapacity = this.vertexCapacity + this.vertexCapacity / 4;
 
-		this.accum = VkBuf.device(this.fineCount * 4L, 0);
-		this.densA = VkBuf.device(this.fineCount * 4L, 0);
-		this.densB = VkBuf.device(this.fineCount * 4L, 0);
-		this.vertexId = VkBuf.device(this.cubeCount * 4L, 0);
+		this.accum = SplitBuf.device(this.fineCount, 4);
+		this.densA = SplitBuf.device(this.fineCount, 4);
+		this.densB = SplitBuf.device(this.fineCount, 4);
+		this.vertexId = SplitBuf.device(this.cubeCount, 4);
 		this.verts = VkBuf.device(this.vertexCapacity * 16L, 0);
 		this.quads = VkBuf.device(this.quadCapacity * 16L, 0);
 		this.meshCounters = VkBuf.device(64, VkBuf.INDIRECT);
 		long cells = (long) nx * ny * nz;
-		this.occupancy = VkBuf.device(cells * 4L, 0);
+		long keys = sortKeys(nx, ny, nz);
+		this.occupancy = VkBuf.device(keys * 4L, 0);
 		this.depthA = VkBuf.device(cells * 4L, 0);
 		this.depthB = VkBuf.device(cells * 4L, 0);
-		this.start = VkBuf.device(cells * 4L, 0);
-		this.cursor = VkBuf.device(cells * 4L, 0);
-		this.scanSums = VkBuf.device((cells / (SCAN_BLOCK - 1) + 16) * 4L, 0);
+		this.start = VkBuf.device(keys * 4L, 0);
+		this.cursor = VkBuf.device(keys * 4L, 0);
+		this.scanSums = VkBuf.device((keys / (SCAN_BLOCK - 1) + 16) * 4L, 0);
 		long blocks = (long) Math.ceilDiv(this.fx, 8) * Math.ceilDiv(this.fy, 8) * Math.ceilDiv(this.fz, 4);
 		this.blockMask = VkBuf.device(blocks * 4L, 0);
 		this.nearMask = VkBuf.device(blocks * 4L, 0);
@@ -99,21 +101,21 @@ final class SurfaceMesher implements AutoCloseable {
 			int S = Desc.SSBO;
 			shared = new ComputeProgram[]{
 				new ComputeProgram("fine_clear.comp", U, S, S),
-				new ComputeProgram("blur.comp", U, S, S, S, S),
-				new ComputeProgram("nets_vertices.comp", U, S, S, S, S, S),
-				new ComputeProgram("nets_quads.comp", U, S, S, S, S),
+				new ComputeProgram("blur.comp", U, S, S, S, S, S, S, S),
+				new ComputeProgram("nets_vertices.comp", U, S, S, S, S, S, S, S),
+				new ComputeProgram("nets_quads.comp", U, S, S, S, S, S, S),
 				new ComputeProgram("mesh_args.comp", U, S),
-				new ComputeProgram("sheet_fill.comp", U, S, S, S),
-				new ComputeProgram("zb_splat.comp", U, S, S, S, S),
-				new ComputeProgram("zb_field.comp", U, S, S, S),
-				new ComputeProgram("mesh_occupancy.comp", U, S, S, S),
+				new ComputeProgram("sheet_fill.comp", U, S, S, S, S, S, S),
+				new ComputeProgram("zb_splat.comp", U, S, S, S, S, S),
+				new ComputeProgram("zb_field.comp", U, S, S, S, S),
+				new ComputeProgram("mesh_occupancy.comp", U, S, S, S, S),
 				new ComputeProgram("mesh_depth.comp", U, S, S),
 				new ComputeProgram("scan_local.comp", S, S),
 				new ComputeProgram("scan_add.comp", S, S),
-				new ComputeProgram("mesh_bin.comp", U, S, S, S, S),
-				new ComputeProgram("zb_gather.comp", U, S, S, S, S, S, S),
+				new ComputeProgram("mesh_bin.comp", U, S, S, S, S, S, S),
+				new ComputeProgram("zb_gather.comp", U, S, S, S, S, S, S, S, S),
 				new ComputeProgram("mesh_bin_total.comp", U, S, S, S),
-				new ComputeProgram("wall_fill.comp", U, S, S, S, S),
+				new ComputeProgram("wall_fill.comp", U, S, S, S, S, S, S),
 				new ComputeProgram("mesh_block_dilate.comp", S, S)
 			};
 		}
@@ -159,33 +161,39 @@ final class SurfaceMesher implements AutoCloseable {
 		return Math.max(0, fineBox[3] - fineBox[0]) * Math.max(0, fineBox[4] - fineBox[1]) * Math.max(0, fineBox[5] - fineBox[2]);
 	}
 
+	static long sortKeys(int dx, int dy, int dz) {
+		return (long) Math.ceilDiv(dx, 4) * Math.ceilDiv(dy, 4) * Math.ceilDiv(dz, 4) * 64L;
+	}
+
 	static int cubes(int[] fineBox) {
 		return (fineBox[3] - fineBox[0] + 1) * (fineBox[4] - fineBox[1] + 1) * (fineBox[5] - fineBox[2] + 1);
 	}
 
-	void build(VkCommandBuffer cb, Desc ubo, VkBuf particles, VkBuf counters, int counterIndex, VkBuf dispatchArgs, VkBuf staticSolid,
-		VkBuf cellFlags, int[] fineBox, boolean fillSheets, @Nullable VkBuf sortInto, int sortCounter) {
+	void build(VkCommandBuffer cb, Desc ubo, SplitBuf particles, VkBuf counters, int counterIndex, VkBuf dispatchArgs, VkBuf staticSolid,
+		VkBuf cellFlags, int[] fineBox, boolean fillSheets, @Nullable SplitBuf sortInto, int sortCounter) {
 		boolean wallFill = WaterSettings.wallFill && WaterSettings.wallFillReach > 0.0F;
 		boolean blurIntoB = wallFill && !fillSheets;
 		this.buildField(cb, ubo, particles, counters, counterIndex, dispatchArgs, fineBox, fillSheets, sortInto, sortCounter, blurIntoB);
 		if (wallFill) {
 			int reach = Math.max(1, Math.round(WaterSettings.wallFillReach * this.subdivision));
 			if (!blurIntoB) {
-				this.densA.copyTo(cb, this.densB, 0, 0, this.densA.size);
+				this.densA.copyTo(cb, this.densB);
 				Vk.barrier(cb);
 			}
-			this.wallFill.bind(cb, ubo, Desc.ssbo(this.densB), Desc.ssbo(this.densA), Desc.ssbo(staticSolid), Desc.ssbo(cellFlags));
+			this.wallFill.bind(cb, ubo, this.densB.part0(), this.densA.part0(), Desc.ssbo(staticSolid), Desc.ssbo(cellFlags), this.densB.part1(),
+				this.densA.part1());
 			this.wallFill.push(cb, reach);
 			this.wallFill.dispatch(cb, ComputeProgram.groups(voxels(fineBox), 256), 1, 1);
 			Vk.barrier(cb);
 		}
 		int cubeGroups = ComputeProgram.groups(cubes(fineBox), 256);
-		this.netsVertices.bind(cb, ubo, Desc.ssbo(this.densA), Desc.ssbo(this.vertexId), Desc.ssbo(this.verts), Desc.ssbo(this.meshCounters),
-			Desc.ssbo(staticSolid));
+		this.netsVertices.bind(cb, ubo, this.densA.part0(), this.vertexId.part0(), Desc.ssbo(this.verts), Desc.ssbo(this.meshCounters),
+			Desc.ssbo(staticSolid), this.densA.part1(), this.vertexId.part1());
 		this.netsVertices.push(cb, this.vertexCapacity);
 		this.netsVertices.dispatch(cb, cubeGroups, 1, 1);
 		Vk.barrier(cb);
-		this.netsQuads.bind(cb, ubo, Desc.ssbo(this.densA), Desc.ssbo(this.vertexId), Desc.ssbo(this.quads), Desc.ssbo(this.meshCounters));
+		this.netsQuads.bind(cb, ubo, this.densA.part0(), this.vertexId.part0(), Desc.ssbo(this.quads), Desc.ssbo(this.meshCounters),
+			this.densA.part1(), this.vertexId.part1());
 		this.netsQuads.push(cb, 0, this.quadCapacity);
 		this.netsQuads.dispatch(cb, cubeGroups, 1, 1);
 		Vk.barrier(cb);
@@ -195,52 +203,58 @@ final class SurfaceMesher implements AutoCloseable {
 		Vk.barrier(cb);
 	}
 
-	void buildField(VkCommandBuffer cb, Desc ubo, VkBuf particles, VkBuf counters, int counterIndex, VkBuf dispatchArgs, int[] fineBox,
-		boolean fillSheets, @Nullable VkBuf sortInto, int sortCounter) {
+	void buildField(VkCommandBuffer cb, Desc ubo, SplitBuf particles, VkBuf counters, int counterIndex, VkBuf dispatchArgs, int[] fineBox,
+		boolean fillSheets, @Nullable SplitBuf sortInto, int sortCounter) {
 		this.buildField(cb, ubo, particles, counters, counterIndex, dispatchArgs, fineBox, fillSheets, sortInto, sortCounter, false);
 	}
 
-	private void buildField(VkCommandBuffer cb, Desc ubo, VkBuf particles, VkBuf counters, int counterIndex, VkBuf dispatchArgs, int[] fineBox,
-		boolean fillSheets, @Nullable VkBuf sortInto, int sortCounter, boolean intoB) {
+	private void buildField(VkCommandBuffer cb, Desc ubo, SplitBuf particles, VkBuf counters, int counterIndex, VkBuf dispatchArgs, int[] fineBox,
+		boolean fillSheets, @Nullable SplitBuf sortInto, int sortCounter, boolean intoB) {
 		int groups = ComputeProgram.groups(voxels(fineBox), 256);
 		int s = this.subdivision;
 		int cells = (fineBox[3] - fineBox[0]) / s * ((fineBox[4] - fineBox[1]) / s) * ((fineBox[5] - fineBox[2]) / s);
+		int keys = (int) sortKeys((fineBox[3] - fineBox[0]) / s, (fineBox[4] - fineBox[1]) / s, (fineBox[5] - fineBox[2]) / s);
 		boolean gather = WaterSettings.surfaceGather;
 		this.maskValid = false;
 		this.meshCounters.fill(cb, 0);
 		if (gather || WaterSettings.surfaceInteriorSkip) {
-			this.occupancy.fill(cb, 0, (long) cells * 4L, 0);
+			this.occupancy.fill(cb, 0, (long) keys * 4L, 0);
 			Vk.barrier(cb);
-			this.occupancyCount.bind(cb, ubo, Desc.ssbo(particles), Desc.ssbo(counters), Desc.ssbo(this.occupancy));
+			this.occupancyCount.bind(cb, ubo, particles.part0(), Desc.ssbo(counters), Desc.ssbo(this.occupancy), particles.part1());
 			this.occupancyCount.push(cb, counterIndex);
 			this.occupancyCount.dispatchIndirect(cb, dispatchArgs, WaterRegion.ARGS_FLUID_DISPATCH);
 			Vk.barrier(cb);
 		}
 		int[] skip = this.markInterior(cb, ubo, cells);
 		if (gather) {
-			this.gatherField(cb, ubo, particles, counters, counterIndex, dispatchArgs, fineBox, cells, skip[1], sortInto, sortCounter);
+			this.gatherField(cb, ubo, particles, counters, counterIndex, dispatchArgs, fineBox, keys, skip[1], sortInto, sortCounter);
 		} else {
 			this.splatField(cb, ubo, particles, counters, counterIndex, dispatchArgs, groups, skip);
 		}
 
 		int mask = this.maskValid ? 1 : 0;
-		this.blur.bind(cb, ubo, Desc.ssbo(this.accum), Desc.ssbo(this.densB), Desc.ssbo(this.accum), Desc.ssbo(this.nearMask));
+		this.blur.bind(cb, ubo, this.accum.part0(), this.densB.part0(), this.accum.part0(), Desc.ssbo(this.nearMask), this.accum.part1(),
+			this.densB.part1(), this.accum.part1());
 		this.blur.push(cb, 0, 0, 0, mask);
 		this.blur.dispatch(cb, groups, 1, 1);
 		Vk.barrier(cb);
-		VkBuf middle = intoB ? this.densA : this.densB;
-		this.blur.bind(cb, ubo, Desc.ssbo(this.accum), Desc.ssbo(this.accum), Desc.ssbo(middle), Desc.ssbo(this.nearMask));
+		SplitBuf middle = intoB ? this.densA : this.densB;
+		this.blur.bind(cb, ubo, this.accum.part0(), this.accum.part0(), middle.part0(), Desc.ssbo(this.nearMask), this.accum.part1(),
+			this.accum.part1(), middle.part1());
 		this.blur.push(cb, 1, 0, 0, mask);
 		this.blur.dispatch(cb, groups, 1, 1);
 		Vk.barrier(cb);
-		this.blur.bind(cb, ubo, Desc.ssbo(this.accum), Desc.ssbo(middle), Desc.ssbo(intoB ? this.densB : this.densA), Desc.ssbo(this.nearMask));
+		SplitBuf last = intoB ? this.densB : this.densA;
+		this.blur.bind(cb, ubo, this.accum.part0(), middle.part0(), last.part0(), Desc.ssbo(this.nearMask), this.accum.part1(), middle.part1(),
+			last.part1());
 		this.blur.push(cb, 2, 0, 1, mask);
 		this.blur.dispatch(cb, groups, 1, 1);
 		Vk.barrier(cb);
 
 		if (fillSheets) {
 			for (int pass = 0; pass < 3; pass++) {
-				this.sheetFill.bind(cb, ubo, Desc.ssbo(this.densA), Desc.ssbo(this.densB), Desc.ssbo(this.accum));
+				this.sheetFill.bind(cb, ubo, this.densA.part0(), this.densB.part0(), this.accum.part0(), this.densA.part1(), this.densB.part1(),
+					this.accum.part1());
 				this.sheetFill.push(cb, pass, 0, 0, 0, Program.f(WaterSettings.sheetSmoothing));
 				this.sheetFill.dispatch(cb, groups, 1, 1);
 				Vk.barrier(cb);
@@ -248,7 +262,7 @@ final class SurfaceMesher implements AutoCloseable {
 		}
 	}
 
-	private void splatField(VkCommandBuffer cb, Desc ubo, VkBuf particles, VkBuf counters, int counterIndex, VkBuf dispatchArgs, int groups, int[] skip) {
+	private void splatField(VkCommandBuffer cb, Desc ubo, SplitBuf particles, VkBuf counters, int counterIndex, VkBuf dispatchArgs, int groups, int[] skip) {
 		if (this.zb == null) {
 			this.zb = VkBuf.device(this.fineCount * 16L, 0);
 		}
@@ -256,34 +270,34 @@ final class SurfaceMesher implements AutoCloseable {
 		this.clear.push(cb, 0, skip[1]);
 		this.clear.dispatch(cb, groups, 1, 1);
 		Vk.barrier(cb);
-		this.zbSplat.bind(cb, ubo, Desc.ssbo(particles), Desc.ssbo(counters), Desc.ssbo(this.zb), Desc.ssbo(this.depthA));
+		this.zbSplat.bind(cb, ubo, particles.part0(), Desc.ssbo(counters), Desc.ssbo(this.zb), Desc.ssbo(this.depthA), particles.part1());
 		this.zbSplat.push(cb, counterIndex, skip[0], 0, 0, Program.f(WaterSettings.surfaceKernel));
 		this.zbSplat.dispatchIndirect(cb, dispatchArgs, WaterRegion.ARGS_FLUID_DISPATCH);
 		Vk.barrier(cb);
-		this.zbField.bind(cb, ubo, Desc.ssbo(this.zb), Desc.ssbo(this.densB), Desc.ssbo(this.depthA));
+		this.zbField.bind(cb, ubo, Desc.ssbo(this.zb), this.densB.part0(), Desc.ssbo(this.depthA), this.densB.part1());
 		this.zbField.push(cb, 0, skip[1], 0, 0, Program.f(WaterSettings.surfaceRadius), Program.f(1.0F), Program.f(3.0F));
 		this.zbField.dispatch(cb, groups, 1, 1);
 		Vk.barrier(cb);
 	}
 
-	private void gatherField(VkCommandBuffer cb, Desc ubo, VkBuf particles, VkBuf counters, int counterIndex, VkBuf dispatchArgs, int[] fineBox, int cells,
-		int insideDepth, @Nullable VkBuf sortInto, int sortCounter) {
-		VkBuf target = sortInto;
+	private void gatherField(VkCommandBuffer cb, Desc ubo, SplitBuf particles, VkBuf counters, int counterIndex, VkBuf dispatchArgs, int[] fineBox, int keys,
+		int insideDepth, @Nullable SplitBuf sortInto, int sortCounter) {
+		SplitBuf target = sortInto;
 		if (target == null) {
-			if (this.sorted == null || this.sorted.size < particles.size) {
+			if (this.sorted == null || this.sorted.count < particles.count) {
 				if (this.sorted != null) {
 					Vk.destroyLater(this.sorted);
 				}
-				this.sorted = VkBuf.device(particles.size, 0);
+				this.sorted = SplitBuf.device(particles.count, WaterRegion.PARTICLE_BYTES);
 			}
 			target = this.sorted;
 		}
-		this.occupancy.copyTo(cb, this.start, 0, 0, cells * 4L);
+		this.occupancy.copyTo(cb, this.start, 0, 0, keys * 4L);
 		Vk.barrier(cb);
 		List<int[]> levels = new ArrayList<>();
 		VkBuf data = this.start;
 		int first = 0;
-		int count = cells;
+		int count = keys;
 		int sums = 0;
 		while (true) {
 			int blocks = ComputeProgram.groups(count, SCAN_BLOCK);
@@ -307,22 +321,22 @@ final class SurfaceMesher implements AutoCloseable {
 			this.scanAdd.dispatch(cb, ComputeProgram.groups(level[2], 256), 1, 1);
 			Vk.barrier(cb);
 		}
-		this.start.copyTo(cb, this.cursor, 0, 0, cells * 4L);
+		this.start.copyTo(cb, this.cursor, 0, 0, keys * 4L);
 		if (sortInto != null) {
 			this.binTotal.bind(cb, ubo, Desc.ssbo(this.start), Desc.ssbo(this.occupancy), Desc.ssbo(counters));
-			this.binTotal.push(cb, sortCounter, cells);
+			this.binTotal.push(cb, sortCounter, keys);
 			this.binTotal.dispatch(cb, 1, 1, 1);
 		}
 		Vk.barrier(cb);
-		this.bin.bind(cb, ubo, Desc.ssbo(particles), Desc.ssbo(counters), Desc.ssbo(this.cursor), Desc.ssbo(target));
+		this.bin.bind(cb, ubo, particles.part0(), Desc.ssbo(counters), Desc.ssbo(this.cursor), target.part0(), particles.part1(), target.part1());
 		this.bin.push(cb, counterIndex, sortInto != null ? sortCounter : -1);
 		this.bin.dispatchIndirect(cb, dispatchArgs, WaterRegion.ARGS_FLUID_DISPATCH);
 		Vk.barrier(cb);
 		int bx = Math.ceilDiv(fineBox[3] - fineBox[0], 8);
 		int by = Math.ceilDiv(fineBox[4] - fineBox[1], 8);
 		int bz = Math.ceilDiv(fineBox[5] - fineBox[2], 4);
-		this.gather.bind(cb, ubo, Desc.ssbo(target), Desc.ssbo(this.start), Desc.ssbo(this.occupancy), Desc.ssbo(this.depthA), Desc.ssbo(this.densB),
-			Desc.ssbo(this.blockMask));
+		this.gather.bind(cb, ubo, target.part0(), Desc.ssbo(this.start), Desc.ssbo(this.occupancy), Desc.ssbo(this.depthA), this.densB.part0(),
+			Desc.ssbo(this.blockMask), this.densB.part1(), target.part1());
 		this.gather.push(cb, 0, 0, insideDepth, 0, Program.f(WaterSettings.surfaceKernel), Program.f(WaterSettings.surfaceRadius), Program.f(1.0F),
 			Program.f(3.0F), bx, by, bz, 0);
 		this.gather.dispatch(cb, bx * by * bz, 1, 1);
@@ -348,6 +362,14 @@ final class SurfaceMesher implements AutoCloseable {
 			Vk.barrier(cb);
 		}
 		return new int[]{deepest + 1, INSIDE_RADIUS + 1};
+	}
+
+	int fineSplit() {
+		return this.accum.split;
+	}
+
+	int vertexSplit() {
+		return this.vertexId.split;
 	}
 
 	@Override

@@ -72,7 +72,7 @@ public final class PortalTransit {
 	}
 
 	public static void material(ServerLevel level, BlockPos portalPos, byte material, float eighths) {
-		if (material < SyncMaterial.WATER || material > SyncMaterial.LEAVES || !level.isLoaded(portalPos)
+		if (material < SyncMaterial.WATER || material > SyncMaterial.GRAVEL || !level.isLoaded(portalPos)
 			|| !(level.getBlockState(portalPos).getBlock() instanceof Portal portal)) {
 			return;
 		}
@@ -201,6 +201,7 @@ public final class PortalTransit {
 				&& !RealisticWaterBlock.isInfinite(state) ? state.getFluidState().getAmount() : -1;
 			case SyncMaterial.SAND -> block == ModContent.REALISTIC_SAND ? RealisticSandBlock.layers(state) : -1;
 			case SyncMaterial.LEAVES -> block == ModContent.REALISTIC_LEAVES ? RealisticLeavesBlock.layers(state) : -1;
+			case SyncMaterial.GRAVEL -> block == SyncMaterial.block(material) ? state.getValue(me.skaffy.block.LooseLayerBlock.LAYERS) : -1;
 			default -> -1;
 		};
 	}
@@ -211,6 +212,7 @@ public final class PortalTransit {
 			case SyncMaterial.SLIME -> SlimeSyncPayload.stateFor(eighths);
 			case SyncMaterial.SAND -> SandSyncPayload.stateFor(eighths);
 			case SyncMaterial.LEAVES -> LeavesSyncPayload.stateFor(eighths);
+			case SyncMaterial.GRAVEL -> me.skaffy.net.LayerSyncPayload.stateFor(material, eighths);
 			default -> WaterSyncPayload.stateFor(eighths);
 		};
 	}

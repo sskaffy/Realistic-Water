@@ -2,8 +2,13 @@
 #include "common.glsl"
 layout(local_size_x = 256) in;
 layout(std430, binding = 1) readonly buffer Src { Particle src[]; };
+layout(std430, binding = 5) readonly buffer SrcHi { Particle srcHi[]; };
+#define SRC_AT(i) (uint(i) < SPLIT_PART ? src[uint(i)] : srcHi[uint(i) - SPLIT_PART])
 layout(std430, binding = 2) readonly buffer SrcCounters { uint srcCounters[]; };
 layout(std430, binding = 3) writeonly buffer Dst { Particle dst[]; };
+layout(std430, binding = 6) writeonly buffer DstHi { Particle dstHi[]; };
+#define DST_AT(i) (uint(i) < SPLIT_PART ? dst[uint(i)] : dstHi[uint(i) - SPLIT_PART])
+#define DST_SET(i, v) { uint s_dst = uint(i); if (s_dst < SPLIT_PART) { dst[s_dst] = (v); } else { dstHi[s_dst - SPLIT_PART] = (v); } }
 layout(std430, binding = 4) buffer DstCounters { uint dstCounters[]; };
 layout(push_constant) uniform PC { ivec4 a; vec4 b; } pc;
 
@@ -12,7 +17,7 @@ void main() {
     if (i >= srcCounters[pc.a.x]) {
         return;
     }
-    Particle p = src[i];
+    Particle p = SRC_AT(i);
     if (p.pos.w < 0.0) {
         return;
     }
@@ -20,6 +25,6 @@ void main() {
     if (o < uint(pc.a.z)) {
         p.pos.xyz += pc.b.xyz;
         p.pos.w = 0.0;
-        dst[o] = p;
+        DST_SET(o, p);
     }
 }

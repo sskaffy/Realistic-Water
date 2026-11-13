@@ -2,6 +2,7 @@
 #include "common.glsl"
 #include "grain_common.glsl"
 layout(std430, binding = 1) readonly buffer Visible { SurfaceParticle visible[]; };
+layout(push_constant) uniform PC { ivec4 a; ivec4 b; } pc;
 
 layout(location = 0) out vec2 vUV;
 layout(location = 1) out vec3 vCenter;
@@ -19,8 +20,17 @@ void hide() {
 }
 
 void main() {
-    SurfaceParticle p = visible[gl_InstanceIndex];
+    bool far = pc.a.x != 0;
+    int index = far ? G.caps.x - 1 - gl_InstanceIndex : gl_InstanceIndex;
+    SurfaceParticle p = visible[index];
     uint child = uint(gl_VertexIndex) / 6u;
+    // Level 1 draws a quarter of the grains at twice the size, level 2 a sixteenth at four times: same area covered.
+    float lod = far ? max(p.extra.z, 1.0) : 0.0;
+    uint grains = uint(max(G.matB.z, 1.0));
+    if (lod > 1.5 && child >= max(grains / 16u, 1u)) {
+        hide();
+        return;
+    }
     vec3 nWorld = p.normal.xyz;
 
     uint seed = hash(floatBitsToUint(p.extra.x) * 747796405u + child * 2891336453u + 1u);
@@ -34,7 +44,7 @@ void main() {
         hide();
         return;
     }
-    float r = G.matB.w * (0.6 + 0.8 * rand(seed));
+    float r = G.matB.w * (0.6 + 0.8 * rand(seed)) * exp2(lod);
     float pixelR = r * G.proj[1][1] * 0.5 * G.screen.y / dist;
     float minPx = max(G.matD.x, 0.05);
     if (pixelR < minPx) {

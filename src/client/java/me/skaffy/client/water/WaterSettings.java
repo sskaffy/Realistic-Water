@@ -15,6 +15,11 @@ import java.util.Map;
 import java.util.TreeMap;
 
 public final class WaterSettings {
+	public static int performanceMode = 0;
+	public static int reflectionSteps = 48;
+	public static int lightRefreshBlocks = 4096;
+	public static int blockSyncInterval = 30;
+
 	public static int resolution = 6;
 	public static int boxMargin = 6;
 	public static float windowLookahead = 0.6F;
@@ -133,6 +138,42 @@ public final class WaterSettings {
 	public static float sandGrainMinPixels = 0.7F;
 	public static float sandBrightness = 1.1F;
 	public static boolean sandSounds = true;
+	public static boolean grainViewCulling = true;
+
+	public static boolean realisticSnow = true;
+	public static int snowRadius = 64;
+	public static int snowDetail = 8;
+	public static int snowTrackRadius = 24;
+	public static boolean snowTracks = true;
+	public static boolean snowFootprints = true;
+	public static int snowTrackEntities = 32;
+	public static float snowFluff = 0.06F;
+	public static float snowDrift = 0.035F;
+	public static float snowCompress = 0.7F;
+	public static float snowRepose = 38.0F;
+	public static boolean snowSaveTracks = true;
+	public static float snowEdgeRounding = 0.45F;
+	public static float snowRefill = 0.01F;
+	public static float snowBrightness = 1.0F;
+	public static float snowSparkle = 1.5F;
+	public static float snowShadowTint = 0.8F;
+	public static float snowPackedTint = 0.6F;
+	public static boolean snowMelting = true;
+	public static float snowMeltHeat = 1.0F;
+	public static float snowMeltLight = 0.05F;
+	public static int snowMeltLightLevel = 12;
+	public static float snowMeltWater = 0.5F;
+	public static float snowMeltWaterYield = 0.25F;
+	public static boolean snowDebugLog = false;
+
+	public static boolean realisticSnowfall = true;
+	public static int snowfallRadius = 32;
+	public static float snowfallDensity = 0.25F;
+	public static float snowfallSpeed = 1.4F;
+	public static float snowfallFlakeSize = 0.035F;
+	public static float snowfallOpacity = 0.9F;
+	public static float snowfallWind = 0.6F;
+
 
 	public static int leafResolution = 8;
 	public static int leavesPerBlock = 200;
@@ -189,7 +230,7 @@ public final class WaterSettings {
 	public static float grabStrength = 8000.0F;
 	public static boolean opGrabbing = false;
 	public static boolean grabCarrying = false;
-	public static boolean realisticGrass = true;
+	public static boolean realisticGrass = false;
 	public static int grassStyle = 0;
 	public static boolean grassTrails = true;
 	public static float grassTrailTime = 45.0F;
@@ -209,7 +250,7 @@ public final class WaterSettings {
 	public static float grassLieTime = 180.0F;
 	public static float grassRegrowTime = 60.0F;
 	public static float grassGrabRadius = 0.2F;
-	public static boolean realisticTreeLeaves = true;
+	public static boolean realisticTreeLeaves = false;
 	public static int treeLeafRadius = 24;
 	public static int treeLeavesPerBlock = 400;
 	public static float treeLeafSize = 1.25F;
@@ -268,7 +309,7 @@ public final class WaterSettings {
 	public static boolean wobblyBlocks = true;
 	public static float wobblySoftness = 1.0F;
 	public static int wobblyRange = 64;
-	public static boolean realisticIce = true;
+	public static boolean realisticIce = false;
 	public static float realisticIceCloudiness = 0.25F;
 	public static float realisticIceBubbles = 0.45F;
 	public static float realisticIceCracks = 0.35F;
@@ -368,6 +409,9 @@ public final class WaterSettings {
 	public static float fireHeatTime = 12.0F;
 	public static float furnaceWaterTemperature = 80.0F;
 	public static float furnaceHeatTime = 120.0F;
+	public static float hotPlateWaterTemperature = 140.0F;
+	public static float hotPlateHeatTime = 3.0F;
+	public static float hotPlateHeatReach = 3.0F;
 	public static float boilChurn = 6.0F;
 	public static float boilSteam = 1.0F;
 	public static float steamWispTemperature = 60.0F;
@@ -401,6 +445,37 @@ public final class WaterSettings {
 	public static float steamOpacity = 0.35F;
 	public static float steamDarkShade = 0.45F;
 	public static float steamLightShade = 0.95F;
+
+	public static boolean fire = true;
+	public static boolean fireVanillaBlocks = false;
+	public static int fireMaxSources = 256;
+	public static float fireRange = 64.0F;
+	public static boolean fireParticles = true;
+	public static float fireParticleDensity = 1.0F;
+	public static float fireParticleRange = 32.0F;
+	public static int fireParticleBudget = 200;
+	public static boolean fireSteam = true;
+	public static boolean fireEmbers = true;
+	public static float fireWind = 1.0F;
+	public static float fireSpreadSpeed = 1.0F;
+	public static float fireParticleStep = 0.1F;
+	public static float fireFlameSize = 0.15F;
+	public static float fireFlameLife = 0.6F;
+	public static float fireFlameRise = 6.0F;
+	public static float fireFlameBrightness = 1.0F;
+	public static float fireFlameOpacity = 0.55F;
+	public static float fireFlameAmount = 1.0F;
+	public static float fireSmokeSize = 0.2F;
+	public static float fireSmokeLife = 5.0F;
+	public static float fireSmokeRise = 1.1F;
+	public static float fireSmokeOpacity = 0.3F;
+	public static float fireSmokeDark = 0.07F;
+	public static float fireSmokeLight = 0.4F;
+	public static float fireSmokeAmount = 1.0F;
+	public static float fireSparks = 1.0F;
+	public static float fireSparkSize = 0.03F;
+	public static float fireSparkLife = 3.5F;
+	public static float fireSparkBrightness = 2.2F;
 
 	public static String ffmpeg = "";
 	public static boolean renderFreezeWorld = true;
@@ -440,6 +515,7 @@ public final class WaterSettings {
 	}
 
 	public static void load() {
+		ModSettings.realisticSnow = realisticSnow;
 		Path file = file();
 		if (!Files.exists(file)) {
 			return;
@@ -465,7 +541,7 @@ public final class WaterSettings {
 		Properties props = new Properties();
 		for (String name : fields().keySet()) {
 			try {
-				String value = get(name);
+				String value = PerformanceMode.overrides(name) ? PerformanceMode.userValue(name) : get(name);
 				if (!value.equals(defaultValue(name))) {
 					props.setProperty(name, value);
 				}
@@ -504,6 +580,14 @@ public final class WaterSettings {
 		if (f == null) {
 			throw new NoSuchFieldException(name);
 		}
+		if (PerformanceMode.overrides(name) && !PerformanceMode.applying()) {
+			Class<?> type = f.getType();
+			String stored = type == String.class ? (value.equals("-") ? "" : value)
+				: type == int.class ? String.valueOf(Integer.parseInt(value))
+				: type == float.class ? String.valueOf(Float.parseFloat(value)) : String.valueOf(Boolean.parseBoolean(value));
+			PerformanceMode.storeUserValue(name, stored);
+			return String.valueOf(f.get(null));
+		}
 		Class<?> t = f.getType();
 		if (t == int.class) {
 			f.setInt(null, Integer.parseInt(value));
@@ -519,6 +603,12 @@ public final class WaterSettings {
 		}
 		if ("lavaWaterMixing".equals(name) && t == boolean.class) {
 			ModSettings.lavaWaterMixing = (boolean) f.get(null);
+		}
+		if ("realisticSnow".equals(name) && t == boolean.class) {
+			ModSettings.realisticSnow = (boolean) f.get(null);
+		}
+		if ("performanceMode".equals(name)) {
+			PerformanceMode.apply();
 		}
 		return String.valueOf(f.get(null));
 	}

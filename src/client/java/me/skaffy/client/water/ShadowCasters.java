@@ -47,7 +47,7 @@ final class ShadowCasters {
 	}
 
 	static boolean casts(Material material) {
-		return material == Material.SAND || material == Material.SLIME || material == Material.LEAVES;
+		return material.isGranular() || material == Material.SLIME || material == Material.LEAVES;
 	}
 
 	static Casters leaves(ByteBuffer m, int count, int ox, int oy, int oz, int res) {

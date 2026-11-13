@@ -30,6 +30,14 @@ public abstract class LooseLayerBlock extends Block {
 
 	protected abstract TagKey<Item> digTool();
 
+	protected boolean isOwnItem(final net.minecraft.world.item.ItemStack stack) {
+		return stack.is(this.asItem());
+	}
+
+	public static int layersOf(final BlockState state, final Block block) {
+		return state.getBlock() == block ? state.getValue(LAYERS) : 0;
+	}
+
 	@Override
 	protected RenderShape getRenderShape(final BlockState state) {
 		return RenderShape.INVISIBLE;
@@ -38,7 +46,7 @@ public abstract class LooseLayerBlock extends Block {
 	@Override
 	protected VoxelShape getShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
 		if (context instanceof EntityCollisionContext entityContext && entityContext.getEntity() instanceof Player player
-			&& (player.getMainHandItem().is(this.digTool()) || player.getMainHandItem().is(this.asItem()) || player.getOffhandItem().is(this.asItem()))) {
+			&& (player.getMainHandItem().is(this.digTool()) || this.isOwnItem(player.getMainHandItem()) || this.isOwnItem(player.getOffhandItem()))) {
 			return SHAPES[state.getValue(LAYERS)];
 		}
 		return Shapes.empty();

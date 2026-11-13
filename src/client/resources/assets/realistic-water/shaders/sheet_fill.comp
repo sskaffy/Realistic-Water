@@ -2,18 +2,27 @@
 #include "common.glsl"
 layout(local_size_x = 256) in;
 layout(std430, binding = 1) buffer Dens { float dens[]; };
+layout(std430, binding = 4) buffer DensHi { float densHi[]; };
+#define DENS_AT(i) (uint(i) < SPLIT_FINE ? dens[uint(i)] : densHi[uint(i) - SPLIT_FINE])
+#define DENS_SET(i, v) { uint s_dens = uint(i); if (s_dens < SPLIT_FINE) { dens[s_dens] = (v); } else { densHi[s_dens - SPLIT_FINE] = (v); } }
 layout(std430, binding = 2) buffer Wide { float wide[]; };
+layout(std430, binding = 5) buffer WideHi { float wideHi[]; };
+#define WIDE_AT(i) (uint(i) < SPLIT_FINE ? wide[uint(i)] : wideHi[uint(i) - SPLIT_FINE])
+#define WIDE_SET(i, v) { uint s_wide = uint(i); if (s_wide < SPLIT_FINE) { wide[s_wide] = (v); } else { wideHi[s_wide - SPLIT_FINE] = (v); } }
 layout(std430, binding = 3) buffer Result { float result[]; };
+layout(std430, binding = 6) buffer ResultHi { float resultHi[]; };
+#define RESULT_AT(i) (uint(i) < SPLIT_FINE ? result[uint(i)] : resultHi[uint(i) - SPLIT_FINE])
+#define RESULT_SET(i, v) { uint s_result = uint(i); if (s_result < SPLIT_FINE) { result[s_result] = (v); } else { resultHi[s_result - SPLIT_FINE] = (v); } }
 layout(push_constant) uniform PC { ivec4 a; vec4 b; } pc;
 
 const int TAPS = 6;
 
 float densAt(ivec3 p) {
-    return inFine(p) ? dens[fineIndex(p)] : 0.0;
+    return inFine(p) ? DENS_AT(fineIndex(p)) : 0.0;
 }
 
 float wideAt(ivec3 p) {
-    return inFine(p) ? wide[fineIndex(p)] : 0.0;
+    return inFine(p) ? WIDE_AT(fineIndex(p)) : 0.0;
 }
 
 bool thinAt(ivec3 p, float v) {
@@ -35,7 +44,7 @@ void main() {
     int i = fineIndex(p);
     int pass = pc.a.x;
     if (pass == 2) {
-        dens[i] = result[i];
+        DENS_SET(i, RESULT_AT(i));
         return;
     }
     float inv2s2 = 0.5 / max(pc.b.x * pc.b.x, 1e-4);
@@ -49,10 +58,10 @@ void main() {
     }
     float blurred = sum / norm;
     if (pass == 0) {
-        wide[i] = blurred;
+        WIDE_SET(i, blurred);
         return;
     }
-    float v = dens[i];
+    float v = DENS_AT(i);
     float r = v;
     if (thinAt(p, v)) {
         r = max(blurred, mix(v, blurred, 0.5));
@@ -60,5 +69,5 @@ void main() {
             r = max(r, G.surf.x + 0.04);
         }
     }
-    result[i] = r;
+    RESULT_SET(i, r);
 }

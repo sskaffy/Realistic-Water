@@ -9,10 +9,15 @@
 		"ChunkStatusTasksMixin",
 		"ContainerOpenersCounterGridMixin",
 		"EntityCollideMixin",
+		"EntitySnowEffectsMixin",
+		"EntitySnowSpeedMixin",
+		"LivingEntitySnowLandingMixin",
 		"LeavesCollisionMixin",
 		"LevelBlockEntityGridMixin",
 		"LivingEntityBodyFrictionMixin",
 		"NaturalSpawnerMixin",
+		"FireBlockAccessor",
+		"FireBlockMixin",
 		"PistonBaseBlockMixin",
 		"PistonStructureResolverMixin",
 		"PlayerEdgeMixin",
@@ -20,7 +25,8 @@
 		"SerializableChunkDataMixin",
 		"ServerGamePacketListenerImplMixin",
 		"ServerLevelBlockEventMixin",
-		"ServerLevelGridMixin"
+		"ServerLevelGridMixin",
+		"ServerLevelSnowfallMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

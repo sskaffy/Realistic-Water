@@ -17,5 +17,8 @@ public class WeatherEffectRendererMixin {
 		if (WaterSettings.realisticRain) {
 			renderState.rainColumns.clear();
 		}
+		if (WaterSettings.realisticSnowfall) {
+			renderState.snowColumns.clear();
+		}
 	}
 }

@@ -1,0 +1,9 @@
+{
+  "parent": "minecraft:block/cube_bottom_top",
+  "textures": {
+    "particle": "realistic-water:block/hot_plate_side",
+    "top": "realistic-water:block/hot_plate_top",
+    "side": "realistic-water:block/hot_plate_side",
+    "bottom": "realistic-water:block/hot_plate_bottom"
+  }
+}

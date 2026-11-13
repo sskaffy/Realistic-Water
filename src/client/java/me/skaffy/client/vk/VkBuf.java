@@ -30,6 +30,11 @@ public final class VkBuf implements AutoCloseable {
 
 	private VkBuf(long size, int usage, int memoryUsage, int flags) {
 		this.size = size;
+		long max = Vk.maxBufferBytes();
+		if (size > max) {
+			throw new VkOutOfMemory("a GPU buffer of " + size / (1024L * 1024L) + " MiB is more than this graphics driver allows in one buffer ("
+				+ max / (1024L * 1024L) + " MiB)", true);
+		}
 		try (MemoryStack stack = MemoryStack.stackPush()) {
 			VkBufferCreateInfo info = VkBufferCreateInfo.calloc(stack).sType$Default()
 				.size(size)

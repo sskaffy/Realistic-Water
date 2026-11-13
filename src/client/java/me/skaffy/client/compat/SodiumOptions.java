@@ -4,6 +4,7 @@ import java.util.HashSet;
 import java.util.Locale;
 import java.util.Set;
 import me.skaffy.RealisticWater;
+import me.skaffy.client.water.PerformanceMode;
 import me.skaffy.client.water.WaterSettings;
 import me.skaffy.client.water.WaterSettingsInfo;
 import me.skaffy.client.water.WaterSettingsScreen;
@@ -23,6 +24,7 @@ import org.jspecify.annotations.Nullable;
 
 public final class SodiumOptions implements ConfigEntryPoint {
 	private static final StorageEventHandler SAVE = WaterSettings::save;
+	private static final Identifier MODE_ID = Identifier.fromNamespaceAndPath(RealisticWater.MOD_ID, "performance_mode");
 
 	@Override
 	public void registerConfigLate(ConfigBuilder builder) {
@@ -57,6 +59,15 @@ public final class SodiumOptions implements ConfigEntryPoint {
 			case SWITCH -> builder.createBooleanOption(id(name, ids))
 				.setDefaultValue(Boolean.parseBoolean(WaterSettings.defaultValue(name)))
 				.setBinding(on -> set(name, on.toString()), () -> Boolean.parseBoolean(get(name)));
+			case CHOICE -> {
+				java.util.List<String> labels = WaterSettingsInfo.choices(name);
+				int max = Math.max(0, labels.size() - 1);
+				yield builder.createIntegerOption(id(name, ids))
+					.setRange(0, max, 1)
+					.setValueFormatter(v -> Component.literal(labels.isEmpty() ? String.valueOf(v) : labels.get(clamp(v, 0, max))))
+					.setDefaultValue(clamp(parseInt(WaterSettings.defaultValue(name), 0), 0, max))
+					.setBinding(v -> set(name, String.valueOf(v)), () -> clamp(parseInt(get(name), 0), 0, max));
+			}
 			case INTEGER -> {
 				int min = (int) info.min();
 				int max = Math.max((int) info.max(), min);
@@ -91,6 +102,9 @@ public final class SodiumOptions implements ConfigEntryPoint {
 		};
 		if (impact != null) {
 			option.setImpact(impact);
+		}
+		if (PerformanceMode.controlledSettings().contains(name)) {
+			option.setEnabledProvider(state -> !PerformanceMode.controls(state.readIntOption(MODE_ID), name), MODE_ID);
 		}
 		return option;
 	}

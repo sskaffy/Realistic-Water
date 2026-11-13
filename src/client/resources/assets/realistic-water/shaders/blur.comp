@@ -2,8 +2,15 @@
 #include "common.glsl"
 layout(local_size_x = 256) in;
 layout(std430, binding = 1) readonly buffer SrcInt { int srcInt[]; };
+layout(std430, binding = 5) readonly buffer SrcIntHi { int srcIntHi[]; };
+#define SRCINT_AT(i) (uint(i) < SPLIT_FINE ? srcInt[uint(i)] : srcIntHi[uint(i) - SPLIT_FINE])
 layout(std430, binding = 2) readonly buffer SrcFloat { float srcFloat[]; };
+layout(std430, binding = 6) readonly buffer SrcFloatHi { float srcFloatHi[]; };
+#define SRCFLOAT_AT(i) (uint(i) < SPLIT_FINE ? srcFloat[uint(i)] : srcFloatHi[uint(i) - SPLIT_FINE])
 layout(std430, binding = 3) writeonly buffer Dst { float dst[]; };
+layout(std430, binding = 7) writeonly buffer DstHi { float dstHi[]; };
+#define DST_AT(i) (uint(i) < SPLIT_FINE ? dst[uint(i)] : dstHi[uint(i) - SPLIT_FINE])
+#define DST_SET(i, v) { uint s_dst = uint(i); if (s_dst < SPLIT_FINE) { dst[s_dst] = (v); } else { dstHi[s_dst - SPLIT_FINE] = (v); } }
 layout(std430, binding = 4) readonly buffer NearMask { uint nearMask[]; };
 layout(push_constant) uniform PC { ivec4 a; ivec4 b; } pc;
 
@@ -12,7 +19,7 @@ float load(ivec3 p) {
         return 0.0;
     }
     int i = fineIndex(p);
-    return pc.a.y != 0 ? float(srcInt[i]) / (4096.0 * G.surf.y) : srcFloat[i];
+    return pc.a.y != 0 ? float(SRCINT_AT(i)) / (4096.0 * G.surf.y) : SRCFLOAT_AT(i);
 }
 
 void main() {
@@ -51,5 +58,5 @@ void main() {
             v = max(v, side * 0.25);
         }
     }
-    dst[i] = v;
+    DST_SET(i, v);
 }

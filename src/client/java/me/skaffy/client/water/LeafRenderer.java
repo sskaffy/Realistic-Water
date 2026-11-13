@@ -81,7 +81,7 @@ final class LeafRenderer implements AutoCloseable {
 		GraphicsProgram.begin(cb, width, height, mainColorView, null, mainDepthView);
 		for (WaterRenderer.Body body : bodies) {
 			WaterRegion r = body.region();
-			leaves.bind(cb, body.ubo(), Desc.ssbo(r.currentParticles()), Desc.ssbo(this.textures), Desc.ssbo(r.light()),
+			leaves.bind(cb, body.ubo(), r.currentParticles().part0(), Desc.ssbo(this.textures), Desc.ssbo(r.light()),
 				Desc.tex(lightmap, this.linear.handle), Desc.ssbo(r.staticSolid),
 				Desc.tex(WaterWorld.packShadowView != 0L ? WaterWorld.packShadowView : lightmap, this.nearest.handle), atlas, looks);
 			leaves.drawIndirect(cb, r.args, WaterRegion.ARGS_FLUID_DRAW);

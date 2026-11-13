@@ -3,6 +3,9 @@
 layout(local_size_x = 256) in;
 layout(std430, binding = 1) buffer Vel { float vel[]; };
 layout(std430, binding = 2) buffer Scratch { float scratch[]; };
+layout(std430, binding = 4) buffer ScratchHi { float scratchHi[]; };
+#define SCRATCH_AT(i) (uint(i) < SPLIT_ACCUM ? scratch[uint(i)] : scratchHi[uint(i) - SPLIT_ACCUM])
+#define SCRATCH_SET(i, v) { uint s_scratch = uint(i); if (s_scratch < SPLIT_ACCUM) { scratch[s_scratch] = (v); } else { scratchHi[s_scratch - SPLIT_ACCUM] = (v); } }
 layout(std430, binding = 3) readonly buffer Flags { uint cellFlags[]; };
 layout(push_constant) uniform PC { ivec4 a; vec4 b; } pc;
 
@@ -22,7 +25,7 @@ int faceKind(int comp, ivec3 f) {
 }
 
 float guess(int j) {
-    return pc.a.x < 0 ? vel[j] : scratch[pc.a.x + j];
+    return pc.a.x < 0 ? vel[j] : SCRATCH_AT(pc.a.x + j);
 }
 
 void main() {
@@ -51,6 +54,6 @@ void main() {
     if (pc.a.y < 0) {
         vel[i] = result;
     } else {
-        scratch[pc.a.y + i] = result;
+        SCRATCH_SET(pc.a.y + i, result);
     }
 }

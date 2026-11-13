@@ -2,6 +2,9 @@
 #include "common.glsl"
 layout(local_size_x = 256) in;
 layout(std430, binding = 1) writeonly buffer Accum { int accum[]; };
+layout(std430, binding = 6) writeonly buffer AccumHi { int accumHi[]; };
+#define ACCUM_AT(i) (uint(i) < SPLIT_ACCUM ? accum[uint(i)] : accumHi[uint(i) - SPLIT_ACCUM])
+#define ACCUM_SET(i, v) { uint s_accum = uint(i); if (s_accum < SPLIT_ACCUM) { accum[s_accum] = (v); } else { accumHi[s_accum - SPLIT_ACCUM] = (v); } }
 layout(std430, binding = 2) writeonly buffer Count { int cellCount[]; };
 layout(std430, binding = 3) writeonly buffer Dens { int cellDens[]; };
 layout(std430, binding = 4) writeonly buffer WwCount { int wwCount[]; };
@@ -21,7 +24,7 @@ void main() {
     ivec3 f;
     if (boxFace(t - G.boxMin.w, comp, f)) {
         int i = faceIndex(comp, f);
-        accum[2 * i] = 0;
-        accum[2 * i + 1] = 0;
+        ACCUM_SET(2 * i, 0);
+        ACCUM_SET(2 * i + 1, 0);
     }
 }

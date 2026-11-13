@@ -21,22 +21,25 @@ import org.lwjgl.vulkan.VkCommandBuffer;
 
 final class SandRenderer implements AutoCloseable {
 	private static final Identifier SAND_TEXTURE = Identifier.withDefaultNamespace("textures/block/sand.png");
+	private static final Identifier GRAVEL_TEXTURE = Identifier.withDefaultNamespace("textures/block/gravel.png");
 
 	private final Map<Integer, GraphicsProgram> grains = new HashMap<>();
 	private final ComputeProgram cull;
-	private final VkBuf texture;
+	private final Map<Material, VkBuf> textures = new java.util.EnumMap<>(Material.class);
 	private final Sampler linear = new Sampler(true);
 	private final Sampler nearest = new Sampler(false);
 
 	SandRenderer() {
 		int U = Desc.UBO;
 		int S = Desc.SSBO;
-		this.cull = new ComputeProgram("grain_cull.comp", U, S, S, S, S, S, S, Desc.TEX);
-		this.texture = loadTexture();
+		this.cull = new ComputeProgram("grain_cull.comp", U, S, S, S, S, S, S, Desc.TEX, S);
 	}
 
-	private static VkBuf loadTexture() {
-		return loadTexture(SAND_TEXTURE, 0xFFDBCFA3);
+	private VkBuf texture(Material material) {
+		return this.textures.computeIfAbsent(material, m -> switch (m) {
+			case GRAVEL -> loadTexture(GRAVEL_TEXTURE, 0xFF857F7E);
+			default -> loadTexture(SAND_TEXTURE, 0xFFDBCFA3);
+		});
 	}
 
 	static VkBuf loadTexture(Identifier id, int fallback) {
@@ -98,24 +101,29 @@ final class SandRenderer implements AutoCloseable {
 						false, null, 0);
 				}
 				r.args.fill(cb, WaterRegion.ARGS_GRAIN_DRAW + 4, 4, 0);
+				r.args.fill(cb, WaterRegion.ARGS_GRAIN_FAR_DRAW + 4, 4, 0);
 			});
 		}
 		Vk.interleave(cb, fields);
 		Vk.barrier(cb);
 		for (WaterRenderer.Body body : bodies) {
 			WaterRegion r = body.region();
-			this.cull.bind(cb, body.ubo(), Desc.ssbo(r.currentParticles()), Desc.ssbo(r.mesher.densA), Desc.ssbo(r.surfaceParticles), Desc.ssbo(r.args),
-				Desc.ssbo(r.counters), Desc.ssbo(r.light()), Desc.tex(WaterWorld.packShadowView != 0L ? WaterWorld.packShadowView : lightmap, this.nearest.handle));
-			this.cull.push(cb, WaterRegion.C_FLUID + r.cur);
+			this.cull.bind(cb, body.ubo(), r.currentParticles().part0(), r.mesher.densA.part0(), Desc.ssbo(r.surfaceParticles), Desc.ssbo(r.args),
+				Desc.ssbo(r.counters), Desc.ssbo(r.light()), Desc.tex(WaterWorld.packShadowView != 0L ? WaterWorld.packShadowView : lightmap, this.nearest.handle),
+				r.mesher.densA.part1());
+			this.cull.push(cb, WaterRegion.C_FLUID + r.cur, WaterSettings.grainViewCulling ? 1 : 0);
 			this.cull.dispatchIndirect(cb, r.args, WaterRegion.ARGS_FLUID_DISPATCH);
 		}
 		Vk.barrier(cb);
 		GraphicsProgram.begin(cb, width, height, mainColorView, null, mainDepthView);
 		for (WaterRenderer.Body body : bodies) {
 			WaterRegion r = body.region();
-			grains.bind(cb, body.ubo(), Desc.ssbo(r.surfaceParticles), Desc.ssbo(this.texture), Desc.ssbo(r.light()),
+			grains.bind(cb, body.ubo(), Desc.ssbo(r.surfaceParticles), Desc.ssbo(this.texture(r.material)), Desc.ssbo(r.light()),
 				Desc.tex(lightmap, this.linear.handle));
+			grains.push(cb, 0);
 			grains.drawIndirect(cb, r.args, WaterRegion.ARGS_GRAIN_DRAW);
+			grains.push(cb, 1);
+			grains.drawIndirect(cb, r.args, WaterRegion.ARGS_GRAIN_FAR_DRAW);
 		}
 		GraphicsProgram.end(cb);
 	}
@@ -124,7 +132,8 @@ final class SandRenderer implements AutoCloseable {
 	public void close() {
 		this.grains.values().forEach(GraphicsProgram::close);
 		this.cull.close();
-		this.texture.close();
+		this.textures.values().forEach(VkBuf::close);
+		this.textures.clear();
 		this.linear.close();
 		this.nearest.close();
 	}

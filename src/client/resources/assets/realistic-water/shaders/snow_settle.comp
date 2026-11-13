@@ -1,0 +1,61 @@
+#version 450
+#define SNOW_PARAMS_BINDING 0
+#define SNOW_COLUMNS_BINDING 1
+#define SNOW_DETAIL_BINDING 2
+#include "common.glsl"
+#include "snow_common.glsl"
+layout(std430, binding = 3) writeonly buffer DetailDst { uint detailDst[]; };
+layout(std430, binding = 4) buffer Deposit { int deposit[]; };
+layout(std430, binding = 5) readonly buffer Rest { float restHeight[]; };
+layout(std430, binding = 6) buffer Landed { uint landedCount; uint landedPad0; uint landedPad1; uint landedPad2; vec4 landed[]; };
+#define MAX_LANDED 4096
+layout(local_size_x = 256) in;
+
+float slide(float ha, float hb, float da, float packA) {
+    float excess = ha - hb - SP.motion.z;
+    return excess <= 0.0 ? 0.0 : min(0.2 * excess, max(da, 0.0) * 0.24) * (1.0 - packA);
+}
+
+void main() {
+    int n = SP.track.x;
+    int i = int(gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * gl_NumWorkGroups.x * 256u);
+    if (n <= 0 || i >= n * n) {
+        return;
+    }
+    float restI = restHeight[i];
+    int dep = deposit[i];
+    deposit[i] = 0;
+    ivec2 lo = SP.track.yz;
+    ivec2 idx = ivec2(i % n, i / n);
+    ivec2 world = lo + ivec2(snowMod(idx.x - lo.x, n), snowMod(idx.y - lo.y, n));
+    if (restI < -1.0e8) {
+        detailDst[i] = 0u;
+        if (dep > 0) {
+            int q = SP.grid.w;
+            vec2 xz = (vec2(world - snowOrigin() * q) + 0.5) / float(q);
+            uint o = atomicAdd(landedCount, 1u);
+            if (o < uint(MAX_LANDED)) {
+                landed[o] = vec4(xz.x, snowRest(xz).y, xz.y, float(dep) / SNOW_DEP_FP);
+            }
+        }
+        return;
+    }
+    vec2 v = unpackHalf2x16(detail[i]);
+    float d = v.x + float(dep) / SNOW_DEP_FP;
+    float hI = restI + v.x;
+    const ivec2 SIDES[4] = ivec2[](ivec2(-1, 0), ivec2(1, 0), ivec2(0, -1), ivec2(0, 1));
+    for (int k = 0; k < 4; k++) {
+        int j;
+        if (!snowPointSlot(world + SIDES[k], j)) {
+            continue;
+        }
+        float restJ = restHeight[j];
+        if (restJ < -1.0e8) {
+            continue;
+        }
+        vec2 w = unpackHalf2x16(detail[j]);
+        float hJ = restJ + w.x;
+        d += slide(hJ, hI, w.x, w.y) - slide(hI, hJ, v.x, v.y);
+    }
+    detailDst[i] = packHalf2x16(vec2(clamp(d, -8.0, 1.0), v.y));
+}

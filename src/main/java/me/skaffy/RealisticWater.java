@@ -18,6 +18,7 @@ import me.skaffy.realistic.RealisticPhysics;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLevelEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import me.skaffy.block.RealisticFireBlock;
 import me.skaffy.net.LavaSyncPayload;
 import me.skaffy.net.LeavesSyncPayload;
 import me.skaffy.net.RemoveAllWaterPayload;
@@ -54,11 +55,17 @@ public class RealisticWater implements ModInitializer {
 	@Override
 	public void onInitialize() {
 		ModContent.init();
+		ServerLifecycleEvents.SERVER_STARTING.register(server -> RealisticFireBlock.syncFlammability());
 		PayloadTypeRegistry.serverboundPlay().register(WaterSyncPayload.TYPE, WaterSyncPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(SandSyncPayload.TYPE, SandSyncPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(LavaSyncPayload.TYPE, LavaSyncPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(SlimeSyncPayload.TYPE, SlimeSyncPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(LeavesSyncPayload.TYPE, LeavesSyncPayload.CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(me.skaffy.net.LayerSyncPayload.TYPE, me.skaffy.net.LayerSyncPayload.CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(me.skaffy.net.SnowMeltPayload.TYPE, me.skaffy.net.SnowMeltPayload.CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(me.skaffy.net.SnowEditPayload.TYPE, me.skaffy.net.SnowEditPayload.CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(me.skaffy.net.SnowBlastPayload.TYPE, me.skaffy.net.SnowBlastPayload.CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(me.skaffy.net.SnowBurstPayload.TYPE, me.skaffy.net.SnowBurstPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(me.skaffy.net.FallenLeavesPayload.TYPE, me.skaffy.net.FallenLeavesPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(RemoveAllWaterPayload.TYPE, RemoveAllWaterPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(FluidMixPayload.TYPE, FluidMixPayload.CODEC);
@@ -81,6 +88,15 @@ public class RealisticWater implements ModInitializer {
 		PayloadTypeRegistry.clientboundPlay().register(GridSoundPayload.TYPE, GridSoundPayload.CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(GridLevelEventPayload.TYPE, GridLevelEventPayload.CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(SteamPayload.TYPE, SteamPayload.CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(me.skaffy.net.FireHeatPayload.TYPE, me.skaffy.net.FireHeatPayload.CODEC);
+		ServerTickEvents.END_LEVEL_TICK.register(me.skaffy.block.FireHeat::tick);
+		PayloadTypeRegistry.serverboundPlay().register(me.skaffy.net.FireSpeedPayload.TYPE, me.skaffy.net.FireSpeedPayload.CODEC);
+		ServerPlayNetworking.registerGlobalReceiver(me.skaffy.net.FireSpeedPayload.TYPE, (payload, context) -> {
+			if (isAuthority(context.server(), context.player())) {
+				context.server().execute(payload::apply);
+			}
+		});
+		ServerLifecycleEvents.SERVER_STOPPED.register(server -> me.skaffy.block.FireHeat.forgetAll());
 		ServerPlayNetworking.registerGlobalReceiver(BodyStatePayload.TYPE, (payload, context) -> context.server().execute(() -> payload.apply(context.player())));
 		ServerPlayNetworking.registerGlobalReceiver(BodyPushPayload.TYPE, (payload, context) -> context.server().execute(() -> payload.apply(context.player())));
 		ServerPlayNetworking.registerGlobalReceiver(FlowPayload.TYPE, (payload, context) -> {
@@ -92,6 +108,10 @@ public class RealisticWater implements ModInitializer {
 		ServerTickEvents.END_LEVEL_TICK.register(BoilingWater::tick);
 		ServerTickEvents.END_LEVEL_TICK.register(OceanServer::tick);
 		ServerChunkEvents.CHUNK_UNLOAD.register(OceanServer::onChunkUnload);
+		ServerChunkEvents.CHUNK_LOAD.register((level, chunk, generated) -> me.skaffy.snow.SnowConversion.onChunkLoad(level, chunk));
+		ServerChunkEvents.CHUNK_UNLOAD.register(me.skaffy.snow.SnowConversion::onChunkUnload);
+		ServerTickEvents.END_LEVEL_TICK.register(me.skaffy.snow.SnowConversion::tick);
+		ServerTickEvents.END_LEVEL_TICK.register(me.skaffy.snow.SnowBlasts::tick);
 		ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> server.execute(() -> OceanServer.forget(handler.getPlayer())));
 		ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> me.skaffy.trees.LeafSinking.forget(handler.getPlayer()));
 		ServerPlayNetworking.registerGlobalReceiver(OceanModePayload.TYPE, (payload, context) -> context.server().execute(() -> payload.apply(context.player())));
@@ -113,12 +133,15 @@ public class RealisticWater implements ModInitializer {
 			PortalTransit.clear();
 			BoilingWater.clear();
 			OceanServer.clear();
+			me.skaffy.snow.SnowConversion.clear();
+			me.skaffy.snow.SnowBlasts.clear();
 		});
 		ServerLevelEvents.UNLOAD.register((server, level) -> {
 			RealisticPhysics.forget(level);
 			GridSpace.forget(level);
 			BoilingWater.forget(level);
 			OceanServer.forget(level);
+			me.skaffy.snow.SnowConversion.forget(level);
 		});
 		ServerPlayNetworking.registerGlobalReceiver(BreakRealisticPayload.TYPE, (payload, context) -> context.server().execute(() -> payload.apply(context.player())));
 		ServerPlayNetworking.registerGlobalReceiver(UseRealisticPayload.TYPE, (payload, context) -> context.server().execute(() -> payload.apply(context.player())));
@@ -148,6 +171,21 @@ public class RealisticWater implements ModInitializer {
 			}
 		});
 		ServerPlayNetworking.registerGlobalReceiver(LeavesSyncPayload.TYPE, (payload, context) -> {
+			if (isAuthority(context.server(), context.player())) {
+				context.server().execute(() -> payload.apply(context.player()));
+			}
+		});
+		ServerPlayNetworking.registerGlobalReceiver(me.skaffy.net.SnowEditPayload.TYPE, (payload, context) -> {
+			if (isAuthority(context.server(), context.player())) {
+				context.server().execute(() -> payload.apply(context.player()));
+			}
+		});
+		ServerPlayNetworking.registerGlobalReceiver(me.skaffy.net.SnowMeltPayload.TYPE, (payload, context) -> {
+			if (isAuthority(context.server(), context.player())) {
+				context.server().execute(() -> payload.apply(context.player()));
+			}
+		});
+		ServerPlayNetworking.registerGlobalReceiver(me.skaffy.net.LayerSyncPayload.TYPE, (payload, context) -> {
 			if (isAuthority(context.server(), context.player())) {
 				context.server().execute(() -> payload.apply(context.player()));
 			}

@@ -5,7 +5,12 @@
 #include "common.glsl"
 layout(local_size_x = 256) in;
 layout(std430, binding = 1) readonly buffer Src { Particle src[]; };
+layout(std430, binding = 15) readonly buffer SrcHi { Particle srcHi[]; };
+#define SRC_AT(i) (uint(i) < SPLIT_PART ? src[uint(i)] : srcHi[uint(i) - SPLIT_PART])
 layout(std430, binding = 2) writeonly buffer Dst { Particle dst[]; };
+layout(std430, binding = 16) writeonly buffer DstHi { Particle dstHi[]; };
+#define DST_AT(i) (uint(i) < SPLIT_PART ? dst[uint(i)] : dstHi[uint(i) - SPLIT_PART])
+#define DST_SET(i, v) { uint s_dst = uint(i); if (s_dst < SPLIT_PART) { dst[s_dst] = (v); } else { dstHi[s_dst - SPLIT_PART] = (v); } }
 layout(std430, binding = 3) buffer Counters { uint counters[]; };
 layout(std430, binding = 4) readonly buffer Vel { float vel[]; };
 layout(std430, binding = 5) readonly buffer VelOld { float velOld[]; };
@@ -341,15 +346,28 @@ bool stepHeat(vec3 x, inout vec3 v, inout float temp, inout uint seed, out bool 
             magmaTarget = G.heatC.x;
         } else if (code == 2u) {
             lava = true;
-        } else if (code == 3u || code == 4u) {
-            float target = code == 3u ? G.heatC.z : G.heatC.w;
-            float rate = code == 3u ? G.heatE.z : G.heatE.w;
+        } else if (code == 3u || code == 4u || code == 7u) {
+            float target = code == 3u ? G.heatC.z : code == 4u ? G.heatC.w : G.heatF.x;
+            float rate = code == 3u ? G.heatE.z : code == 4u ? G.heatE.w : G.heatF.y;
             if (temp < target) {
                 temp += (target - temp) * (1.0 - exp(-rate * DT));
             }
             heated = true;
         } else if (code >= 5u && temp > 0.0) {
             temp = max(temp - G.heatB.y * temp * perFlux, 0.0);
+        }
+    }
+    for (int k = 0; k < 27; k++) {
+        ivec3 d3 = ivec3(k % 3, (k / 3) % 3, k / 9) - 1;
+        if (abs(d3.x) + abs(d3.y) + abs(d3.z) < 2) {
+            continue;
+        }
+        if (thermalAt(x + vec3(d3)) == 3u) {
+            float target = G.heatC.z;
+            if (temp < target) {
+                temp += (target - temp) * (1.0 - exp(-G.heatE.z * 0.6 * DT));
+            }
+            heated = true;
         }
     }
     if (magmaTarget < 0.0 && G.heatC.y > 0.0) {
@@ -359,6 +377,24 @@ bool stepHeat(vec3 x, inout vec3 v, inout float temp, inout uint seed, out bool 
             if (((word >> THERMAL_SHIFT) & 7u) == 1u) {
                 float fade = clamp(1.0 - float(d - 1) / G.heatC.y, 0.0, 1.0);
                 magmaTarget = mix(G.heatA.y, G.heatC.x, fade);
+                break;
+            }
+            if ((word & 0x100u) != 0u) {
+                break;
+            }
+        }
+    }
+    if (G.heatF.z > 0.0) {
+        int plateReach = min(int(ceil(G.heatF.z)), MAX_MAGMA_REACH);
+        for (int d = 1; d <= plateReach; d++) {
+            uint word = lightWordAt(x - vec3(0.0, float(d) * res, 0.0));
+            if (((word >> THERMAL_SHIFT) & 7u) == 7u) {
+                float fade = clamp(1.0 - float(d - 1) / G.heatF.z, 0.0, 1.0);
+                float plateTarget = mix(G.heatA.y, G.heatF.x, fade);
+                if (temp < plateTarget) {
+                    temp += (plateTarget - temp) * (1.0 - exp(-G.heatF.y * DT));
+                }
+                heated = true;
                 break;
             }
             if ((word & 0x100u) != 0u) {
@@ -488,7 +524,7 @@ void main() {
     if (i >= counters[pc.a.x]) {
         return;
     }
-    Particle p = src[i];
+    Particle p = SRC_AT(i);
     if (p.pos.w < 0.0) {
         return;
     }
@@ -631,7 +667,7 @@ void main() {
     if (o >= uint(G.caps.x)) {
         return;
     }
-    dst[o] = Particle(vec4(xn, tag), vec4(v, isWater() ? temp : rest));
+    DST_SET(o, Particle(vec4(xn, tag), vec4(v, isWater() ? temp : rest)));
     uvec3 cell = uvec3(ivec3(floor(xn)) + AABB_BIAS);
     uvec3 lo = uvec3(subgroupMin(cell.x), subgroupMin(cell.y), subgroupMin(cell.z));
     uvec3 hi = uvec3(subgroupMax(cell.x), subgroupMax(cell.y), subgroupMax(cell.z));

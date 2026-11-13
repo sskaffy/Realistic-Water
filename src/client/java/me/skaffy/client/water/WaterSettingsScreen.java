@@ -88,6 +88,18 @@ public class WaterSettingsScreen extends OptionsSubScreen {
 		AbstractWidget widget = switch (info.kind()) {
 			case SWITCH -> CycleButton.onOffBuilder(Boolean.parseBoolean(value(info.name())))
 				.create(Component.literal(info.label()), (button, on) -> set(info.name(), on.toString()));
+			case CHOICE -> {
+				List<String> options = WaterSettingsInfo.choices(info.name());
+				int current = Math.clamp(parseInt(value(info.name())), 0, Math.max(0, options.size() - 1));
+				yield CycleButton.builder(Component::literal, options.get(current))
+					.withValues(options)
+					.create(Component.literal(info.label()), (button, picked) -> {
+						set(info.name(), String.valueOf(options.indexOf(picked)));
+						if ("performanceMode".equals(info.name())) {
+							this.minecraft.gui.setScreen(new WaterSettingsScreen(this.lastScreen, this.category));
+						}
+					});
+			}
 			case TEXT -> {
 				EditBox box = new EditBox(this.font, 150, 20, Component.literal(info.label()));
 				box.setMaxLength(1024);
@@ -99,7 +111,18 @@ public class WaterSettingsScreen extends OptionsSubScreen {
 			default -> new SettingSlider(info);
 		};
 		widget.setTooltip(Tooltip.create(tooltip(info)));
+		if (PerformanceMode.overrides(info.name())) {
+			widget.active = false;
+		}
 		return widget;
+	}
+
+	private static int parseInt(String value) {
+		try {
+			return Integer.parseInt(value);
+		} catch (NumberFormatException e) {
+			return 0;
+		}
 	}
 
 	private static String value(String name) {
@@ -135,7 +158,16 @@ public class WaterSettingsScreen extends OptionsSubScreen {
 		String note = info.costNote().isEmpty() ? info.cost().meaning : info.costNote();
 		out.append(Component.literal("\n" + note).withStyle(ChatFormatting.GRAY));
 		String def = WaterSettings.defaultValue(info.name());
+		if (info.kind() == WaterSettingsInfo.Kind.CHOICE) {
+			List<String> options = WaterSettingsInfo.choices(info.name());
+			int d = Math.clamp(parseInt(def), 0, Math.max(0, options.size() - 1));
+			def = options.isEmpty() ? def : options.get(d);
+		}
 		out.append(Component.literal("\nDefault: " + (def.isEmpty() ? "(empty)" : def)).withStyle(ChatFormatting.DARK_GRAY));
+		if (PerformanceMode.overrides(info.name())) {
+			out.append(Component.literal("\n\nLocked by Performance mode (" + PerformanceMode.label(PerformanceMode.mode()) + "). Your value "
+				+ PerformanceMode.userValue(info.name()) + " comes back when Performance mode is Off.").withStyle(ChatFormatting.YELLOW));
+		}
 		return out;
 	}
 

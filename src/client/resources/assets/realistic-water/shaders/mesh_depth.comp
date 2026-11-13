@@ -9,7 +9,7 @@ uint at(ivec3 c) {
     if (!inBox(c)) {
         return 0u;
     }
-    uint v = src[boxIndex(c)];
+    uint v = src[pc.a.y != 0 ? sortKey(c) : boxIndex(c)];
     return pc.a.y != 0 ? (v >= uint(pc.a.w) ? uint(pc.a.z) + 1u : 0u) : v;
 }
 

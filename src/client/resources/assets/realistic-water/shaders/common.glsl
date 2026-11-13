@@ -89,7 +89,15 @@ layout(std140, set = 0, binding = 0) uniform Globals {
     vec4 freezeA;
     vec4 freezeB;
     vec4 freezeC;
+    vec4 perfA;
+    vec4 heatF;
+    ivec4 split;
 } G;
+
+#define SPLIT_FINE uint(G.split.x)
+#define SPLIT_VERTEX uint(G.split.y)
+#define SPLIT_ACCUM uint(G.split.z)
+#define SPLIT_PART uint(G.split.w)
 
 float latentFreeze() {
     return max(G.freezeA.z, 1.0);
@@ -216,6 +224,23 @@ int boxIndex(ivec3 c) {
     ivec3 d = boxDims();
     ivec3 l = c - G.boxMin.xyz;
     return l.x + d.x * (l.y + d.y * l.z);
+}
+
+ivec3 sortBricks() {
+    return (boxDims() + 3) >> 2;
+}
+
+int sortKeyCount() {
+    ivec3 b = sortBricks();
+    return b.x * b.y * b.z * 64;
+}
+
+int sortKey(ivec3 c) {
+    ivec3 l = c - G.boxMin.xyz;
+    ivec3 b = l >> 2;
+    ivec3 i = l & 3;
+    ivec3 nb = sortBricks();
+    return ((b.x + nb.x * (b.y + nb.y * b.z)) << 6) | i.x | (i.y << 2) | (i.z << 4);
 }
 
 bool inInnerBox(vec3 x) {

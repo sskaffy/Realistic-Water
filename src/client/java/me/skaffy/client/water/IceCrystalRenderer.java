@@ -25,7 +25,7 @@ final class IceCrystalRenderer implements AutoCloseable {
 	private final Sampler linear = new Sampler(true);
 
 	IceCrystalRenderer() {
-		this.cull = new ComputeProgram("crystal_cull.comp", Desc.UBO, Desc.SSBO, Desc.SSBO, Desc.SSBO, Desc.SSBO, Desc.SSBO);
+		this.cull = new ComputeProgram("crystal_cull.comp", Desc.UBO, Desc.SSBO, Desc.SSBO, Desc.SSBO, Desc.SSBO, Desc.SSBO, Desc.SSBO);
 	}
 
 	static boolean wanted() {
@@ -76,8 +76,8 @@ final class IceCrystalRenderer implements AutoCloseable {
 		for (WaterRenderer.Body body : water) {
 			WaterRegion r = body.region();
 			VkBuf crystals = this.buffer(r);
-			this.cull.bind(cb, body.ubo(), Desc.ssbo(r.currentParticles()), Desc.ssbo(r.cellCount), Desc.ssbo(crystals), Desc.ssbo(r.args),
-				Desc.ssbo(r.counters));
+			this.cull.bind(cb, body.ubo(), r.currentParticles().part0(), Desc.ssbo(r.cellCount), Desc.ssbo(crystals), Desc.ssbo(r.args),
+				Desc.ssbo(r.counters), r.currentParticles().part1());
 			this.cull.push(cb, WaterRegion.C_FLUID + r.cur, this.capacities.get(r));
 			this.cull.dispatchIndirect(cb, r.args, WaterRegion.ARGS_FLUID_DISPATCH);
 		}
