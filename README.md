@@ -45,6 +45,8 @@ How to use:
 - Wobbly slime and honey can be converted into realistic blocks
 - Realistic Fire
 - Realistic fire for furnace, torch, campfire, candle
+- Realistic snow
+- Realistic snowball
 - Realistic ice toggle for vanilla ice
 - Realistic ice for realistic water (can be obtained if the water is freezing)
 - Realistic slush for realistic water (can be obtained if the water is almost freezing)
