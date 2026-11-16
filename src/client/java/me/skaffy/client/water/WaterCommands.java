@@ -35,6 +35,10 @@ public final class WaterCommands {
 		dispatcher.register(literal("water")
 			.executes(WaterCommands::openMenu)
 			.then(op("gui").executes(WaterCommands::openMenu))
+			.then(literal("liquids").executes(c -> {
+				me.skaffy.client.liquid.LiquidEditorScreen.openNextTick();
+				return 1;
+			}))
 			.then(op("stats").executes(c -> {
 				c.getSource().sendFeedback(Component.literal(WaterWorld.get().statsLine()));
 				return 1;
@@ -77,6 +81,16 @@ public final class WaterCommands {
 					c.getSource().sendFeedback(Component.literal("Removing all realistic water around you (springs included)"));
 					return 1;
 				})
+				.then(op("liquids").executes(c -> {
+					WaterWorld.get().removeAllLiquids(Minecraft.getInstance().options.renderDistance().get() + 2, false);
+					c.getSource().sendFeedback(Component.literal("Removing every realistic liquid around you: water, lava, slime and custom liquids (springs included)"));
+					return 1;
+				}))
+				.then(op("custom").executes(c -> {
+					WaterWorld.get().removeAllLiquids(Minecraft.getInstance().options.renderDistance().get() + 2, true);
+					c.getSource().sendFeedback(Component.literal("Removing all custom liquids around you"));
+					return 1;
+				}))
 				.then(op("sand").executes(c -> {
 					WaterWorld.get().removeAll(Minecraft.getInstance().options.renderDistance().get() + 2, Material.SAND);
 					c.getSource().sendFeedback(Component.literal("Removing all realistic sand around you"));

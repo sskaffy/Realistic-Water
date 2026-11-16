@@ -92,6 +92,11 @@ layout(std140, set = 0, binding = 0) uniform Globals {
     vec4 perfA;
     vec4 heatF;
     ivec4 split;
+    vec4 liquidA;
+    vec4 liquidB;
+    vec4 liquidC;
+    vec4 liquidD;
+    vec4 liquidE;
 } G;
 
 #define SPLIT_FINE uint(G.split.x)
@@ -145,7 +150,15 @@ bool isLeaves() {
 }
 
 bool isSteam() {
-    return G.matA.x > 4.5;
+    return G.matA.x > 4.5 && G.matA.x < 9.5;
+}
+
+bool isCustom() {
+    return G.matA.x > 9.5;
+}
+
+bool stickyLiquid() {
+    return isSlime() || isCustom();
 }
 
 #define NX G.dims.x
@@ -281,6 +294,7 @@ bool entIsDrain(int e) { return abs(G.ent[e * 3 + 2].w - 3.0) < 0.5; }
 bool entIsBox(int e) { return G.ent[e * 3 + 2].w < -1e-4; }
 bool entIsContainer(int e) { return abs(G.ent[e * 3 + 2].w - 4.0) < 0.5; }
 bool entIsExtra(int e) { return abs(G.ent[e * 3 + 2].w - 5.0) < 0.5; }
+bool entIsPiston(int e) { return abs(G.ent[e * 3 + 2].w - 6.0) < 0.5; }
 bool entIsBody(int e) { return entIsCell(e) || entIsBox(e) || entIsContainer(e); }
 
 struct Vessel {

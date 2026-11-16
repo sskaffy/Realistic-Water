@@ -116,6 +116,10 @@ public final class WaterSettingsInfo {
 				+ "simulation from the blocks, so moving water snaps to its block shape once.");
 
 		category("Water simulation");
+		integer("simulationStyle", "Simulation Style", Cost.LOW, "Style 2 makes water move faster, so fast water can need an extra substep.", 1, 2,
+			"1 is the older, softer water. 2 (the default) makes water feel less like jelly: it is as heavy as everything else in Minecraft (twice the Gravity setting), "
+				+ "so it falls, spreads and sloshes quicker; slow water stops jiggling and settles flat while fast water stays just as "
+				+ "splashy; and nearly level water is shaded flat instead of as soft bumps. Only placed water, not the realistic ocean.");
 		toggle("vanillaWaterExchange", "Mix with vanilla water", Cost.LOW, "Checks blocks where flowing vanilla water appears.",
 			"Realistic water that runs into still vanilla water (lakes, the sea) joins it, and flowing vanilla water that reaches "
 				+ "realistic water turns into realistic water, so a vanilla stream keeps filling a realistic pool.");
@@ -260,6 +264,10 @@ public final class WaterSettingsInfo {
 			"Size of one particle drawn as a droplet, in cells.");
 
 		category("Water look");
+		integer("waterStyle", "Water Style", Cost.NONE, LOOK, 1, 2,
+			"1 is the older look, shaped by the settings below. 2 (the default) is clear in the shallows and fades to deep teal, with a hazy sky "
+				+ "reflection that glows around the sun, fine ripples on deeper water and a sharp sun glint with a soft halo. Style 2 has "
+				+ "its own fixed colours, so the absorb, scatter, ripple, roughness, sun glint and wet darkening sliders do nothing with it.");
 		toggle("waterSeaLook", "Look like the sea", Cost.NONE, LOOK,
 			"Placed realistic water (buckets) uses the realistic ocean's look and its settings (colour, tint, glints) instead of the settings here.");
 		num("thicknessScale", "Thickness scale", Cost.NONE, LOOK, 0, 4, 0.05,
@@ -306,6 +314,9 @@ public final class WaterSettingsInfo {
 			"Flattens the lighting of very thin water so puddles don't get a glassy rim.");
 
 		category("Lava");
+		toggle("lavaRealisticTexture", "Realistic texture", Cost.NONE, "A few extra noise lookups per lava pixel.",
+			"Gives lava a slowly drifting texture: darker cooling crust, brighter molten patches and thin glowing veins, instead of one "
+				+ "even colour. Off is the plain look.");
 		integer("lavaResolution", "Resolution", Cost.EXTREME, "Same as water: doubling it is roughly 8x the cost.", 1, 16,
 			"Simulation cells per block for lava. Changing it rebuilds every lava body.");
 		num("lavaFlipRatio", "FLIP ratio", Cost.NONE, LOOK, 0.8, 1, 0.0001,
@@ -364,6 +375,17 @@ public final class WaterSettingsInfo {
 			"Also lets vanilla fire, torches, campfires and furnaces give off realistic flames and smoke. Off by default; only the realistic blocks do.");
 		toggle("fireParticles", "Draw fire", Cost.MEDIUM, "Every fire adds particles to the GPU simulation.",
 			"Draws flames, smoke and sparks. Turn it off to keep fire blocks working but invisible.");
+		toggle("fireCoverEntities", "Flames on burning players and mobs", Cost.LOW, "Each burning player or mob near you adds a puff of flame particles.",
+			"Anything that is on fire is covered in realistic flames instead of the vanilla fire texture, in first person too. "
+				+ "Burning still hurts exactly as before. Needs Draw fire.");
+		num("fireCoverAmount", "Flames on burning things: amount", Cost.LOW, "More flame particles per burning player or mob.", 0.05, 10, 0.05,
+			"How much fire covers a burning player or mob. 1 is a light covering; raise it for a bigger blaze.");
+		toggle("fireFlameHitbox", "Flames burn what touches them", Cost.LOW, "Checks players and mobs against the flames a few times a second.",
+			"Walking into the flames themselves (not just the fire block) sets you on fire and hurts. In singleplayer, or as an operator, "
+				+ "it also burns mobs.");
+		toggle("fireFlameIgnites", "Flames set blocks alight", Cost.LOW, "Checks the blocks flames reach a few times a second.",
+			"Flames that keep licking a flammable block set it on fire after a while, including flames from torches, campfires and "
+				+ "furnaces. Only the singleplayer owner or an operator does this.");
 		integer("fireMaxSources", "Max fire sources", Cost.MEDIUM, "Each active source puffs particles every few ticks.", 1, 4096,
 			"The most fires drawn at once, nearest first.");
 		num("fireRange", "Fire search range", Cost.LOW, "How far out fire sources stay tracked.", 8, 256, 1,
@@ -666,6 +688,14 @@ public final class WaterSettingsInfo {
 			"How much of the water behind a fully powered water pump it moves to the front each second (4 = about four blocks of water per second). Weaker redstone signals pump less.");
 		num("waveMakerSpeed", "Jet speed scale", Cost.NONE, LOOK, 0.1, 5, 0.05,
 			"Multiplies how fast water leaves the front for every speed setting (slow 2, medium 4, fast 14 blocks per second).");
+
+		category("Pistons");
+		num("pistonPush", "Piston push strength", Cost.LOW, "Harder pushes throw water faster, which needs more substeps for a moment.", 0, 1, 0.05,
+			"How much of a piston's real speed (10 blocks per second) is handed to the water, lava, slime, sand and leaves it shoves. "
+				+ "The material is always moved out of the piston's way; this only sets how hard it is thrown. 1 is the full slap.");
+		num("pistonSplashSpeed", "Piston splash limit", Cost.LOW, "Lower limits keep squeezed water from spraying far, so the simulated area stays small.", 0, 40, 0.5,
+			"The fastest water may move right next to a moving piston, in blocks per second. Water squeezed between a piston and a "
+				+ "wall would otherwise shoot out many times faster than the piston. 0 removes the limit.");
 
 		category("TNT and explosions");
 		toggle("tntReactions", "Explosions push fluids", Cost.LOW, "One small pass per explosion per body it reaches.",
@@ -1001,6 +1031,23 @@ public final class WaterSettingsInfo {
 			"Seconds for water touching a powered hot plate to get most of the way to its temperature.");
 		num("hotPlateHeatReach", "Hot plate heat reach", Cost.NONE, LOOK, 0, 8, 0.5,
 			"How many blocks up a powered hot plate heats the water above it, fading with height, like magma. Longer reach heats a deeper pool, so the whole body can roll at the boil.");
+		toggle("hotBlocks", "Blocks glow when hot", Cost.LOW, "Looks for heat sources in the chunk sections around you, two sections per tick.",
+			"Iron blocks, stone, cobblestone, deepslate and cobbled deepslate next to lava, fire, a powered hot plate, magma, a lit campfire "
+				+ "or a lit furnace slowly heat up and start to glow red, then orange. Iron passes the heat on through three blocks, stone "
+				+ "through two. A block that is glowing also heats the water touching it and melts snow. They cool down again when the "
+				+ "heat is gone.");
+		toggle("hotBlockDamage", "Hot blocks hurt", Cost.LOW, "Checks the blocks you and nearby mobs touch a few times a second.",
+			"Touching a glowing block hurts, more the hotter it is. At full heat it does the same damage as lava and sets you on fire. "
+				+ "In singleplayer, or as an operator, mobs are hurt too. A small amount of water landing on a very hot block also "
+				+ "flashes into steam.");
+		num("hotBlockMetalTime", "Iron heating time", Cost.NONE, LOOK, 1, 600, 1,
+			"Seconds for an iron block touching lava to reach full heat.");
+		num("hotBlockStoneTime", "Stone heating time", Cost.NONE, LOOK, 1, 600, 1,
+			"Seconds for stone touching lava to reach full heat.");
+		num("hotBlockGlowStart", "Glow starts at", Cost.NONE, LOOK, 0, 0.95, 0.01,
+			"How hot a block has to be (0 cold, 1 fully heated) before it starts to turn red.");
+		num("hotBlockGlow", "Glow strength", Cost.NONE, LOOK, 0, 1, 0.01,
+			"How strongly the red glow covers the block.");
 		num("boilChurn", "Boiling churn", Cost.NONE, LOOK, 0, 40, 0.5,
 			"How hard boiling stirs the water at the hot spot, in blocks per second squared.");
 		num("boilSteam", "Boiling steam", Cost.MEDIUM, "More steam means more steam points.", 0, 5, 0.05,

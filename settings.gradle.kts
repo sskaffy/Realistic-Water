@@ -14,4 +14,3 @@ pluginManagement {
 }
 
 rootProject.name = "realistic-water"
-

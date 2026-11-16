@@ -10,6 +10,21 @@ public final class SyncMaterial {
 	public static final byte SLIME = 3;
 	public static final byte LEAVES = 4;
 	public static final byte GRAVEL = 5;
+	public static final byte CUSTOM = 6;
+	public static final byte ALL_LIQUIDS = 7;
+
+	public static boolean matches(byte material, net.minecraft.world.level.block.state.BlockState state) {
+		if (me.skaffy.block.RealisticWaterBlock.isOcean(state)) {
+			return false;
+		}
+		Block b = state.getBlock();
+		return switch (material) {
+			case CUSTOM -> b == ModContent.CUSTOM_LIQUID_BLOCK;
+			case ALL_LIQUIDS -> b == ModContent.REALISTIC_WATER_BLOCK || b == ModContent.REALISTIC_LAVA_BLOCK || b == ModContent.REALISTIC_SLIME_BLOCK
+				|| b == ModContent.CUSTOM_LIQUID_BLOCK;
+			default -> b == block(material);
+		};
+	}
 
 	private SyncMaterial() {
 	}
@@ -32,6 +47,8 @@ public final class SyncMaterial {
 			case SLIME -> "slime";
 			case LEAVES -> "leaves";
 			case GRAVEL -> "gravel";
+			case CUSTOM -> "custom liquid";
+			case ALL_LIQUIDS -> "liquid";
 			default -> "water";
 		};
 	}

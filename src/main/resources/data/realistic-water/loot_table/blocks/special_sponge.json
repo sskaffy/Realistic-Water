@@ -1,0 +1,15 @@
+{
+  "type": "minecraft:block",
+  "pools": [
+    {
+      "rolls": 1,
+      "entries": [
+        {
+          "type": "minecraft:item",
+          "name": "realistic-water:special_sponge"
+        }
+      ]
+    }
+  ],
+  "random_sequence": "realistic-water:blocks/special_sponge"
+}

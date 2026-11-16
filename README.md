@@ -1,7 +1,7 @@
 # Realistic Water
 A Minecraft mod that adds a lot of cool, realistic stuff from Minecraft Blender animations.
 
-![Project Screenshot](images/4.png)
+![Project Screenshot](images/1.png)
 
 #
 
@@ -18,15 +18,18 @@ How to use:
 10. Remove realistic things: "/water remove" to remove water and "/water remove <block>" for everything else (op only) 
 11. Use "Water Pump" to move water in ways it couldn't flow by itself (has to be powered by redstone)
 12. Use "Realistic Water Drain" to drain realistic water
+13. Use "Special Sponge" to suck up custom liquids
 13. Customize most things about how things look/move in "/water gui" (or just "/water" if you aren't op)
 14. Turn on Realistic Ocean in "/water" or in sodium settings (this makes oceans look realistic and adds realistic physics to the water)
-15. Use shaders with Vitrail! Any OF/Iris shaders (even Complementary Shaders) will work, download Vitrail from: https://modrinth.com/mod/vitrail-shaders
+15. Make custom liquids in "/water liquids"
+16. Use shaders with Vitrail! Any OF/Iris shaders (even Complementary Shaders) will work, download Vitrail from: https://modrinth.com/mod/vitrail-shaders
 
 #
 
 ### What the mod contains:
 
 - Realistic water
+- Custom liquids
 - Small Bucket of Realistic water (puts down only 1 block of realistic water instead of an infinite source)
 - Realistic water boiling, moving with pumps, ultra realistic physics, reacting to entities, swim in it, react to realistic blocks
 - Realistic blocks (can be obtained by right clicking a Realistic Convertor and putting any block inside)
@@ -74,9 +77,9 @@ How to use:
 
 ![Project Screenshot](images/3.png)
 
-**Realistic Fire:**
+**Realistic Water:**
 
-![Project Screenshot](images/1.png)
+![Project Screenshot](images/4.png)
 
 **Wobbly Slime and Honey:**
 

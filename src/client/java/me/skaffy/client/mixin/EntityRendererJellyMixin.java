@@ -14,6 +14,13 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(EntityRenderer.class)
 public abstract class EntityRendererJellyMixin {
 	@Inject(method = "extractRenderState", at = @At("TAIL"))
+	private void realisticWater$realisticFlames(Entity entity, EntityRenderState state, float partialTicks, CallbackInfo ci) {
+		if (state.displayFireAnimation && me.skaffy.client.fire.FireCover.covers(entity.getX(), entity.getY(), entity.getZ())) {
+			state.displayFireAnimation = false;
+		}
+	}
+
+	@Inject(method = "extractRenderState", at = @At("TAIL"))
 	private void realisticWater$standInDent(Entity entity, EntityRenderState state, float partialTicks, CallbackInfo ci) {
 		var level = Minecraft.getInstance().level;
 		if (level != null && JellyWorld.on()) {

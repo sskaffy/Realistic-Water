@@ -30,7 +30,7 @@ public record RemoveAllWaterPayload(int radiusChunks, byte material) implements 
 
 	public int apply(ServerPlayer player) {
 		ServerLevel level = player.level();
-		Block target = SyncMaterial.block(this.material);
+		byte material = this.material;
 		int radius = Math.clamp(this.radiusChunks, 1, 64);
 		int cx = player.blockPosition().getX() >> 4;
 		int cz = player.blockPosition().getZ() >> 4;
@@ -45,13 +45,13 @@ public record RemoveAllWaterPayload(int radiusChunks, byte material) implements 
 				LevelChunkSection[] sections = chunk.getSections();
 				for (int s = 0; s < sections.length; s++) {
 					LevelChunkSection section = sections[s];
-					if (section.hasOnlyAir() || !section.maybeHas(state -> state.getBlock() == target)) {
+					if (section.hasOnlyAir() || !section.maybeHas(state -> SyncMaterial.matches(material, state))) {
 						continue;
 					}
 					int baseY = (level.getMinSectionY() + s) << 4;
 					for (int i = 0; i < 4096; i++) {
 						BlockState state = section.getBlockState(i & 15, (i >> 4) & 15, i >> 8);
-						if (state.getBlock() == target && !RealisticWaterBlock.isOcean(state)) {
+						if (SyncMaterial.matches(material, state)) {
 							pos.set(((cx + dx) << 4) + (i & 15), baseY + ((i >> 4) & 15), ((cz + dz) << 4) + (i >> 8));
 							level.setBlock(pos, Blocks.AIR.defaultBlockState(), Block.UPDATE_CLIENTS | Block.UPDATE_KNOWN_SHAPE | Block.UPDATE_SKIP_ON_PLACE);
 							removed++;

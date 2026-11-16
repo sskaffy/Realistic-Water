@@ -35,6 +35,7 @@ public class ClientLevelMixin {
 			|| RealisticWaterFluid.isRealistic(fluid)
 			|| RealisticLavaFluid.isRealistic(fluid)
 			|| RealisticSlimeFluid.isRealistic(fluid)
+			|| me.skaffy.fluid.CustomLiquidFluid.isCustom(fluid)
 			|| state.getBlock() instanceof RealisticSandBlock
 			|| state.getBlock() instanceof me.skaffy.block.RealisticGravelBlock;
 	}

@@ -61,7 +61,7 @@ void main() {
     outG = vec4(n, dist);
     vec3 rel = (G.invView * vec4(vView, 1.0)).xyz;
     vec3 nWorld = mat3(G.invView) * n;
-    float shadowed = abs(G.matA.x - 3.0) < 0.5 ? 1.0 - sunShadowFactor(relToSim(rel + nWorld * 0.1)) : 0.0;
+    float shadowed = abs(G.matA.x - 3.0) < 0.5 || isCustom() ? 1.0 - sunShadowFactor(relToSim(rel + nWorld * 0.1)) : 0.0;
     float a = G.oceanA.x > 0.1 ? 2.0 : shadowed;
     if (isWater() && G.oceanA.x < 0.5) {
         float phase = frozenPhase(relToSim(rel - nWorld * (0.6 * G.domainOrigin.w)));

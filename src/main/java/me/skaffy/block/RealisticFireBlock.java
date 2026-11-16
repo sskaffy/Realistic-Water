@@ -58,6 +58,37 @@ public class RealisticFireBlock extends FireBlock {
 		ours.realisticWater$burnOdds().put(ModContent.REALISTIC_LEAVES, 60);
 	}
 
+	public static void flameTouch(ServerLevel level, BlockPos pos) {
+		BlockState state = level.getBlockState(pos);
+		int burn = ((FireBlockAccessor) ModContent.REALISTIC_FIRE).realisticWater$burnOdds().getInt(state.getBlock());
+		if (state.is(Blocks.TNT)) {
+			burn = Math.max(burn, 60);
+		}
+		if (burn <= 0) {
+			return;
+		}
+		RandomSource random = level.getRandom();
+		if (!FireHeat.feed(level, pos, burn / 60.0 * 0.12 * (0.5 + random.nextDouble()))) {
+			return;
+		}
+		if (state.is(Blocks.TNT)) {
+			TntBlock.prime(level, pos);
+			level.removeBlock(pos, false);
+			return;
+		}
+		for (Direction d : new Direction[]{Direction.UP, Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST, Direction.DOWN}) {
+			BlockPos cell = pos.relative(d);
+			if (!level.isEmptyBlock(cell)) {
+				continue;
+			}
+			BlockState fire = placementState(level, cell);
+			if (fire.canSurvive(level, cell)) {
+				level.setBlock(cell, young(fire, random), 3);
+				return;
+			}
+		}
+	}
+
 	public static double[] wind(Level level) {
 		double t = level.getGameTime() * 0.01;
 		double strength = 0.6 + 0.6 * level.getRainLevel(1.0F) + 0.5 * level.getThunderLevel(1.0F);

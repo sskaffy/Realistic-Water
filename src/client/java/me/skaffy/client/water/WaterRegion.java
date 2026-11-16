@@ -217,6 +217,23 @@ public final class WaterRegion implements AutoCloseable {
 	final int id;
 	final int res;
 	final Material material;
+	final int liquidSlot;
+
+	me.skaffy.liquid.@Nullable CustomLiquid custom() {
+		if (this.liquidSlot < 0) {
+			return null;
+		}
+		me.skaffy.liquid.CustomLiquid liquid = me.skaffy.liquid.CustomLiquids.client(this.liquidSlot);
+		return liquid != null ? liquid : me.skaffy.liquid.CustomLiquid.missing(this.liquidSlot);
+	}
+
+	float shaderId() {
+		return this.material.shaderId() + Math.max(this.liquidSlot, 0);
+	}
+
+	boolean sameLiquid(WaterRegion other) {
+		return this.material == other.material && this.liquidSlot == other.liquidSlot;
+	}
 
 	int ox;
 	int oy;
@@ -389,9 +406,14 @@ public final class WaterRegion implements AutoCloseable {
 	static final int LIGHT_COVER_SHIFT = 14;
 
 	WaterRegion(int id, int res, Material material) {
+		this(id, res, material, -1);
+	}
+
+	WaterRegion(int id, int res, Material material, int liquidSlot) {
 		this.id = id;
 		this.res = res;
 		this.material = material;
+		this.liquidSlot = material == Material.CUSTOM ? liquidSlot : -1;
 		for (int i = 0; i < 2; i++) {
 			this.particles[i] = me.skaffy.client.vk.SplitBuf.device(this.fluidCapacity, PARTICLE_BYTES);
 			this.whitewater[i] = me.skaffy.client.vk.SplitBuf.device(this.wwCapacity, PARTICLE_BYTES);
@@ -1423,6 +1445,12 @@ public final class WaterRegion implements AutoCloseable {
 			if (code == 0 && conductsHeat(state)) {
 				code = conductedCode(level, pos, CONDUCT_REACH);
 			}
+			if (code == 0 && me.skaffy.client.heat.HotBlocks.hot(pos)) {
+				code = 3;
+				if (me.skaffy.client.heat.HotBlocks.heatAt(pos) >= me.skaffy.client.heat.HotBlocks.FLASH) {
+					medium |= LIGHT_HOT;
+				}
+			}
 			thermal = code << THERMAL_SHIFT;
 		}
 		int sea = 0;
@@ -1460,6 +1488,9 @@ public final class WaterRegion implements AutoCloseable {
 		int code = thermalCode(state);
 		if (code == 0 && conductsHeat(state)) {
 			code = conductedCode(level, pos, CONDUCT_REACH);
+		}
+		if (code == 0 && me.skaffy.client.heat.HotBlocks.hot(pos)) {
+			code = 3;
 		}
 		return code;
 	}
@@ -1538,6 +1569,9 @@ public final class WaterRegion implements AutoCloseable {
 		if (state.getBlock() == ModContent.REALISTIC_SLIME_BLOCK) {
 			return Math.clamp(state.getFluidState().getAmount(), 0, 8);
 		}
+		if (state.getBlock() == ModContent.CUSTOM_LIQUID_BLOCK) {
+			return me.skaffy.block.CustomLiquidBlock.eighths(state);
+		}
 		if (state.isAir() || state.canOcclude()) {
 			return 0;
 		}
@@ -1556,6 +1590,9 @@ public final class WaterRegion implements AutoCloseable {
 	}
 
 	boolean whitewaterOn() {
+		if (this.material == Material.CUSTOM) {
+			return WaterSettings.whitewater && this.custom().foams();
+		}
 		return this.material.usesWhitewater() && (this.ocean != null ? WaterSettings.oceanWhitewater : WaterSettings.whitewater);
 	}
 
@@ -1570,6 +1607,10 @@ public final class WaterRegion implements AutoCloseable {
 		return settled && this.initialized && this.lastAwakeFrame > this.wakeFrame
 			&& this.pending.isEmpty() && this.removals.isEmpty() && this.absorbQueue.isEmpty() && this.pendingShift == null
 			&& !this.solidsFullUpload && this.solidPatches.isEmpty() && this.solidRangeHi <= this.solidRangeLo && !this.freshGrid;
+	}
+
+	boolean settledForSponge() {
+		return this.calmSeconds >= Math.max(WaterSettings.fluidRestTime, 0.5F);
 	}
 
 	void trackCalm(float seconds, int steps) {
@@ -1772,7 +1813,7 @@ public final class WaterRegion implements AutoCloseable {
 		p[0].bind(cb, ubo, Desc.ssbo(this.counters), Desc.ssbo(this.args));
 		p[0].push(cb, C_FLUID + this.cur, C_WW + this.wwCur);
 		p[0].dispatch(cb, 1, 1, 1);
-		if (this.material.usesWhitewater() && !(this.ocean != null && OceanMode.packDrawsSea())) {
+		if (this.material == Material.WATER && !(this.ocean != null && OceanMode.packDrawsSea())) {
 			p[13].bind(cb, ubo, Desc.ssbo(this.cellDens), Desc.ssbo(this.cellFlags), Desc.ssbo(frameView));
 			p[13].dispatch(cb, 1, 1, 1);
 		}
@@ -2188,7 +2229,7 @@ public final class WaterRegion implements AutoCloseable {
 		p[5].dispatch(cb, faceGroups, 1, 1);
 		Vk.barrier(cb);
 
-		if (this.material == Material.SLIME && WaterSettings.slimeViscosity > 0.0F && WaterSettings.slimeViscosityIterations > 0) {
+		if (this.viscosityValue() > 0.0F && this.viscosityIterations() > 0) {
 			this.viscosity(cb, ubo, faceGroups);
 		}
 
@@ -2403,10 +2444,22 @@ public final class WaterRegion implements AutoCloseable {
 		}
 	}
 
+	private float viscosityValue() {
+		return this.material == Material.SLIME ? WaterSettings.slimeViscosity
+			: this.material == Material.CUSTOM ? this.custom().get(me.skaffy.liquid.LiquidParam.VISCOSITY) : 0.0F;
+	}
+
+	private int viscosityIterations() {
+		if (this.material == Material.CUSTOM) {
+			return Math.max(WaterSettings.slimeViscosityIterations, 2 + Math.round(2.0F * this.custom().get(me.skaffy.liquid.LiquidParam.VISCOSITY)));
+		}
+		return WaterSettings.slimeViscosityIterations;
+	}
+
 	private void viscosity(VkCommandBuffer cb, Desc ubo, int faceGroups) {
 		ComputeProgram visc = programs()[23];
-		int sweeps = Math.max(2, WaterSettings.slimeViscosityIterations);
-		float nu = WaterSettings.slimeViscosity * this.res * this.res;
+		int sweeps = Math.max(2, this.viscosityIterations());
+		float nu = this.viscosityValue() * this.res * this.res;
 		for (int k = 0; k < sweeps; k++) {
 			int src = k == 0 ? -1 : ((k - 1) % 2) * this.numFaces;
 			int dst = k == sweeps - 1 ? -1 : (k % 2) * this.numFaces;

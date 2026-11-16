@@ -138,6 +138,9 @@ public class RealisticWaterClient implements ClientModInitializer {
 		ClientCommandRegistrationCallback.EVENT.register(FireCommands::register);
 		ClientTickEvents.END_CLIENT_TICK.register(fire::tick);
 		ClientTickEvents.END_CLIENT_TICK.register(me.skaffy.client.fire.FireEffects::tick);
+		ClientTickEvents.END_CLIENT_TICK.register(me.skaffy.client.heat.HotBlocks::tick);
+		ClientTickEvents.END_CLIENT_TICK.register(me.skaffy.client.fire.FireCover::tick);
+		ClientTickEvents.END_CLIENT_TICK.register(me.skaffy.client.fire.FlameContact::tick);
 		ClientChunkEvents.CHUNK_LOAD.register(fire::onChunkLoad);
 		ClientChunkEvents.CHUNK_UNLOAD.register(fire::onChunkUnload);
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
@@ -146,6 +149,13 @@ public class RealisticWaterClient implements ClientModInitializer {
 			me.skaffy.client.fire.FireHeatClient.clear();
 		});
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> me.skaffy.client.snow.SnowCover.get().clear());
+		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> client.execute(me.skaffy.liquid.CustomLiquids::clearClient));
+		ClientPlayNetworking.registerGlobalReceiver(me.skaffy.net.LiquidDefsPayload.TYPE, (payload, context) -> context.client().execute(() -> {
+			me.skaffy.liquid.CustomLiquids.setClient(payload.liquids());
+			if (context.client().gui.screen() instanceof me.skaffy.client.liquid.LiquidEditorScreen editor) {
+				editor.definitionsChanged();
+			}
+		}));
 		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> water.shutdown());
 	}
 
@@ -199,6 +209,7 @@ public class RealisticWaterClient implements ClientModInitializer {
 			BlockTintSources.constant(0x7EDB5C)
 		);
 		FluidRenderingRegistry.register(ModContent.REALISTIC_SLIME, ModContent.FLOWING_REALISTIC_SLIME, slimeModel, invisible);
+		FluidRenderingRegistry.register(ModContent.CUSTOM_LIQUID, ModContent.FLOWING_CUSTOM_LIQUID, slimeModel, invisible);
 		ParticleProviderRegistry.getInstance().register(ModContent.STEAM, SteamParticle.Provider::new);
 	}
 }

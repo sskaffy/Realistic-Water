@@ -1,6 +1,5 @@
 #!/bin/sh
 
-
 #
 # Copyright © 2015 the original authors.
 #
@@ -18,7 +17,6 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-
 
 ##############################################################################
 #

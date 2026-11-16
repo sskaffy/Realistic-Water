@@ -98,10 +98,30 @@ bool slimeSupported(vec3 x) {
     return true;
 }
 
+const ivec3 OUT[6] = ivec3[](ivec3(0, 1, 0), ivec3(1, 0, 0), ivec3(-1, 0, 0), ivec3(0, 0, 1), ivec3(0, 0, -1), ivec3(0, -1, 0));
+
+vec3 digOut(vec3 x, inout vec3 v) {
+    ivec3 c = ivec3(floor(x));
+    int reach = int(G.camGrid.w) + 2;
+    for (int d = 2; d <= reach; d++) {
+        for (int k = 0; k < 6; k++) {
+            ivec3 nc = c + OUT[k] * d;
+            if (!inGrid(nc) || staticSolid[cellIndex(nc)] != 0u) {
+                continue;
+            }
+            int a = OUT[k].x != 0 ? 0 : OUT[k].y != 0 ? 1 : 2;
+            vec3 r = x;
+            r[a] = float(nc[a]) + 0.5;
+            v = vec3(0.0);
+            return r;
+        }
+    }
+    return x;
+}
+
 vec3 escapeSolid(vec3 x, inout vec3 v) {
     ivec3 c = ivec3(floor(x));
     vec3 f = x - vec3(c);
-    const ivec3 OUT[6] = ivec3[](ivec3(0, 1, 0), ivec3(1, 0, 0), ivec3(-1, 0, 0), ivec3(0, 0, 1), ivec3(0, 0, -1), ivec3(0, -1, 0));
     float best = 9.0;
     int pick = -1;
     for (int k = 0; k < 6; k++) {
@@ -117,7 +137,7 @@ vec3 escapeSolid(vec3 x, inout vec3 v) {
         }
     }
     if (pick < 0) {
-        return x;
+        return digOut(x, v);
     }
     vec3 n = vec3(OUT[pick]);
     int a = OUT[pick].x != 0 ? 0 : OUT[pick].y != 0 ? 1 : 2;
@@ -212,11 +232,32 @@ vec3 collideEntities(vec3 x, inout vec3 v) {
         if (vn < en) {
             v += n * (en - vn);
         }
-        if (isSlime()) {
+        if (stickyLiquid()) {
             v = mix(v, ve, G.matA.z);
         }
     }
     return x;
+}
+
+void calmNearPistons(vec3 x, inout vec3 v, inout vec3 dx) {
+    float reach = 1.5 * G.camGrid.w;
+    for (int e = 0; e < numEntities(); e++) {
+        if (!entIsPiston(e)) {
+            continue;
+        }
+        float cap = G.ent[e * 3].w;
+        if (cap <= 0.0 || any(lessThan(x, entMin(e) - reach)) || any(greaterThan(x, entMax(e) + reach))) {
+            continue;
+        }
+        float s = length(v);
+        if (s > cap) {
+            v *= cap / s;
+        }
+        float dl = length(dx);
+        if (dl > cap * DT) {
+            dx *= cap * DT / dl;
+        }
+    }
 }
 
 bool drainWater(vec3 x) {
@@ -338,6 +379,7 @@ bool stepHeat(vec3 x, inout vec3 v, inout float temp, inout uint seed, out bool 
     float perFlux = G.heatA.w * DT;
     float magmaTarget = -1.0;
     bool lava = false;
+    bool flash = false;
     for (int k = 1; k < 7; k++) {
         vec3 o = vec3(0.0);
         o[(k - 1) >> 1] = (k & 1) == 1 ? 1.0 : -1.0;
@@ -347,6 +389,9 @@ bool stepHeat(vec3 x, inout vec3 v, inout float temp, inout uint seed, out bool 
         } else if (code == 2u) {
             lava = true;
         } else if (code == 3u || code == 4u || code == 7u) {
+            if (code == 3u && (lightWordAt(x + o) & 0x2000u) != 0u) {
+                flash = true;
+            }
             float target = code == 3u ? G.heatC.z : code == 4u ? G.heatC.w : G.heatF.x;
             float rate = code == 3u ? G.heatE.z : code == 4u ? G.heatE.w : G.heatF.y;
             if (temp < target) {
@@ -407,6 +452,22 @@ bool stepHeat(vec3 x, inout vec3 v, inout float temp, inout uint seed, out bool 
             temp += (magmaTarget - temp) * (1.0 - exp(-G.heatE.x * DT));
         }
         heated = true;
+    }
+    if (flash) {
+        int halfBlock = max(1, int(res) / 2);
+        bool shallow = false;
+        for (int d = 1; d <= halfBlock; d++) {
+            if (countAt(c + ivec3(0, d, 0)) == 0) {
+                shallow = true;
+                break;
+            }
+        }
+        if (shallow) {
+            temp = max(temp, 100.0);
+            if (rand(seed) < 1.0 - exp(-12.0 * DT)) {
+                return false;
+            }
+        }
     }
     if (lava) {
         heated = true;
@@ -547,7 +608,12 @@ void main() {
     if (gridded) {
         vec3 uNew = sampleVel(x);
         vec3 uOld = sampleVelOld(x);
-        v = mix(uNew, v + (uNew - uOld), G.simA.x);
+        float flip = G.simA.x;
+        if (G.perfA.w > 0.5 && isWater()) {
+            float blocksPerSecond = length(uNew) / G.camGrid.w;
+            flip *= mix(pow(0.9, DT * 60.0), 1.0, smoothstep(0.2, 1.2, blocksPerSecond));
+        }
+        v = mix(uNew, v + (uNew - uOld), flip);
         dx = DT * sampleVel(x + 0.5 * DT * uNew);
         if (!wasIce && !waterFilm(x, v, dx, tag)) {
             return;
@@ -599,10 +665,10 @@ void main() {
                 return;
             }
         }
-        bool squeezed = isSlime() && float(countAt(ivec3(floor(x)))) > G.simA.y * 1.5;
-        if (isSlime() && squeezed) {
+        bool squeezed = stickyLiquid() && float(countAt(ivec3(floor(x)))) > G.simA.y * 1.5;
+        if (stickyLiquid() && squeezed) {
             rest = 0.0;
-        } else if (isSlime()) {
+        } else if (stickyLiquid()) {
             slimeAdhere(x, v, dx);
             rest = p.vel.w;
             bool frozen = rest >= G.matC.y;
@@ -618,6 +684,7 @@ void main() {
         v += G.gravityDt.xyz * DT;
         dx = DT * v;
     }
+    calmNearPistons(x, v, dx);
     float s = length(v);
     if (s > maxSpeed) {
         v *= maxSpeed / s;

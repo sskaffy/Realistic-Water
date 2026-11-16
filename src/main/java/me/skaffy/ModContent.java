@@ -158,6 +158,39 @@ public final class ModContent {
 		}
 	});
 
+	public static final FlowingFluid FLOWING_CUSTOM_LIQUID = Registry.register(
+		BuiltInRegistries.FLUID, RealisticWater.id("flowing_custom_liquid"), new me.skaffy.fluid.CustomLiquidFluid.Flowing());
+	public static final FlowingFluid CUSTOM_LIQUID = Registry.register(
+		BuiltInRegistries.FLUID, RealisticWater.id("custom_liquid"), new me.skaffy.fluid.CustomLiquidFluid.Source());
+
+	public static final ResourceKey<Block> CUSTOM_LIQUID_BLOCK_KEY = ResourceKey.create(Registries.BLOCK, RealisticWater.id("custom_liquid"));
+	public static final Block CUSTOM_LIQUID_BLOCK = Registry.register(BuiltInRegistries.BLOCK, CUSTOM_LIQUID_BLOCK_KEY, new me.skaffy.block.CustomLiquidBlock(
+		CUSTOM_LIQUID,
+		BlockBehaviour.Properties.of()
+			.mapColor(MapColor.COLOR_LIGHT_GRAY)
+			.replaceable()
+			.noCollision()
+			.strength(100.0F)
+			.pushReaction(PushReaction.POPPED)
+			.noLootTable()
+			.liquid()
+			.sound(SoundType.EMPTY)
+			.setId(CUSTOM_LIQUID_BLOCK_KEY)
+	));
+
+	public static final DataComponentType<Integer> LIQUID_SLOT = Registry.register(BuiltInRegistries.DATA_COMPONENT_TYPE, RealisticWater.id("liquid_slot"),
+		DataComponentType.<Integer>builder().persistent(com.mojang.serialization.Codec.intRange(0, me.skaffy.liquid.CustomLiquid.MAX_SLOTS - 1))
+			.networkSynchronized(net.minecraft.network.codec.ByteBufCodecs.VAR_INT).build());
+
+	public static final ResourceKey<Item> CUSTOM_LIQUID_BUCKET_KEY = ResourceKey.create(Registries.ITEM, RealisticWater.id("custom_liquid_bucket"));
+	public static final Item CUSTOM_LIQUID_BUCKET = Registry.register(BuiltInRegistries.ITEM, CUSTOM_LIQUID_BUCKET_KEY, new me.skaffy.item.CustomLiquidBucketItem(
+		CUSTOM_LIQUID, new Item.Properties().craftRemainder(Items.BUCKET).stacksTo(1).setId(CUSTOM_LIQUID_BUCKET_KEY), false));
+
+	public static final ResourceKey<Item> INFINITE_CUSTOM_LIQUID_BUCKET_KEY = ResourceKey.create(Registries.ITEM, RealisticWater.id("infinite_custom_liquid_bucket"));
+	public static final Item INFINITE_CUSTOM_LIQUID_BUCKET = Registry.register(BuiltInRegistries.ITEM, INFINITE_CUSTOM_LIQUID_BUCKET_KEY,
+		new me.skaffy.item.CustomLiquidBucketItem(CUSTOM_LIQUID, new Item.Properties().craftRemainder(Items.BUCKET).stacksTo(1)
+			.component(net.minecraft.core.component.DataComponents.ENCHANTMENT_GLINT_OVERRIDE, true).setId(INFINITE_CUSTOM_LIQUID_BUCKET_KEY), true));
+
 	public static final ResourceKey<Block> REALISTIC_SAND_KEY = ResourceKey.create(Registries.BLOCK, RealisticWater.id("realistic_sand"));
 	public static final Block REALISTIC_SAND = Registry.register(BuiltInRegistries.BLOCK, REALISTIC_SAND_KEY, new RealisticSandBlock(
 		BlockBehaviour.Properties.of()
@@ -276,7 +309,17 @@ public final class ModContent {
 	));
 	public static final ResourceKey<Item> WATER_DRAIN_ITEM_KEY = ResourceKey.create(Registries.ITEM, RealisticWater.id("water_drain"));
 	public static final Item WATER_DRAIN_ITEM = registerBlockItem(WATER_DRAIN_ITEM_KEY, WATER_DRAIN);
-	public static final ResourceKey<Block> HOT_PLATE_KEY = ResourceKey.create(Registries.BLOCK, RealisticWater.id("hot_plate"));
+	public static final ResourceKey<Block> SPECIAL_SPONGE_KEY = ResourceKey.create(Registries.BLOCK, RealisticWater.id("special_sponge"));
+	public static final Block SPECIAL_SPONGE = Registry.register(BuiltInRegistries.BLOCK, SPECIAL_SPONGE_KEY, new me.skaffy.block.SpecialSpongeBlock(
+		BlockBehaviour.Properties.of()
+			.mapColor(MapColor.COLOR_CYAN)
+			.strength(0.6F)
+			.sound(SoundType.SPONGE)
+			.setId(SPECIAL_SPONGE_KEY)
+	));
+	public static final ResourceKey<Item> SPECIAL_SPONGE_ITEM_KEY = ResourceKey.create(Registries.ITEM, RealisticWater.id("special_sponge"));
+	public static final Item SPECIAL_SPONGE_ITEM = registerBlockItem(SPECIAL_SPONGE_ITEM_KEY, SPECIAL_SPONGE);
+	public static final ResourceKey<Block> HOT_PLATE_KEY =ResourceKey.create(Registries.BLOCK, RealisticWater.id("hot_plate"));
 	public static final Block HOT_PLATE = Registry.register(BuiltInRegistries.BLOCK, HOT_PLATE_KEY, new me.skaffy.block.HotPlateBlock(
 		BlockBehaviour.Properties.of()
 			.mapColor(MapColor.METAL)
@@ -574,6 +617,8 @@ public final class ModContent {
 			DispenserBlock.DISPENSER_REGISTRY.get(Items.WATER_BUCKET), "Water bucket dispenser behavior");
 		DispenserBlock.registerBehavior(REALISTIC_WATER_BUCKET, waterBucketBehavior);
 		DispenserBlock.registerBehavior(SMALL_REALISTIC_WATER_BUCKET, waterBucketBehavior);
+		DispenserBlock.registerBehavior(CUSTOM_LIQUID_BUCKET, waterBucketBehavior);
+		DispenserBlock.registerBehavior(INFINITE_CUSTOM_LIQUID_BUCKET, waterBucketBehavior);
 		DispenserBlock.registerProjectileBehavior(REALISTIC_SNOWBALL_ITEM);
 
 		registerFireDispensers();
@@ -592,6 +637,7 @@ public final class ModContent {
 				output.insertAfter(REALISTIC_SLIME_BUCKET, CONVERTER);
 				output.insertAfter(CONVERTER, WAVE_MAKER_ITEM);
 				output.insertAfter(WAVE_MAKER_ITEM, WATER_DRAIN_ITEM);
+				output.insertAfter(WATER_DRAIN_ITEM, SPECIAL_SPONGE_ITEM);
 				output.insertAfter(WATER_DRAIN_ITEM, HOT_PLATE_ITEM);
 			});
 		CreativeModeTabEvents.modifyOutputEvent(CreativeModeTabs.COMBAT)

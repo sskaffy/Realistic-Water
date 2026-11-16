@@ -106,6 +106,17 @@ public final class FireEffects {
 		}
 	}
 
+	private static void flamePuff(ClientLevel level, Material material, double x, double y, double z, double half, double height, float vx, float vy,
+		float vz, float step) {
+		flamePuff(level, material, x, y, z, half, half, height, vx, vy, vz, step);
+	}
+
+	private static void flamePuff(ClientLevel level, Material material, double x, double y, double z, double halfX, double halfZ, double height,
+		float vx, float vy, float vz, float step) {
+		WaterWorld.get().addGasPuff(material, x, y, z, halfX, halfZ, height, vx, vy, vz, step);
+		FlameContact.add(level, x, y, z, halfX, halfZ, height, vx, vy, vz);
+	}
+
 	private static boolean nextToWater(ClientLevel level, BlockPos pos) {
 		for (Direction dir : Direction.values()) {
 			if (level.getFluidState(pos.relative(dir)).is(FluidTags.WATER)) {
@@ -158,7 +169,7 @@ public final class FireEffects {
 			if (faces == 0) {
 				double half = campfire ? 0.17 : Math.min(0.5, (0.03 + 0.15 * i) * blaze);
 				double height = campfire ? 0.22 : (0.05 + 0.1 * i) * blaze;
-				water.addGasPuff(flameMaterial, x, baseY, z, half, height, wx * 0.5F, rise, wz * 0.5F, level6 + step);
+				flamePuff(level, flameMaterial, x, baseY, z, half, height, wx * 0.5F, rise, wz * 0.5F, level6 + step);
 				gpuPuffs++;
 				count();
 			} else {
@@ -176,13 +187,13 @@ public final class FireEffects {
 					double fz = cz + d.getStepZ() * (0.5 - wall);
 					double halfX = d.getStepX() != 0 ? wall : span;
 					double halfZ = d.getStepZ() != 0 ? wall : span;
-					water.addGasPuff(flameMaterial, fx, pos.getY() + 0.02, fz, halfX, halfZ, height,
+					flamePuff(level, flameMaterial, fx, pos.getY() + 0.02, fz, halfX, halfZ, height,
 						-d.getStepX() * 0.12F + wx * 0.2F, rise, -d.getStepZ() * 0.12F + wz * 0.2F, wallStep);
 					gpuPuffs++;
 					count();
 				}
 				if ((faces & 16) != 0) {
-					water.addGasPuff(flameMaterial, cx, pos.getY() + 0.02, cz, span, span, 0.12 + 0.05 * level6, wx * 0.3F, rise * 0.6F, wz * 0.3F, wallStep);
+					flamePuff(level, flameMaterial, cx, pos.getY() + 0.02, cz, span, span, 0.12 + 0.05 * level6, wx * 0.3F, rise * 0.6F, wz * 0.3F, wallStep);
 					gpuPuffs++;
 					count();
 				}
@@ -291,7 +302,7 @@ public final class FireEffects {
 				any = true;
 				double ox = d.getStepX() != 0 ? 0.0 : Math.signum(dirX) * (0.46 - span);
 				double oz = d.getStepZ() != 0 ? 0.0 : Math.signum(dirZ) * (0.46 - span);
-				water.addGasPuff(flame, cx + d.getStepX() * face + ox, baseY, cz + d.getStepZ() * face + oz,
+				flamePuff(level, flame, cx + d.getStepX() * face + ox, baseY, cz + d.getStepZ() * face + oz,
 					d.getStepX() != 0 ? 0.05 : span, d.getStepZ() != 0 ? 0.05 : span, height,
 					wx * 0.2F, rise, wz * 0.2F, 0.1F);
 				gpuPuffs++;
@@ -299,14 +310,14 @@ public final class FireEffects {
 			}
 			if (solid ? !level.getBlockState(pos.above()).canOcclude() : (faces & 16) != 0) {
 				double y = pos.getY() + (solid ? 1.02 : 0.02);
-				water.addGasPuff(flame, cx + Math.signum(dirX) * (0.46 - span), y, cz + Math.signum(dirZ) * (0.46 - span),
+				flamePuff(level, flame, cx + Math.signum(dirX) * (0.46 - span), y, cz + Math.signum(dirZ) * (0.46 - span),
 					span, span, 0.1 + 0.1 * lv, wx * 0.3F, rise * 0.6F, wz * 0.3F, 0.1F);
 				gpuPuffs++;
 				count();
 				any = true;
 			}
 			if (!any && !solid) {
-				water.addGasPuff(flame, cx, pos.getY() + 0.02, cz, 0.03 + 0.12 * lv, 0.05 + 0.25 * lv, wx * 0.3F, rise * 0.7F, wz * 0.3F, 0.1F);
+				flamePuff(level, flame, cx, pos.getY() + 0.02, cz, 0.03 + 0.12 * lv, 0.05 + 0.25 * lv, wx * 0.3F, rise * 0.7F, wz * 0.3F, 0.1F);
 				gpuPuffs++;
 				count();
 			}

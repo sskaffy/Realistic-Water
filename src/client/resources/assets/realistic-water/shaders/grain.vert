@@ -24,7 +24,6 @@ void main() {
     int index = far ? G.caps.x - 1 - gl_InstanceIndex : gl_InstanceIndex;
     SurfaceParticle p = visible[index];
     uint child = uint(gl_VertexIndex) / 6u;
-    // Level 1 draws a quarter of the grains at twice the size, level 2 a sixteenth at four times: same area covered.
     float lod = far ? max(p.extra.z, 1.0) : 0.0;
     uint grains = uint(max(G.matB.z, 1.0));
     if (lod > 1.5 && child >= max(grains / 16u, 1u)) {

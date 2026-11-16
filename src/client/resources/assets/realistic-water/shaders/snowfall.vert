@@ -122,7 +122,6 @@ void main() {
     float dim = mix(0.6 + 0.4 * facing, 1.0, detail);
     float alpha = W.drift.z * thin * thin * edge * top * bottom * landing * near * dim / (1.0 + 1.5 * blur);
     vColor = vec4(mix(vec3(0.97, 0.98, 1.0), W.sky.rgb, 0.12) * lit * shade, alpha);
-    // The shape is drawn in the quad's own axes, which already turn with the flake.
     vShape = vec4(detail, 0.0, blur, smoothstep(0.2, 0.45, big));
     vSeed = seed * 37.0;
 }

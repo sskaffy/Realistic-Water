@@ -18,7 +18,10 @@ public enum Material {
 	SMOKE,
 	FLAME,
 	SOUL_FLAME,
-	SPARK;
+	SPARK,
+	CUSTOM;
+
+	static final float CUSTOM_BASE_ID = 10.0F;
 
 	float shaderId() {
 		return switch (this) {
@@ -31,6 +34,7 @@ public enum Material {
 			case FLAME -> 7.0F;
 			case SOUL_FLAME -> 8.0F;
 			case SPARK -> 9.0F;
+			case CUSTOM -> CUSTOM_BASE_ID;
 			default -> 0.0F;
 		};
 	}
@@ -40,7 +44,7 @@ public enum Material {
 	}
 
 	boolean isFluidSim() {
-		return this == WATER || this == LAVA || this == SLIME;
+		return this == WATER || this == LAVA || this == SLIME || this == CUSTOM;
 	}
 
 	boolean isLeaves() {
@@ -108,6 +112,7 @@ public enum Material {
 			case FLAME -> "flame";
 			case SOUL_FLAME -> "soul flame";
 			case SPARK -> "spark";
+			case CUSTOM -> "custom liquid";
 			default -> "water";
 		};
 	}

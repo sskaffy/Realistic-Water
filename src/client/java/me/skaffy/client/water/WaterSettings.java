@@ -20,6 +20,7 @@ public final class WaterSettings {
 	public static int lightRefreshBlocks = 4096;
 	public static int blockSyncInterval = 30;
 
+	public static int simulationStyle = 2;
 	public static int resolution = 6;
 	public static int boxMargin = 6;
 	public static float windowLookahead = 0.6F;
@@ -86,6 +87,7 @@ public final class WaterSettings {
 	public static float particleRadius = 0.4F;
 	public static float thicknessScale = 1.0F;
 	public static float refraction = 0.15F;
+	public static int waterStyle = 2;
 	public static float absorbR = 0.45F;
 	public static float absorbG = 0.12F;
 	public static float absorbB = 0.07F;
@@ -140,7 +142,7 @@ public final class WaterSettings {
 	public static boolean sandSounds = true;
 	public static boolean grainViewCulling = true;
 
-	public static boolean realisticSnow = true;
+	public static boolean realisticSnow = false;
 	public static int snowRadius = 64;
 	public static int snowDetail = 8;
 	public static int snowTrackRadius = 24;
@@ -166,7 +168,7 @@ public final class WaterSettings {
 	public static float snowMeltWaterYield = 0.25F;
 	public static boolean snowDebugLog = false;
 
-	public static boolean realisticSnowfall = true;
+	public static boolean realisticSnowfall = false;
 	public static int snowfallRadius = 32;
 	public static float snowfallDensity = 0.25F;
 	public static float snowfallSpeed = 1.4F;
@@ -202,6 +204,9 @@ public final class WaterSettings {
 	public static float waveMakerRate = 4.0F;
 	public static float waveMakerSpeed = 1.0F;
 
+	public static float pistonPush = 0.6F;
+	public static float pistonSplashSpeed = 9.0F;
+
 	public static int lavaResolution = 6;
 	public static float lavaFlipRatio = 0.9993F;
 	public static float lavaMaxSpeed = 5.0F;
@@ -209,6 +214,7 @@ public final class WaterSettings {
 	public static float lavaStrandedTime = 5.0F;
 	public static int lavaStrandedNeighbors = 16;
 	public static float lavaFilmDepth = 0.05F;
+	public static boolean lavaRealisticTexture = true;
 	public static float lavaRefraction = 0.04F;
 	public static float lavaAbsorbR = 2.8F;
 	public static float lavaAbsorbG = 5.5F;
@@ -411,6 +417,12 @@ public final class WaterSettings {
 	public static float furnaceHeatTime = 120.0F;
 	public static float hotPlateWaterTemperature = 140.0F;
 	public static float hotPlateHeatTime = 3.0F;
+	public static boolean hotBlocks = true;
+	public static boolean hotBlockDamage = true;
+	public static float hotBlockMetalTime = 20.0F;
+	public static float hotBlockStoneTime = 45.0F;
+	public static float hotBlockGlowStart = 0.35F;
+	public static float hotBlockGlow = 1.0F;
 	public static float hotPlateHeatReach = 3.0F;
 	public static float boilChurn = 6.0F;
 	public static float boilSteam = 1.0F;
@@ -451,6 +463,10 @@ public final class WaterSettings {
 	public static int fireMaxSources = 256;
 	public static float fireRange = 64.0F;
 	public static boolean fireParticles = true;
+	public static boolean fireCoverEntities = true;
+	public static float fireCoverAmount = 1.0F;
+	public static boolean fireFlameHitbox = true;
+	public static boolean fireFlameIgnites = true;
 	public static float fireParticleDensity = 1.0F;
 	public static float fireParticleRange = 32.0F;
 	public static int fireParticleBudget = 200;

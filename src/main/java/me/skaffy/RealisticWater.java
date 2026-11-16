@@ -60,6 +60,9 @@ public class RealisticWater implements ModInitializer {
 		PayloadTypeRegistry.serverboundPlay().register(SandSyncPayload.TYPE, SandSyncPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(LavaSyncPayload.TYPE, LavaSyncPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(SlimeSyncPayload.TYPE, SlimeSyncPayload.CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(me.skaffy.net.CustomLiquidSyncPayload.TYPE, me.skaffy.net.CustomLiquidSyncPayload.CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(me.skaffy.net.LiquidEditPayload.TYPE, me.skaffy.net.LiquidEditPayload.CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(me.skaffy.net.LiquidDefsPayload.TYPE, me.skaffy.net.LiquidDefsPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(LeavesSyncPayload.TYPE, LeavesSyncPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(me.skaffy.net.LayerSyncPayload.TYPE, me.skaffy.net.LayerSyncPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(me.skaffy.net.SnowMeltPayload.TYPE, me.skaffy.net.SnowMeltPayload.CODEC);
@@ -71,6 +74,8 @@ public class RealisticWater implements ModInitializer {
 		PayloadTypeRegistry.serverboundPlay().register(FluidMixPayload.TYPE, FluidMixPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(VanillaFeedPayload.TYPE, VanillaFeedPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(BoilingWaterPayload.TYPE, BoilingWaterPayload.CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(me.skaffy.net.FlameTouchPayload.TYPE, me.skaffy.net.FlameTouchPayload.CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(me.skaffy.net.HotTouchPayload.TYPE, me.skaffy.net.HotTouchPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(PortalTransitPayload.TYPE, PortalTransitPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(BackgroundSyncPayload.TYPE, BackgroundSyncPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(BreakRealisticPayload.TYPE, BreakRealisticPayload.CODEC);
@@ -160,6 +165,17 @@ public class RealisticWater implements ModInitializer {
 				context.server().execute(() -> payload.apply(context.player()));
 			}
 		});
+		ServerPlayNetworking.registerGlobalReceiver(me.skaffy.net.CustomLiquidSyncPayload.TYPE, (payload, context) -> {
+			if (isAuthority(context.server(), context.player())) {
+				context.server().execute(() -> payload.apply(context.player()));
+			}
+		});
+		ServerPlayNetworking.registerGlobalReceiver(me.skaffy.net.LiquidEditPayload.TYPE, (payload, context) -> {
+			if (isAuthority(context.server(), context.player())) {
+				context.server().execute(() -> payload.apply(context.player()));
+			}
+		});
+		ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> server.execute(() -> me.skaffy.liquid.CustomLiquids.sendTo(handler.getPlayer())));
 		ServerPlayNetworking.registerGlobalReceiver(SlimeSyncPayload.TYPE, (payload, context) -> {
 			if (isAuthority(context.server(), context.player())) {
 				context.server().execute(() -> payload.apply(context.player()));
@@ -199,6 +215,14 @@ public class RealisticWater implements ModInitializer {
 			if (isAuthority(context.server(), context.player())) {
 				context.server().execute(() -> payload.apply(context.player()));
 			}
+		});
+		ServerPlayNetworking.registerGlobalReceiver(me.skaffy.net.FlameTouchPayload.TYPE, (payload, context) -> {
+			boolean authority = isAuthority(context.server(), context.player());
+			context.server().execute(() -> payload.apply(context.player(), authority));
+		});
+		ServerPlayNetworking.registerGlobalReceiver(me.skaffy.net.HotTouchPayload.TYPE, (payload, context) -> {
+			boolean authority = isAuthority(context.server(), context.player());
+			context.server().execute(() -> payload.apply(context.player(), authority));
 		});
 		ServerPlayNetworking.registerGlobalReceiver(BoilingWaterPayload.TYPE, (payload, context) -> {
 			if (isAuthority(context.server(), context.player())) {

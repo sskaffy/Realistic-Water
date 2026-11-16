@@ -40,6 +40,7 @@ public class WaterSettingsScreen extends OptionsSubScreen {
 	}
 
 	public static void tick(Minecraft mc) {
+		me.skaffy.client.liquid.LiquidEditorScreen.tick(mc);
 		if (openPending) {
 			openPending = false;
 			mc.gui.setScreen(new WaterSettingsScreen(mc.gui.screen(), lastCategory));
@@ -81,6 +82,9 @@ public class WaterSettingsScreen extends OptionsSubScreen {
 		}).build();
 		reset.setTooltip(Tooltip.create(Component.translatable("realistic-water.settings.resetCategory.tooltip")));
 		buttons.addChild(reset);
+		Button liquids = Button.builder(Component.literal("Custom liquids..."), button -> this.minecraft.gui.setScreen(new me.skaffy.client.liquid.LiquidEditorScreen(() -> new WaterSettingsScreen(this.lastScreen, this.category)))).build();
+		liquids.setTooltip(Tooltip.create(Component.literal("Make your own liquids: pick a kind, a colour and a few settings, then take a bucket of it. Also /water liquids.")));
+		buttons.addChild(liquids);
 		buttons.addChild(Button.builder(CommonComponents.GUI_DONE, button -> this.onClose()).build());
 	}
 

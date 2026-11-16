@@ -222,20 +222,29 @@ public final class WaterRenderer implements AutoCloseable {
 			}
 			boolean seaBackground = material == Material.WATER && ocean != null && (ocean.background() || ubo == null);
 			if (ubo != null) {
-				this.composite(composite, cb, ubo, matTex, view, lightmap, readable, material, 0.0F, seaBackground ? 0.0F : 1.0F, null);
+				this.composite(composite, cb, ubo, matTex, view, lightmap, readable, material.shaderId(), 0.0F, seaBackground ? 0.0F : 1.0F, null);
 			}
 			if (material == Material.WATER && ocean != null) {
-				this.composite(composite, cb, ocean.ubo(), matTex, view, lightmap, readable, material, 1.0F, seaBackground ? 1.0F : 0.0F, ocean.colors());
+				this.composite(composite, cb, ocean.ubo(), matTex, view, lightmap, readable, material.shaderId(), 1.0F, seaBackground ? 1.0F : 0.0F, ocean.colors());
 			} else if (material == Material.WATER && ubo != null && WaterSettings.debugWaterLayers) {
-				this.composite(composite, cb, ubo, matTex, view, lightmap, readable, material, 1.0F, 0.0F, null);
+				this.composite(composite, cb, ubo, matTex, view, lightmap, readable, material.shaderId(), 1.0F, 0.0F, null);
 			}
+		}
+		java.util.Map<Float, Desc> customs = new java.util.LinkedHashMap<>();
+		for (Body body : bodies) {
+			if (body.region().material == Material.CUSTOM) {
+				customs.putIfAbsent(body.region().shaderId(), body.ubo());
+			}
+		}
+		for (java.util.Map.Entry<Float, Desc> e : customs.entrySet()) {
+			this.composite(composite, cb, e.getValue(), matTex, view, lightmap, readable, e.getKey(), 0.0F, 0.0F, null);
 		}
 		GraphicsProgram.end(cb);
 		GraphicsProgram.clearArea();
 	}
 
 	private void composite(GraphicsProgram composite, VkCommandBuffer cb, Desc ubo, Desc matTex, Desc view, long lightmap, float[] readable,
-		Material material, float sea, float background, @Nullable VkBuf seaColors) {
+		float filterMat, float sea, float background, @Nullable VkBuf seaColors) {
 		composite.bind(cb, ubo,
 			Desc.tex(this.gbuffer, this.nearest.handle),
 			Desc.tex(this.thickness, this.linear.handle),
@@ -249,7 +258,7 @@ public final class WaterRenderer implements AutoCloseable {
 			Desc.tex(this.foamSurface, this.linear.handle),
 			Desc.ssbo(seaColors != null ? seaColors : this.slimeTexture));
 		composite.push(cb, Program.f(readable[0]), Program.f(readable[1]), Program.f(readable[2]), Program.f(readable[3]),
-			Program.f(material.shaderId()), Program.f(sea), Program.f(background), Program.f(WaterSettings.debugWaterLayers ? 1.0F : 0.0F),
+			Program.f(filterMat), Program.f(sea), Program.f(background), Program.f(WaterSettings.debugWaterLayers ? 1.0F : 0.0F),
 			Program.f(seaColors != null ? 1.0F : 0.0F));
 		composite.draw(cb, 3, 1);
 	}
